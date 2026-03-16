@@ -133,6 +133,10 @@ go run ./cmd \
 - `-proto`: `tcp` 或 `udp`
 - `-ips`: 多目标，逗号分隔（与 `-target` 二选一）
 - `-max-fp`: 最多做服务识别的开放端口数（默认 `50`，也支持 `-max-fingerprint-ports`）
+- `-honeypot-open-threshold`: 疑似蜜罐判定最小开放端口数（默认 `100`）
+- `-honeypot-open-ratio`: 疑似蜜罐判定开放占比阈值（默认 `0.85`，范围 `0~1`）
+- `-csv`: 是否写入 CSV 结果文件（默认关闭）
+- `-csv-mode`: CSV 写入模式，`append|overwrite`（默认 `append`）
 - `-dict`: `simple|normal|diff`
 - `-dict-file`: 自定义字典文件路径
 - `-dict-max`: 最大加载字典行数，`0` 表示不限制
@@ -223,6 +227,11 @@ func (s *Service) Run(ctx context.Context, target string) (*assetprobe.ScanResul
 针对“全端口伪开放/蜜罐”类目标，扫描器默认策略：
 - 当开放端口非常多时，仅对前 `50` 个开放端口做服务指纹识别，其余端口仍标记为 `open`
 - 当满足 `开放端口数 >= 100` 且 `开放占比 >= 85%` 时，结果中会标记 `SuspectedHoneypot=true`
+
+CSV 输出说明：
+- `gomap port -csv` -> `logs/port.csv`
+- `gomap web -csv` -> `logs/web.csv`
+- `gomap dir -csv` -> `logs/dir.csv`
 
 已提供便捷方法：
 

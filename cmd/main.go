@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,10 +10,13 @@ import (
 	"gomap/pkg/assetprobe"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const csvTimeLayout = "2006-01-02 15:04:05"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -47,33 +51,25 @@ func runPort(args []string) {
 	fs.Usage = func() {
 		fmt.Println("用法: gomap port [options]")
 		fmt.Println()
-		fmt.Println("必选参数:")
-		fmt.Println("  -target string    扫描目标 IP/域名（与 -ips 二选一，至少提供一个）")
-		fmt.Println("  -ips string       多目标，逗号分隔（与 -target 二选一，至少提供一个）")
-		fmt.Println()
-		fmt.Println("可选参数:")
-		fmt.Println("  -ports string     端口表达式，默认: 80,443")
-		fmt.Println("  -proto string     扫描协议 tcp|udp，默认: tcp")
-		fmt.Println("  -rate int         并发数，默认: 200")
-		fmt.Println("  -timeout int      超时秒数，默认: 2")
-		fmt.Println("  -max-fp int       最多做服务识别的开放端口数，默认: 50")
-		fmt.Println("  -v                控制台实时打印日志（同时保留 logs 文件）")
-		fmt.Println()
 		fmt.Println("选项:")
 		fs.PrintDefaults()
 		fmt.Println()
 		fmt.Println("示例:")
 		fmt.Println("  gomap port -target example.com -ports 80,443,1-1024")
 	}
-	target := fs.String("target", "", "扫描目标 IP 或域名")
-	ips := fs.String("ips", "", "兼容参数：多个目标用逗号分隔")
-	ports := fs.String("ports", "80,443", "端口表达式，例如 80,443,1-1024")
-	proto := fs.String("proto", "tcp", "扫描协议: tcp|udp")
-	rate := fs.Int("rate", 200, "并发数")
-	timeout := fs.Int("timeout", 2, "超时秒数")
-	maxFingerprintPorts := fs.Int("max-fp", 50, "最多做服务识别的开放端口数")
-	maxFingerprintPortsLong := fs.Int("max-fingerprint-ports", 50, "最多做服务识别的开放端口数")
-	verbose := fs.Bool("v", false, "控制台实时打印日志（同时保留 logs 文件）")
+	target := fs.String("target", "", "[必选，和 -ips 二选一] 扫描目标 IP 或域名")
+	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
+	ports := fs.String("ports", "80,443", "[可选] 端口表达式，例如 80,443,1-1024")
+	proto := fs.String("proto", "tcp", "[可选] 扫描协议: tcp|udp")
+	rate := fs.Int("rate", 200, "[可选] 并发数")
+	timeout := fs.Int("timeout", 2, "[可选] 超时秒数")
+	maxFingerprintPorts := fs.Int("max-fp", 50, "[可选] 最多做服务识别的开放端口数")
+	maxFingerprintPortsLong := fs.Int("max-fingerprint-ports", 50, "[可选] 最多做服务识别的开放端口数")
+	honeypotOpenThreshold := fs.Int("honeypot-open-threshold", 100, "[可选] 疑似蜜罐判定最小开放端口数阈值")
+	honeypotOpenRatio := fs.Float64("honeypot-open-ratio", 0.85, "[可选] 疑似蜜罐判定开放占比阈值，范围 0~1")
+	enableCSV := fs.Bool("csv", false, "[可选] 将扫描结果写入 logs/port.csv")
+	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
+	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -85,6 +81,14 @@ func runPort(args []string) {
 	targets := collectTargets(*target, *ips)
 	if len(targets) == 0 {
 		fmt.Fprintln(os.Stderr, "target 不能为空，例如: gomap port -target example.com 或 -ips 1.1.1.1,example.com")
+		os.Exit(1)
+	}
+	if *honeypotOpenThreshold <= 0 {
+		fmt.Fprintln(os.Stderr, "honeypot-open-threshold 必须大于 0")
+		os.Exit(1)
+	}
+	if *honeypotOpenRatio <= 0 || *honeypotOpenRatio > 1 {
+		fmt.Fprintln(os.Stderr, "honeypot-open-ratio 必须在 (0,1] 范围内，例如 0.85")
 		os.Exit(1)
 	}
 
@@ -104,16 +108,35 @@ func runPort(args []string) {
 		protocol = assetprobe.ProtocolUDP
 	}
 
+	var csvWriter *csv.Writer
+	var csvFile *os.File
+	if *enableCSV {
+		header := []string{
+			"scan_time", "target", "resolved_ip", "protocol", "port", "open", "service", "version",
+			"banner", "subject", "dns_names", "fingerprinted", "error", "open_ports",
+			"fingerprinted_open_ports", "skipped_fingerprint_ports", "suspected_honeypot", "honeypot_reason",
+		}
+		csvFile, csvWriter, err = openCSVWriter(filepath.Join("logs", "port.csv"), *csvMode, header)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer csvFile.Close()
+		defer csvWriter.Flush()
+	}
+
 	for _, t := range targets {
 		finalMaxFingerprintPorts := *maxFingerprintPorts
 		if *maxFingerprintPortsLong != 50 {
 			finalMaxFingerprintPorts = *maxFingerprintPortsLong
 		}
 		res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-			Target:              t,
-			PortSpec:            *ports,
-			Protocol:            protocol,
-			MaxFingerprintPorts: finalMaxFingerprintPorts,
+			Target:                t,
+			PortSpec:              *ports,
+			Protocol:              protocol,
+			MaxFingerprintPorts:   finalMaxFingerprintPorts,
+			HoneypotOpenThreshold: *honeypotOpenThreshold,
+			HoneypotOpenRatio:     *honeypotOpenRatio,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "scan %s failed: %v\n", t, err)
@@ -121,6 +144,39 @@ func runPort(args []string) {
 		}
 		output, _ := res.ToJSON(true)
 		fmt.Println(string(output))
+
+		if csvWriter != nil {
+			now := time.Now().Format(csvTimeLayout)
+			for _, p := range res.Ports {
+				row := []string{
+					now,
+					res.Target,
+					res.ResolvedIP,
+					string(res.Protocol),
+					strconv.Itoa(p.Port),
+					strconv.FormatBool(p.Open),
+					p.Service,
+					p.Version,
+					p.Banner,
+					p.Subject,
+					strings.Join(p.DNSNames, ";"),
+					strconv.FormatBool(p.Fingerprinted),
+					p.Error,
+					strconv.Itoa(res.OpenPorts),
+					strconv.Itoa(res.FingerprintedOpenPorts),
+					strconv.Itoa(res.SkippedFingerprintPorts),
+					strconv.FormatBool(res.SuspectedHoneypot),
+					res.HoneypotReason,
+				}
+				if err := csvWriter.Write(row); err != nil {
+					fmt.Fprintf(os.Stderr, "写入 port.csv 失败: %v\n", err)
+				}
+			}
+			csvWriter.Flush()
+			if err := csvWriter.Error(); err != nil {
+				fmt.Fprintf(os.Stderr, "刷新 port.csv 失败: %v\n", err)
+			}
+		}
 	}
 }
 
@@ -130,24 +186,18 @@ func runWeb(args []string) {
 	fs.Usage = func() {
 		fmt.Println("用法: gomap web [options]")
 		fmt.Println()
-		fmt.Println("必选参数:")
-		fmt.Println("  -url string       要识别的站点 URL，例如 https://example.com")
-		fmt.Println()
-		fmt.Println("可选参数:")
-		fmt.Println("  -rate int         并发数（影响 scanner 初始化），默认: 100")
-		fmt.Println("  -timeout int      超时秒数，默认: 5")
-		fmt.Println("  -v                控制台实时打印日志（同时保留 logs 文件）")
-		fmt.Println()
 		fmt.Println("选项:")
 		fs.PrintDefaults()
 		fmt.Println()
 		fmt.Println("示例:")
 		fmt.Println("  gomap web -url https://example.com")
 	}
-	rawURL := fs.String("url", "", "要识别的站点 URL，例如 https://example.com")
-	rate := fs.Int("rate", 100, "并发数（保留参数，影响 scanner 初始化）")
-	timeout := fs.Int("timeout", 5, "超时秒数")
-	verbose := fs.Bool("v", false, "控制台实时打印日志（同时保留 logs 文件）")
+	rawURL := fs.String("url", "", "[必选] 要识别的站点 URL，例如 https://example.com")
+	rate := fs.Int("rate", 100, "[可选] 并发数（保留参数，影响 scanner 初始化）")
+	timeout := fs.Int("timeout", 5, "[可选] 超时秒数")
+	enableCSV := fs.Bool("csv", false, "[可选] 将识别结果写入 logs/web.csv")
+	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
+	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -180,6 +230,35 @@ func runWeb(args []string) {
 
 	output, _ := json.MarshalIndent(page, "", "  ")
 	fmt.Println(string(output))
+
+	if *enableCSV {
+		header := []string{"scan_time", "url", "title", "status_code", "content_length", "server", "html_hash", "favicon_hash", "icp"}
+		csvFile, csvWriter, err := openCSVWriter(filepath.Join("logs", "web.csv"), *csvMode, header)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer csvFile.Close()
+
+		row := []string{
+			time.Now().Format(csvTimeLayout),
+			page.URL,
+			page.Title,
+			strconv.Itoa(page.StatusCode),
+			strconv.FormatInt(page.ContentLength, 10),
+			page.Server,
+			page.HTMLHash,
+			page.FaviconHash,
+			page.ICP,
+		}
+		if err := csvWriter.Write(row); err != nil {
+			fmt.Fprintf(os.Stderr, "写入 web.csv 失败: %v\n", err)
+		}
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			fmt.Fprintf(os.Stderr, "刷新 web.csv 失败: %v\n", err)
+		}
+	}
 }
 
 func runDir(args []string) {
@@ -188,32 +267,22 @@ func runDir(args []string) {
 	fs.Usage = func() {
 		fmt.Println("用法: gomap dir [options]")
 		fmt.Println()
-		fmt.Println("必选参数:")
-		fmt.Println("  -url string       目录爆破目标 URL，例如 https://example.com")
-		fmt.Println()
-		fmt.Println("可选参数:")
-		fmt.Println("  -dict string      爆破字典 simple|normal|diff，默认: simple")
-		fmt.Println("  -dict-file string 自定义爆破字典路径")
-		fmt.Println("  -dict-max int     最大字典行数，默认: 0（不限制）")
-		fmt.Println("  -dict-concurrency int 目录爆破并发，默认: 50")
-		fmt.Println("  -rate int         并发数，默认: 200")
-		fmt.Println("  -timeout int      超时秒数，默认: 3")
-		fmt.Println("  -v                控制台实时打印日志（同时保留 logs 文件）")
-		fmt.Println()
 		fmt.Println("选项:")
 		fs.PrintDefaults()
 		fmt.Println()
 		fmt.Println("示例:")
 		fmt.Println("  gomap dir -url https://example.com -dict normal -dict-max 500")
 	}
-	rawURL := fs.String("url", "", "目录爆破目标 URL，例如 https://example.com")
-	rate := fs.Int("rate", 200, "并发数")
-	timeout := fs.Int("timeout", 3, "超时秒数")
-	dictLevel := fs.String("dict", "simple", "目录爆破字典级别: simple|normal|diff")
-	dictFile := fs.String("dict-file", "", "自定义目录爆破字典文件路径")
-	dictMax := fs.Int("dict-max", 0, "目录爆破最多加载路径条数，0 表示不限制")
-	dictConcurrency := fs.Int("dict-concurrency", 50, "目录爆破并发数")
-	verbose := fs.Bool("v", false, "控制台实时打印日志（同时保留 logs 文件）")
+	rawURL := fs.String("url", "", "[必选] 目录爆破目标 URL，例如 https://example.com")
+	rate := fs.Int("rate", 200, "[可选] 并发数")
+	timeout := fs.Int("timeout", 3, "[可选] 超时秒数")
+	dictLevel := fs.String("dict", "simple", "[可选] 目录爆破字典级别: simple|normal|diff")
+	dictFile := fs.String("dict-file", "", "[可选] 自定义目录爆破字典文件路径")
+	dictMax := fs.Int("dict-max", 0, "[可选] 目录爆破最多加载路径条数，0 表示不限制")
+	dictConcurrency := fs.Int("dict-concurrency", 50, "[可选] 目录爆破并发数")
+	enableCSV := fs.Bool("csv", false, "[可选] 将目录爆破结果写入 logs/dir.csv")
+	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
+	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -260,6 +329,121 @@ func runDir(args []string) {
 
 	output, _ := res.ToJSON(true)
 	fmt.Println(string(output))
+
+	if *enableCSV {
+		header := []string{
+			"scan_time", "target", "resolved_ip", "port", "homepage_url", "homepage_title",
+			"homepage_status_code", "path_url", "path_title", "path_status_code", "path_content_length", "path_html_hash",
+		}
+		csvFile, csvWriter, err := openCSVWriter(filepath.Join("logs", "dir.csv"), *csvMode, header)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer csvFile.Close()
+
+		now := time.Now().Format(csvTimeLayout)
+		for _, p := range res.Ports {
+			if p.Homepage == nil {
+				row := []string{
+					now, res.Target, res.ResolvedIP, strconv.Itoa(p.Port),
+					"", "", "", "", "", "", "", "",
+				}
+				if err := csvWriter.Write(row); err != nil {
+					fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
+				}
+				continue
+			}
+			if len(p.Homepage.Paths) == 0 {
+				row := []string{
+					now,
+					res.Target,
+					res.ResolvedIP,
+					strconv.Itoa(p.Port),
+					p.Homepage.URL,
+					p.Homepage.Title,
+					strconv.Itoa(p.Homepage.StatusCode),
+					"", "", "", "", "",
+				}
+				if err := csvWriter.Write(row); err != nil {
+					fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
+				}
+				continue
+			}
+
+			for _, path := range p.Homepage.Paths {
+				row := []string{
+					now,
+					res.Target,
+					res.ResolvedIP,
+					strconv.Itoa(p.Port),
+					p.Homepage.URL,
+					p.Homepage.Title,
+					strconv.Itoa(p.Homepage.StatusCode),
+					path.URL,
+					path.Title,
+					strconv.Itoa(path.StatusCode),
+					strconv.FormatInt(path.ContentLength, 10),
+					path.HTMLHash,
+				}
+				if err := csvWriter.Write(row); err != nil {
+					fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
+				}
+			}
+		}
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			fmt.Fprintf(os.Stderr, "刷新 dir.csv 失败: %v\n", err)
+		}
+	}
+}
+
+// openCSVWriter 按模式打开 CSV 文件；append 模式下仅在新文件时写表头。
+func openCSVWriter(path, mode string, header []string) (*os.File, *csv.Writer, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "append"
+	}
+	if mode != "append" && mode != "overwrite" {
+		return nil, nil, fmt.Errorf("无效 csv-mode: %s（仅支持 append|overwrite）", mode)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, nil, fmt.Errorf("创建日志目录失败: %w", err)
+	}
+
+	fileFlags := os.O_CREATE | os.O_WRONLY
+	writeHeader := false
+	switch mode {
+	case "overwrite":
+		fileFlags |= os.O_TRUNC
+		writeHeader = true
+	default:
+		fileFlags |= os.O_APPEND
+		if fi, err := os.Stat(path); errors.Is(err, os.ErrNotExist) || (err == nil && fi.Size() == 0) {
+			writeHeader = true
+		} else if err != nil {
+			return nil, nil, fmt.Errorf("检查 CSV 文件失败: %w", err)
+		}
+	}
+
+	f, err := os.OpenFile(path, fileFlags, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("打开 CSV 文件失败: %w", err)
+	}
+	w := csv.NewWriter(f)
+	if writeHeader {
+		if err := w.Write(header); err != nil {
+			f.Close()
+			return nil, nil, fmt.Errorf("写入 CSV 表头失败: %w", err)
+		}
+		w.Flush()
+		if err := w.Error(); err != nil {
+			f.Close()
+			return nil, nil, fmt.Errorf("刷新 CSV 表头失败: %w", err)
+		}
+	}
+	return f, w, nil
 }
 
 func parseURLTarget(raw string) (string, int, error) {
