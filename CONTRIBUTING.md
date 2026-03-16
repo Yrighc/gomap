@@ -29,6 +29,30 @@ Examples:
 - `fix(cli): validate target argument`
 - `docs(readme): add DI integration section`
 
+This repository enforces conventional commit style via:
+- Local hook: `husky` + `commitlint` (`.husky/commit-msg`)
+- PR check: semantic PR title validation (`.github/workflows/commitlint.yml`)
+
+### Setup Hooks Locally
+
+```bash
+npm install
+```
+
+Then commit messages will be validated automatically.
+
+### PR Title Convention
+
+Use semantic style for PR titles as well, e.g.:
+- `feat: add release-please workflow`
+- `fix: handle empty target in cli`
+
+### Automated Changelog & Versioning
+
+`release-please` is enabled (`.github/workflows/release-please.yml`).
+After commits land on `main`/`master`, it automatically opens/updates a release PR,
+generates `CHANGELOG.md`, and manages version tags.
+
 ## Code Style
 
 - Run `gofmt` on changed files.

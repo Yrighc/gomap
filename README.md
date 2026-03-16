@@ -1,5 +1,8 @@
 # GoMap（精简版资产探测）
 
+[![CI](https://github.com/your-org/your-repo/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/your-repo/actions/workflows/ci.yml)
+[![CD Release](https://github.com/your-org/your-repo/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/your-repo/actions/workflows/release.yml)
+
 GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 当前仓库已聚焦在资产探测主链路，保留以下能力：
@@ -237,9 +240,25 @@ go run ./examples/library
 go run ./cmd -target example.com -ports 80,443
 ```
 
-## 10. 注意事项
+## 10. 版本发布与 Changelog
+
+- 提交规范：Conventional Commits（`feat/fix/docs/refactor/...`）
+- 自动检查：
+  - PR 标题语义检查：`.github/workflows/commitlint.yml`
+  - 本地提交钩子：`husky + commitlint`
+- 自动版本与变更日志：
+  - `release-please` 工作流：`.github/workflows/release-please.yml`
+  - 自动生成/更新 `CHANGELOG.md`
+  - 自动创建 release PR 并管理版本 tag
+
+本地启用提交钩子：
+
+```bash
+npm install
+```
+
+## 11. 注意事项
 
 - 仅在授权范围内进行探测
 - 高并发与大字典爆破会显著增加目标压力，建议控制 `rate/dict-concurrency`
 - 字典文件属于可选资源，可按你的场景裁剪或替换
-

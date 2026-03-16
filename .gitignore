@@ -40,3 +40,11 @@ go.work.sum
 # Temp
 tmp/
 .cache/
+
+# Node / Husky
+node_modules/
+package-lock.json
+npm-shrinkwrap.json
+pnpm-lock.yaml
+yarn.lock
+.husky/_/
