@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Build outputs
+bin/
+dist/
+out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Coverage
+coverage.out
+*.coverprofile
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Go workspace
+go.work
+go.work.sum
+
+# Temp
+tmp/
+.cache/

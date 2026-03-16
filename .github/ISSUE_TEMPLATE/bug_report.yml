@@ -1,0 +1,43 @@
+name: Bug Report
+description: Report a reproducible bug
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide a minimal reproducible case.
+  - type: textarea
+    id: current
+    attributes:
+      label: Current Behavior
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: Include commands, params, and sample input.
+      placeholder: |
+        1. go run ./cmd ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      placeholder: v1.0.0 or commit sha
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Go version, architecture
+      placeholder: linux amd64, go1.24+

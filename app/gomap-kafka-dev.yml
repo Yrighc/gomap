@@ -1,0 +1,59 @@
+app:
+  name: dev
+server:
+  consumer:
+    host: kafka:9092
+    nmap-consumer-topic: asset_nmap_domestic_task_new
+    nmap-group-id: zk-detect
+    spider-consumer-topic: attack_spider_task_new
+    spider-group-id: zk-spider
+    katana-consumer-topic: attack_spider_link_probe_task
+    katana-group-id: zk-katana
+  producer:
+    host: kafka:9092
+    server-topic: attack_nmap_res
+    spider-topic: attack_spider_res
+    katana-topic: attack_spider_link_probe_res
+workflow:
+  consumer:
+    host: kafka:9092
+    nmap-consumer-topic: workflow_nmap_scan_task_new
+    nmap-group-id: zk-detect
+    spider-consumer-topic: workflow_spider_home_task_new
+    spider-group-id: zk-spider
+    katana-consumer-topic: workflow_spider_link_task 
+    katana-group-id: zk-katana
+  producer:
+    host: kafka:9092
+    server-topic: workflow_nmap_scan_res
+    spider-topic: workflow_spider_home_res
+    katana-topic: workflow_spider_link_res
+  control:
+    start-pause-topic: workflow_attack_resume_pause
+    start-pause-group-id: zk-workflow-control
+apt:
+  consumer:
+    host: kafka:9092
+    nmap-consumer-topic: asset_gomap_apt_task_new
+    nmap-group-id: zk-apt
+  producer:
+    host: kafka:9092
+    server-topic: asset_gomap_apt_res
+goclei:
+  consumer:
+    host: kafka:9092
+    goclei-consumer-topic: asset_goclei_task_new
+    goclei-group-id: zk-goclei
+  producer:
+    host: kafka:9092
+    server-topic: asset_goclei_res
+ssl:
+  enable-ssl: false
+  sasl:
+    username: admin
+    password: zkqa123.com
+domain:
+  nmap-scan: true
+  spider-scan: true
+  link-scan: true
+

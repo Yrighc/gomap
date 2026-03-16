@@ -1,0 +1,6 @@
+# Replace with your org/team, e.g. @your-org/security-team
+* @your-org/your-team
+
+# Optional fine-grained ownership
+# /pkg/assetprobe/ @your-org/backend-team
+# /cmd/ @your-org/platform-team
