@@ -1,7 +1,7 @@
 # GoMap（精简版资产探测）
 
-[![CI](https://github.com/your-org/your-repo/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/your-repo/actions/workflows/ci.yml)
-[![CD Release](https://github.com/your-org/your-repo/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/your-repo/actions/workflows/release.yml)
+[![CI](https://github.com/Yrighc/gomap/actions/workflows/ci.yml/badge.svg)](https://github.com/Yrighc/gomap/actions/workflows/ci.yml)
+[![CD Release](https://github.com/Yrighc/gomap/actions/workflows/release.yml/badge.svg)](https://github.com/Yrighc/gomap/actions/workflows/release.yml)
 
 GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
