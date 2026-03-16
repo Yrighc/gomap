@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gomap/config/logger"
@@ -85,7 +86,27 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	if req.DetectHomepage != nil {
 		detectHomepage = *req.DetectHomepage
 	}
+	maxFingerprintPorts := s.opts.MaxFingerprintPorts
+	if req.MaxFingerprintPorts > 0 {
+		maxFingerprintPorts = req.MaxFingerprintPorts
+	}
+	honeypotOpenThreshold := s.opts.HoneypotOpenThreshold
+	if req.HoneypotOpenThreshold > 0 {
+		honeypotOpenThreshold = req.HoneypotOpenThreshold
+	}
+	honeypotOpenRatio := s.opts.HoneypotOpenRatio
+	if req.HoneypotOpenRatio > 0 {
+		honeypotOpenRatio = req.HoneypotOpenRatio
+	}
 	dirBrute := req.DirBrute
+	var fingerprintSlots chan struct{}
+	if req.Protocol == ProtocolTCP && maxFingerprintPorts > 0 {
+		fingerprintSlots = make(chan struct{}, maxFingerprintPorts)
+		for i := 0; i < maxFingerprintPorts; i++ {
+			fingerprintSlots <- struct{}{}
+		}
+	}
+	var fingerprintedCount int32
 
 	jobs := make(chan int, len(ports))
 	results := make(chan PortResult, len(ports))
@@ -107,7 +128,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 				case ProtocolUDP:
 					r = s.scanUDPPort(targetHost, resolvedIP, p, timeout)
 				default:
-					r = s.scanTCPPort(targetHost, resolvedIP, p, timeout, detectHomepage, dirBrute)
+					r = s.scanTCPPort(targetHost, resolvedIP, p, timeout, detectHomepage, dirBrute, fingerprintSlots, &fingerprintedCount)
 				}
 				results <- r
 			}
@@ -127,11 +148,38 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 	sort.Slice(final, func(i, j int) bool { return final[i].Port < final[j].Port })
 
+	openPorts := 0
+	skippedFingerprintPorts := 0
+	for _, r := range final {
+		if !r.Open {
+			continue
+		}
+		openPorts++
+		if !r.Fingerprinted {
+			skippedFingerprintPorts++
+		}
+	}
+	fingerprintedOpenPorts := int(atomic.LoadInt32(&fingerprintedCount))
+	suspectedHoneypot := false
+	honeypotReason := ""
+	if req.Protocol == ProtocolTCP && len(final) > 0 {
+		openRatio := float64(openPorts) / float64(len(final))
+		if openPorts >= honeypotOpenThreshold && openRatio >= honeypotOpenRatio {
+			suspectedHoneypot = true
+			honeypotReason = fmt.Sprintf("open ports=%d/%d(%.2f%%) >= threshold=%d and ratio=%.2f%%", openPorts, len(final), openRatio*100, honeypotOpenThreshold, honeypotOpenRatio*100)
+		}
+	}
+
 	return &ScanResult{
-		Target:     targetHost,
-		ResolvedIP: resolvedIP,
-		Protocol:   req.Protocol,
-		Ports:      final,
+		Target:                  targetHost,
+		ResolvedIP:              resolvedIP,
+		Protocol:                req.Protocol,
+		OpenPorts:               openPorts,
+		FingerprintedOpenPorts:  fingerprintedOpenPorts,
+		SkippedFingerprintPorts: skippedFingerprintPorts,
+		SuspectedHoneypot:       suspectedHoneypot,
+		HoneypotReason:          honeypotReason,
+		Ports:                   final,
 	}, nil
 }
 
@@ -174,8 +222,16 @@ func (s *Scanner) DetectHomepage(ctx context.Context, rawURL string) (*HomepageR
 	}, nil
 }
 
-// scanTCPPort 执行 TCP 连接、服务识别，并按需执行首页识别和目录爆破。
-func (s *Scanner) scanTCPPort(targetHost, resolvedIP string, port int, timeout time.Duration, detectHomepage bool, dirBrute *DirBruteOptions) PortResult {
+// scanTCPPort 执行 TCP 连接，并在预算内做服务识别；超出指纹预算时仅标记端口开放。
+func (s *Scanner) scanTCPPort(
+	targetHost, resolvedIP string,
+	port int,
+	timeout time.Duration,
+	detectHomepage bool,
+	dirBrute *DirBruteOptions,
+	fingerprintSlots chan struct{},
+	fingerprintedCount *int32,
+) PortResult {
 	result := PortResult{Port: port}
 	address := net.JoinHostPort(resolvedIP, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", address, timeout)
@@ -184,13 +240,35 @@ func (s *Scanner) scanTCPPort(targetHost, resolvedIP string, port int, timeout t
 	}
 	defer conn.Close()
 
-	buf := make([]byte, 4096)
-	banner, subject, dns, serviceName, version, weak := tcpservices.TcpPortServer(resolvedIP, port, buf, conn, s.opts.DisableWeakPassword)
+	// 仅允许前 N 个开放端口进入指纹识别，避免全开端口目标拖慢整体扫描。
+	if fingerprintSlots != nil {
+		select {
+		case <-fingerprintSlots:
+		default:
+			result.Open = true
+			result.Service = "open"
+			result.Error = "fingerprint skipped: max fingerprint ports reached"
+			return result
+		}
+	}
+	result.Fingerprinted = true
+	atomic.AddInt32(fingerprintedCount, 1)
+
+	banner, subject, dns, serviceName, version, weakUser, weakPass, timedOut := detectTCPServiceWithBudget(
+		resolvedIP,
+		port,
+		conn,
+		s.opts.DisableWeakPassword,
+		timeout,
+	)
 
 	result.Open = true
 	result.Service = strings.TrimSuffix(serviceName, "?")
 	if result.Service == "" {
 		result.Service = "unknown"
+	}
+	if timedOut {
+		result.Error = "service fingerprint timeout"
 	}
 	result.Version = achieve.SanitizeUTF8(version)
 	result.Banner = achieve.SanitizeUTF8(banner)
@@ -198,8 +276,8 @@ func (s *Scanner) scanTCPPort(targetHost, resolvedIP string, port int, timeout t
 	if dns != "" {
 		result.DNSNames = splitAndCleanDNS(dns)
 	}
-	result.WeakUser = weak.Username
-	result.WeakPass = weak.Password
+	result.WeakUser = weakUser
+	result.WeakPass = weakPass
 
 	if detectHomepage && shouldDetectHomepage(port, result.Service) {
 		if page := detectPortHomepage(targetHost, port, result.Service); page != nil {
@@ -211,6 +289,51 @@ func (s *Scanner) scanTCPPort(targetHost, resolvedIP string, port int, timeout t
 	}
 
 	return result
+}
+
+func detectTCPServiceWithBudget(
+	ip string,
+	port int,
+	conn net.Conn,
+	disableWeakPassword bool,
+	baseTimeout time.Duration,
+) (banner, subject, dns, serviceName, version, weakUser, weakPass string, timedOut bool) {
+	type detectResult struct {
+		banner      string
+		subject     string
+		dns         string
+		serviceName string
+		version     string
+		weakUser    string
+		weakPass    string
+	}
+
+	resultCh := make(chan detectResult, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		b, s, d, svc, ver, w := tcpservices.TcpPortServer(ip, port, buf, conn, disableWeakPassword)
+		resultCh <- detectResult{
+			banner:      b,
+			subject:     s,
+			dns:         d,
+			serviceName: svc,
+			version:     ver,
+			weakUser:    w.Username,
+			weakPass:    w.Password,
+		}
+	}()
+
+	budget := baseTimeout * 5
+	if budget < 8*time.Second {
+		budget = 8 * time.Second
+	}
+
+	select {
+	case r := <-resultCh:
+		return r.banner, r.subject, r.dns, r.serviceName, r.version, r.weakUser, r.weakPass, false
+	case <-time.After(budget):
+		return "", "", "", "unknown", "", "null", "null", true
+	}
 }
 
 // scanUDPPort 基于 UDP 探针与匹配规则做服务识别。
@@ -246,9 +369,9 @@ func (s *Scanner) scanUDPPort(_ string, resolvedIP string, port int, timeout tim
 // initAssets 从探针文件与服务文件加载静态匹配数据。
 func initAssets(opts Options) error {
 	logger.Init(&logger.Args{
-		ServerName: "gomap-assetprobe",
+		ServerName: "gomap",
 		BasePath:   "./logs",
-		Console:    false,
+		Console:    opts.ConsoleLog,
 		MaxBackups: 3,
 		MaxSize:    50,
 	})
@@ -294,6 +417,15 @@ func applyDefaults(opts *Options) {
 	}
 	if !opts.DisableWeakPassword {
 		opts.DisableWeakPassword = true
+	}
+	if opts.MaxFingerprintPorts <= 0 {
+		opts.MaxFingerprintPorts = 50
+	}
+	if opts.HoneypotOpenThreshold <= 0 {
+		opts.HoneypotOpenThreshold = 100
+	}
+	if opts.HoneypotOpenRatio <= 0 {
+		opts.HoneypotOpenRatio = 0.85
 	}
 }
 

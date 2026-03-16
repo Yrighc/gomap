@@ -12,7 +12,6 @@ test:
 build:
 	mkdir -p dist
 	go build -o dist/gomap ./cmd
-	go build -o dist/gomap-assetprobe ./cmd/assetprobe
 
 build-all:
 	mkdir -p dist

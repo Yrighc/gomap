@@ -29,8 +29,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 │   ├── dict-normal.txt           # 目录爆破字典（normal）
 │   └── dict-diff.txt             # 目录爆破字典（diff）
 ├── cmd/
-│   ├── main.go                   # 主 CLI（支持多目标）
-│   └── assetprobe/main.go        # 轻量 CLI（单目标）
+│   └── main.go                   # 主 CLI（port/web/dir 子命令）
 ├── pkg/assetprobe/
 │   ├── types.go                  # 对外类型定义
 │   ├── scanner.go                # 主流程与核心算法
@@ -100,26 +99,31 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 ## 5. CLI 使用
 
-### 5.1 主 CLI（多目标）
+### 5.1 端口扫描（port）
 
 ```bash
 go run ./cmd \
+  port \
   -target example.com \
-  -ips 1.1.1.1,8.8.8.8 \
   -ports 80,443,1-1024 \
   -proto tcp \
   -rate 200 \
   -timeout 2 \
-  -homepage=true
+  -max-fp 50
 ```
 
-### 5.2 启用目录爆破
+### 5.2 首页识别（web）
+
+```bash
+go run ./cmd web -url https://example.com
+```
+
+### 5.3 目录爆破（dir）
 
 ```bash
 go run ./cmd \
-  -target example.com \
-  -ports 80,443 \
-  -dirbrute=true \
+  dir \
+  -url https://example.com \
   -dict=simple \
   -dict-max=500 \
   -dict-concurrency=50
@@ -127,9 +131,15 @@ go run ./cmd \
 
 参数说明：
 - `-proto`: `tcp` 或 `udp`
+- `-ips`: 多目标，逗号分隔（与 `-target` 二选一）
+- `-max-fp`: 最多做服务识别的开放端口数（默认 `50`，也支持 `-max-fingerprint-ports`）
 - `-dict`: `simple|normal|diff`
 - `-dict-file`: 自定义字典文件路径
 - `-dict-max`: 最大加载字典行数，`0` 表示不限制
+
+兼容说明：
+- 旧用法 `go run ./cmd -target ...` 仍可用（自动按 `port` 模式执行）
+- 建议逐步迁移到子命令模式（`port/web/dir`）
 
 ## 6. 依赖形式调用（推荐）
 
@@ -209,6 +219,10 @@ func (s *Service) Run(ctx context.Context, target string) (*assetprobe.ScanResul
 库调用时建议：
 - 内部流程：优先使用结构体 `ScanResult`（类型安全、易扩展）
 - 对外输出：在边界层转 JSON（HTTP/Kafka/落库）
+
+针对“全端口伪开放/蜜罐”类目标，扫描器默认策略：
+- 当开放端口非常多时，仅对前 `50` 个开放端口做服务指纹识别，其余端口仍标记为 `open`
+- 当满足 `开放端口数 >= 100` 且 `开放占比 >= 85%` 时，结果中会标记 `SuspectedHoneypot=true`
 
 已提供便捷方法：
 

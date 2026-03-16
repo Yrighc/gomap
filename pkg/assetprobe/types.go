@@ -10,45 +10,58 @@ const (
 )
 
 type Options struct {
-	Concurrency         int
-	Timeout             time.Duration
-	DisableWeakPassword bool
-	DetectHomepage      bool
-	ProbesFile          string
-	ServicesFile        string
-	DisableLogging      bool
+	Concurrency           int
+	Timeout               time.Duration
+	DisableWeakPassword   bool
+	DetectHomepage        bool
+	MaxFingerprintPorts   int
+	HoneypotOpenThreshold int
+	HoneypotOpenRatio     float64
+	ConsoleLog            bool
+	ProbesFile            string
+	ServicesFile          string
+	DisableLogging        bool
 }
 
 type ScanRequest struct {
-	Target         string
-	Ports          []int
-	PortSpec       string
-	Protocol       Protocol
-	Concurrency    int
-	Timeout        time.Duration
-	DetectHomepage *bool
-	DirBrute       *DirBruteOptions
+	Target                string
+	Ports                 []int
+	PortSpec              string
+	Protocol              Protocol
+	Concurrency           int
+	Timeout               time.Duration
+	DetectHomepage        *bool
+	MaxFingerprintPorts   int
+	HoneypotOpenThreshold int
+	HoneypotOpenRatio     float64
+	DirBrute              *DirBruteOptions
 }
 
 type ScanResult struct {
-	Target     string
-	ResolvedIP string
-	Protocol   Protocol
-	Ports      []PortResult
+	Target                  string
+	ResolvedIP              string
+	Protocol                Protocol
+	OpenPorts               int
+	FingerprintedOpenPorts  int
+	SkippedFingerprintPorts int
+	SuspectedHoneypot       bool
+	HoneypotReason          string
+	Ports                   []PortResult
 }
 
 type PortResult struct {
-	Port     int
-	Open     bool
-	Service  string
-	Version  string
-	Banner   string
-	Subject  string
-	DNSNames []string
-	WeakUser string
-	WeakPass string
-	Homepage *HomepageResult
-	Error    string
+	Port          int
+	Open          bool
+	Service       string
+	Version       string
+	Banner        string
+	Subject       string
+	DNSNames      []string
+	WeakUser      string
+	WeakPass      string
+	Fingerprinted bool
+	Homepage      *HomepageResult
+	Error         string
 }
 
 type HomepageResult struct {
