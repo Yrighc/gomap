@@ -15,20 +15,36 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux
           - goos: linux
             goarch: amd64
             ext: ""
           - goos: linux
+            goarch: 386
+            ext: ""
+          - goos: linux
             goarch: arm64
             ext: ""
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            ext: ""
+          # macOS
           - goos: darwin
             goarch: amd64
             ext: ""
           - goos: darwin
             goarch: arm64
             ext: ""
+          # Windows
           - goos: windows
             goarch: amd64
+            ext: ".exe"
+          - goos: windows
+            goarch: 386
+            ext: ".exe"
+          - goos: windows
+            goarch: arm64
             ext: ".exe"
 
     steps:
@@ -46,15 +62,20 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           mkdir -p dist
-          BIN_NAME=gomap-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          if [ -n "${{ matrix.goarm }}" ]; then
+            BIN_NAME=gomap-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}${{ matrix.ext }}
+          else
+            BIN_NAME=gomap-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          fi
           go build -o dist/${BIN_NAME} ./cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gomap-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: gomap-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm }}
           path: dist/*
 
   github-release:

@@ -257,6 +257,14 @@ go run ./cmd -target example.com -ports 80,443
 npm install
 ```
 
+CD 发布说明（`.github/workflows/release.yml`）：
+- 触发条件：推送标签 `v*`（如 `v1.0.0`）
+- 自动构建平台：
+  - Linux: `amd64` / `386` / `arm64` / `armv7`
+  - macOS: `amd64` / `arm64`
+  - Windows: `amd64` / `386` / `arm64`
+- 自动发布：将二进制与 `checksums.txt` 上传到 GitHub Release
+
 ## 11. 注意事项
 
 - 仅在授权范围内进行探测
