@@ -25,9 +25,9 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 ├── app/
 │   ├── gomap-service-probes      # 服务识别探针规则
 │   ├── gomap-services            # 端口服务映射
-│   ├── 简单.txt                   # 目录爆破字典（simple）
-│   ├── 一般.txt                   # 目录爆破字典（normal）
-│   └── 复杂.txt                   # 目录爆破字典（diff）
+│   ├── dict-simple.txt           # 目录爆破字典（simple）
+│   ├── dict-normal.txt           # 目录爆破字典（normal）
+│   └── dict-diff.txt             # 目录爆破字典（diff）
 ├── cmd/
 │   ├── main.go                   # 主 CLI（支持多目标）
 │   └── assetprobe/main.go        # 轻量 CLI（单目标）
@@ -94,7 +94,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
          +---------------------------+
          | app/gomap-service-probes |
          | app/gomap-services       |
-         | app/简单|一般|复杂.txt      |
+         | app/dict-*.txt         |
          +---------------------------+
 ```
 

@@ -525,11 +525,23 @@ func resolveDictFile(opts *DirBruteOptions) (string, error) {
 	}
 	switch level {
 	case DirBruteSimple:
-		return filepath.Join(root, "app", "简单.txt"), nil
+		path := filepath.Join(root, "app", "dict-simple.txt")
+		if _, err := os.Stat(path); err != nil {
+			return "", errors.New("simple dictionary file not found")
+		}
+		return path, nil
 	case DirBruteNormal:
-		return filepath.Join(root, "app", "一般.txt"), nil
+		path := filepath.Join(root, "app", "dict-normal.txt")
+		if _, err := os.Stat(path); err != nil {
+			return "", errors.New("normal dictionary file not found")
+		}
+		return path, nil
 	case DirBruteDiff:
-		return filepath.Join(root, "app", "复杂.txt"), nil
+		path := filepath.Join(root, "app", "dict-diff.txt")
+		if _, err := os.Stat(path); err != nil {
+			return "", errors.New("diff dictionary file not found")
+		}
+		return path, nil
 	default:
 		return "", fmt.Errorf("unsupported dir brute level: %s", level)
 	}
