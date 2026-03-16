@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0-alpha-1](https://github.com/Yrighc/gomap/compare/v0.2.0-alpha-1...v0.3.0-alpha-1) (2026-03-16)
+
+
+### Features
+
+* **assetprobe:** 优化端口扫描模式并新增指纹识别限流 ([76235f9](https://github.com/Yrighc/gomap/commit/76235f9847141bb2eb62167cde378a2efa711ba2))
+* **port:** 新增蜜罐判定参数和 CSV 输出功能 ([d0c0c53](https://github.com/Yrighc/gomap/commit/d0c0c53f9587769e4ad62c1037574f820afeb9b3))
+
 ## [0.2.0-alpha](https://github.com/Yrighc/gomap/compare/v0.1.0-alpha...v0.2.0-alpha) (2026-03-16)
 
 
