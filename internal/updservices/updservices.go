@@ -4,9 +4,9 @@ package updservices
 import (
 	"bytes"
 	"fmt"
-	"gomap/config/common"
-	"gomap/config/probes"
-	"gomap/internal/achieve"
+	"github.com/yrighc/gomap/config/common"
+	"github.com/yrighc/gomap/config/probes"
+	"github.com/yrighc/gomap/internal/achieve"
 	"io/ioutil"
 	"net"
 	"strings"

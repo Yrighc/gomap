@@ -2,8 +2,8 @@ package probes
 
 // 解析 nmap-service-probes 文件，提取探针和匹配规则
 import (
-	"gomap/config/common"
-	"gomap/config/logger"
+	"github.com/yrighc/gomap/config/common"
+	"github.com/yrighc/gomap/config/logger"
 	"os"
 	"path/filepath"
 	"regexp"

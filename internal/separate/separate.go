@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"gomap/config/common"
+	"github.com/yrighc/gomap/config/common"
 	"io"
 	"net"
 	"strconv"
