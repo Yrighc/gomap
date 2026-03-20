@@ -1,4 +1,4 @@
-module gomap
+module github.com/yrighc/gomap
 
 go 1.24.6
 
