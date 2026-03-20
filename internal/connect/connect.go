@@ -3,9 +3,9 @@ package connect
 // 连接与服务识别模块
 import (
 	"bytes"
-	"gomap/config/common"
-	"gomap/internal/achieve"
-	"gomap/internal/separate"
+	"github.com/yrighc/gomap/config/common"
+	"github.com/yrighc/gomap/internal/achieve"
+	"github.com/yrighc/gomap/internal/separate"
 	"net"
 	"strings"
 	"time"

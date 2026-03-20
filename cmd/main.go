@@ -7,7 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"gomap/pkg/assetprobe"
+	"github.com/yrighc/gomap/pkg/assetprobe"
 	"net/url"
 	"os"
 	"path/filepath"

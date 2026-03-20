@@ -17,13 +17,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomap/config/logger"
-	"gomap/config/probes"
-	"gomap/config/service"
-	"gomap/internal/achieve"
-	"gomap/internal/crawlweb"
-	"gomap/internal/tcpservices"
-	"gomap/internal/updservices"
+	"github.com/yrighc/gomap/config/logger"
+	"github.com/yrighc/gomap/config/probes"
+	"github.com/yrighc/gomap/config/service"
+	"github.com/yrighc/gomap/internal/achieve"
+	"github.com/yrighc/gomap/internal/crawlweb"
+	"github.com/yrighc/gomap/internal/tcpservices"
+	"github.com/yrighc/gomap/internal/updservices"
 )
 
 var (

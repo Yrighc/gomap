@@ -4,8 +4,8 @@ package service
 import (
 	"bufio"
 	"fmt"
-	"gomap/config/common"
-	"gomap/config/logger"
+	"github.com/yrighc/gomap/config/common"
+	"github.com/yrighc/gomap/config/logger"
 	"os"
 	"path/filepath"
 	"regexp"

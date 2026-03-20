@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"gomap/pkg/assetprobe"
+	"github.com/yrighc/gomap/pkg/assetprobe"
 )
 
 func main() {
