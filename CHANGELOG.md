@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1-alpha-1](https://github.com/Yrighc/gomap/compare/v0.3.0-alpha-1...v0.3.1-alpha-1) (2026-03-20)
+
+
+### Bug Fixes
+
+* **module:** 修正模块名称为完整路径 ([48c74f1](https://github.com/Yrighc/gomap/commit/48c74f1b107f034d85a87b87027178c4c0619c0f))
+* **module:** 修正模块名称为完整路径 ([8d2b2d7](https://github.com/Yrighc/gomap/commit/8d2b2d7a1eb9b45cb7d6dc5c2e98d05446913106))
+* **mod:** 修复发布后调用依赖找不到 ([cc616a0](https://github.com/Yrighc/gomap/commit/cc616a0452430f9d0299e7156907267033a764d7))
+* **mod:** 修复发布后调用依赖找不到 ([52a0f38](https://github.com/Yrighc/gomap/commit/52a0f380d5de4ebf8cb4f6978bbf0153bdde924b))
+
 ## [0.3.0-alpha-1](https://github.com/Yrighc/gomap/compare/v0.2.0-alpha-1...v0.3.0-alpha-1) (2026-03-16)
 
 
