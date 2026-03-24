@@ -66,7 +66,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 - 首页识别仅在 HTTP 类服务/端口触发
 - 目录爆破默认关闭，开启后使用字典并发请求路径
-- 爆破结果输出为 `Homepage.Paths[]`
+- 目录爆破结果通过独立结果模型返回，不再挂载到端口扫描结果中
 
 ## 4. 整体架构
 
@@ -149,7 +149,7 @@ go run ./cmd \
 
 > 当前 `go.mod` 模块名为 `gomap`。如果你在私有仓库发布，请将模块名改为你的仓库地址（如 `github.com/your-org/gomap`），然后在业务项目 `go get` 使用。
 
-### 6.1 基础调用
+### 6.1 端口扫描调用
 
 ```go
 package main
@@ -159,14 +159,13 @@ import (
     "fmt"
     "time"
 
-    "gomap/pkg/assetprobe"
+    "github.com/yrighc/gomap/pkg/assetprobe"
 )
 
 func main() {
     scanner, err := assetprobe.NewScanner(assetprobe.Options{
-        Concurrency:    300,
-        Timeout:        2 * time.Second,
-        DetectHomepage: true,
+        Concurrency: 300,
+        Timeout:     2 * time.Second,
     })
     if err != nil {
         panic(err)
@@ -181,11 +180,37 @@ func main() {
         panic(err)
     }
 
-    fmt.Println(res.Target, res.ResolvedIP, len(res.Ports))
+    fmt.Println(res.Target, res.ResolvedIP, res.Meta.OpenPorts)
 }
 ```
 
-### 6.2 依赖注入（DI）集成示例
+### 6.2 首页识别调用
+
+```go
+page, err := scanner.DetectHomepage(context.Background(), "https://example.com")
+if err != nil {
+    panic(err)
+}
+
+fmt.Println(page.Title, page.StatusCode, page.Server)
+```
+
+### 6.3 目录爆破调用
+
+```go
+dirs, err := scanner.ScanDirectories(context.Background(), "https://example.com", assetprobe.DirBruteOptions{
+    Enable:   true,
+    Level:    assetprobe.DirBruteSimple,
+    MaxPaths: 200,
+})
+if err != nil {
+    panic(err)
+}
+
+fmt.Println(dirs.Target, dirs.Port, len(dirs.Paths))
+```
+
+### 6.4 依赖注入（DI）集成示例
 
 适合在你的业务服务中抽象接口，便于测试替换：
 
@@ -194,18 +219,18 @@ package probe
 
 import (
     "context"
-    "gomap/pkg/assetprobe"
+    "github.com/yrighc/gomap/pkg/assetprobe"
 )
 
-type Scanner interface {
+type PortScanner interface {
     Scan(ctx context.Context, req assetprobe.ScanRequest) (*assetprobe.ScanResult, error)
 }
 
 type Service struct {
-    scanner Scanner
+    scanner PortScanner
 }
 
-func NewService(scanner Scanner) *Service {
+func NewService(scanner PortScanner) *Service {
     return &Service{scanner: scanner}
 }
 
@@ -226,7 +251,7 @@ func (s *Service) Run(ctx context.Context, target string) (*assetprobe.ScanResul
 
 针对“全端口伪开放/蜜罐”类目标，扫描器默认策略：
 - 当开放端口非常多时，仅对前 `50` 个开放端口做服务指纹识别，其余端口仍标记为 `open`
-- 当满足 `开放端口数 >= 100` 且 `开放占比 >= 85%` 时，结果中会标记 `SuspectedHoneypot=true`
+- 当满足 `开放端口数 >= 100` 且 `开放占比 >= 85%` 时，结果中会标记 `Meta.SuspectedHoneypot=true`
 
 CSV 输出说明：
 - `gomap port -csv` -> `logs/port.csv`

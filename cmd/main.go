@@ -113,7 +113,7 @@ func runPort(args []string) {
 	if *enableCSV {
 		header := []string{
 			"scan_time", "target", "resolved_ip", "protocol", "port", "open", "service", "version",
-			"banner", "subject", "dns_names", "fingerprinted", "error", "open_ports",
+			"banner", "subject", "dns_names", "open_ports",
 			"fingerprinted_open_ports", "skipped_fingerprint_ports", "suspected_honeypot", "honeypot_reason",
 		}
 		csvFile, csvWriter, err = openCSVWriter(filepath.Join("logs", "port.csv"), *csvMode, header)
@@ -160,13 +160,11 @@ func runPort(args []string) {
 					p.Banner,
 					p.Subject,
 					strings.Join(p.DNSNames, ";"),
-					strconv.FormatBool(p.Fingerprinted),
-					p.Error,
-					strconv.Itoa(res.OpenPorts),
-					strconv.Itoa(res.FingerprintedOpenPorts),
-					strconv.Itoa(res.SkippedFingerprintPorts),
-					strconv.FormatBool(res.SuspectedHoneypot),
-					res.HoneypotReason,
+					strconv.Itoa(res.Meta.OpenPorts),
+					strconv.Itoa(res.Meta.FingerprintedOpenPorts),
+					strconv.Itoa(res.Meta.SkippedFingerprintPorts),
+					strconv.FormatBool(res.Meta.SuspectedHoneypot),
+					res.Meta.HoneypotReason,
 				}
 				if err := csvWriter.Write(row); err != nil {
 					fmt.Fprintf(os.Stderr, "写入 port.csv 失败: %v\n", err)
@@ -291,12 +289,6 @@ func runDir(args []string) {
 		os.Exit(2)
 	}
 
-	target, port, err := parseURLTarget(*rawURL)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
 		Concurrency:    *rate,
 		Timeout:        time.Duration(*timeout) * time.Second,
@@ -308,26 +300,19 @@ func runDir(args []string) {
 		os.Exit(1)
 	}
 
-	enableHomepage := true
-	res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-		Target:         target,
-		Ports:          []int{port},
-		Protocol:       assetprobe.ProtocolTCP,
-		DetectHomepage: &enableHomepage,
-		DirBrute: &assetprobe.DirBruteOptions{
-			Enable:         true,
-			Level:          assetprobe.DirBruteLevel(strings.ToLower(*dictLevel)),
-			CustomDictFile: *dictFile,
-			MaxPaths:       *dictMax,
-			Concurrency:    *dictConcurrency,
-		},
+	res, err := scanner.ScanDirectories(context.Background(), *rawURL, assetprobe.DirBruteOptions{
+		Enable:         true,
+		Level:          assetprobe.DirBruteLevel(strings.ToLower(*dictLevel)),
+		CustomDictFile: *dictFile,
+		MaxPaths:       *dictMax,
+		Concurrency:    *dictConcurrency,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	output, _ := res.ToJSON(true)
+	output, _ := json.MarshalIndent(res, "", "  ")
 	fmt.Println(string(output))
 
 	if *enableCSV {
@@ -343,43 +328,38 @@ func runDir(args []string) {
 		defer csvFile.Close()
 
 		now := time.Now().Format(csvTimeLayout)
-		for _, p := range res.Ports {
-			if p.Homepage == nil {
-				row := []string{
-					now, res.Target, res.ResolvedIP, strconv.Itoa(p.Port),
-					"", "", "", "", "", "", "", "",
-				}
-				if err := csvWriter.Write(row); err != nil {
-					fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
-				}
-				continue
+		if res.Homepage == nil {
+			row := []string{
+				now, res.Target, res.ResolvedIP, strconv.Itoa(res.Port),
+				"", "", "", "", "", "", "", "",
 			}
-			if len(p.Homepage.Paths) == 0 {
+			if err := csvWriter.Write(row); err != nil {
+				fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
+			}
+		} else if len(res.Paths) == 0 {
+			row := []string{
+				now,
+				res.Target,
+				res.ResolvedIP,
+				strconv.Itoa(res.Port),
+				res.Homepage.URL,
+				res.Homepage.Title,
+				strconv.Itoa(res.Homepage.StatusCode),
+				"", "", "", "", "",
+			}
+			if err := csvWriter.Write(row); err != nil {
+				fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
+			}
+		} else {
+			for _, path := range res.Paths {
 				row := []string{
 					now,
 					res.Target,
 					res.ResolvedIP,
-					strconv.Itoa(p.Port),
-					p.Homepage.URL,
-					p.Homepage.Title,
-					strconv.Itoa(p.Homepage.StatusCode),
-					"", "", "", "", "",
-				}
-				if err := csvWriter.Write(row); err != nil {
-					fmt.Fprintf(os.Stderr, "写入 dir.csv 失败: %v\n", err)
-				}
-				continue
-			}
-
-			for _, path := range p.Homepage.Paths {
-				row := []string{
-					now,
-					res.Target,
-					res.ResolvedIP,
-					strconv.Itoa(p.Port),
-					p.Homepage.URL,
-					p.Homepage.Title,
-					strconv.Itoa(p.Homepage.StatusCode),
+					strconv.Itoa(res.Port),
+					res.Homepage.URL,
+					res.Homepage.Title,
+					strconv.Itoa(res.Homepage.StatusCode),
 					path.URL,
 					path.Title,
 					strconv.Itoa(path.StatusCode),

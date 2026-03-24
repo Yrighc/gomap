@@ -12,30 +12,43 @@
 ## 快速使用
 
 ```go
-import "gomap/pkg/assetprobe"
+import "github.com/yrighc/gomap/pkg/assetprobe"
 
 scanner, err := assetprobe.NewScanner(assetprobe.Options{
-    Concurrency:    300,
-    Timeout:        2 * time.Second,
-    DetectHomepage: true,
+    Concurrency: 300,
+    Timeout:     2 * time.Second,
 })
 if err != nil {
     panic(err)
 }
 
+// 端口扫描
 res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
     Target:   "example.com",
     PortSpec: "80,443,1-1024",
     Protocol: assetprobe.ProtocolTCP,
-    DirBrute: &assetprobe.DirBruteOptions{
-        Enable:   true,
-        Level:    assetprobe.DirBruteSimple,
-        MaxPaths: 200,
-    },
 })
 if err != nil {
     panic(err)
 }
+
+// 首页识别
+web, err := scanner.DetectHomepage(context.Background(), "https://example.com")
+if err != nil {
+    panic(err)
+}
+
+// 目录爆破
+dirs, err := scanner.ScanDirectories(context.Background(), "https://example.com", assetprobe.DirBruteOptions{
+    Enable:   true,
+    Level:    assetprobe.DirBruteSimple,
+    MaxPaths: 200,
+})
+if err != nil {
+    panic(err)
+}
+
+_, _, _ = res, web, dirs
 ```
 
 示例代码见：`examples/library/main.go`

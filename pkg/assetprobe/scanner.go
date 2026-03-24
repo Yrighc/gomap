@@ -48,10 +48,15 @@ func NewScanner(opts Options) (*Scanner, error) {
 	return &Scanner{opts: opts}, nil
 }
 
-// Scan 是主流程：
-// 1) 规范化目标、端口与参数
-// 2) 并发执行端口探测
-// 3) 汇总并排序结果
+// Scan 是资产探测的主流程入口：
+// 1) 读取请求参数，并与 Scanner 的默认配置合并
+// 2) 解析目标地址，将域名统一解析成可连接的 IP
+// 3) 解析端口表达式，得到去重且有序的端口列表
+// 4) 基于 worker pool 并发执行 TCP/UDP 探测
+// 5) 汇总结果，只保留开放端口，并计算统计信息
+//
+// 这里返回的 Ports 已经过滤，只包含 Open=true 的端口。
+// 关闭端口不会出现在结果中，但仍会参与总扫描量与蜜罐判定计算。
 func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error) {
 	if strings.TrimSpace(req.Target) == "" {
 		return nil, errors.New("target is required")
@@ -74,6 +79,8 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		return nil, err
 	}
 
+	// 请求级参数优先级高于 Scanner 默认配置。
+	// 这样既可以全局复用默认值，也可以在单次扫描时做覆盖。
 	timeout := s.opts.Timeout
 	if req.Timeout > 0 {
 		timeout = req.Timeout
@@ -81,10 +88,6 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	concurrency := s.opts.Concurrency
 	if req.Concurrency > 0 {
 		concurrency = req.Concurrency
-	}
-	detectHomepage := s.opts.DetectHomepage
-	if req.DetectHomepage != nil {
-		detectHomepage = *req.DetectHomepage
 	}
 	maxFingerprintPorts := s.opts.MaxFingerprintPorts
 	if req.MaxFingerprintPorts > 0 {
@@ -98,7 +101,9 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	if req.HoneypotOpenRatio > 0 {
 		honeypotOpenRatio = req.HoneypotOpenRatio
 	}
-	dirBrute := req.DirBrute
+	// 为 TCP 指纹识别准备“令牌桶”。
+	// 端口连通后，只有拿到令牌的开放端口才会继续做深度服务识别。
+	// 这样可以避免全开端口、portspoof、蜜罐类目标导致大量指纹探测拖慢整体扫描。
 	var fingerprintSlots chan struct{}
 	if req.Protocol == ProtocolTCP && maxFingerprintPorts > 0 {
 		fingerprintSlots = make(chan struct{}, maxFingerprintPorts)
@@ -108,11 +113,14 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 	var fingerprintedCount int32
 
+	// jobs 负责分发待扫描端口，results 收集每个端口的探测结果。
+	// 两者长度都按端口总数预分配，尽量降低 goroutine 间阻塞。
 	jobs := make(chan int, len(ports))
 	results := make(chan PortResult, len(ports))
 	var wg sync.WaitGroup
 
-	// 端口级并发 Worker 池。
+	// 端口级并发 Worker 池：
+	// 每个 worker 从 jobs 中读取一个端口并执行一次探测，直到队列耗尽或 ctx 被取消。
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -128,7 +136,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 				case ProtocolUDP:
 					r = s.scanUDPPort(targetHost, resolvedIP, p, timeout)
 				default:
-					r = s.scanTCPPort(targetHost, resolvedIP, p, timeout, detectHomepage, dirBrute, fingerprintSlots, &fingerprintedCount)
+					r = s.scanTCPPort(resolvedIP, p, timeout, fingerprintSlots, &fingerprintedCount)
 				}
 				results <- r
 			}
@@ -142,48 +150,60 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	wg.Wait()
 	close(results)
 
-	final := make([]PortResult, 0, len(ports))
+	// 先收集原始结果，再统一排序和过滤。
+	// 这样统计逻辑只需要遍历一次，后续 CLI / JSON 也能直接使用过滤后的结果。
+	collected := make([]PortResult, 0, len(ports))
 	for r := range results {
-		final = append(final, r)
+		collected = append(collected, r)
 	}
-	sort.Slice(final, func(i, j int) bool { return final[i].Port < final[j].Port })
+	sort.Slice(collected, func(i, j int) bool { return collected[i].Port < collected[j].Port })
 
 	openPorts := 0
-	skippedFingerprintPorts := 0
-	for _, r := range final {
+	final := make([]PortResult, 0, len(collected))
+	for _, r := range collected {
+		// 当前产品策略：最终结果只返回开放端口。
+		// 关闭端口在资产探测场景下价值较低，保留会显著放大 JSON / CSV 体积。
 		if !r.Open {
 			continue
 		}
 		openPorts++
-		if !r.Fingerprinted {
-			skippedFingerprintPorts++
-		}
+		final = append(final, r)
 	}
 	fingerprintedOpenPorts := int(atomic.LoadInt32(&fingerprintedCount))
+	skippedFingerprintPorts := openPorts - fingerprintedOpenPorts
+	if skippedFingerprintPorts < 0 {
+		skippedFingerprintPorts = 0
+	}
 	suspectedHoneypot := false
 	honeypotReason := ""
-	if req.Protocol == ProtocolTCP && len(final) > 0 {
-		openRatio := float64(openPorts) / float64(len(final))
+	if req.Protocol == ProtocolTCP && len(collected) > 0 {
+		// 蜜罐判定基于“全部已扫描端口”的开放比例，而不是过滤后的 final。
+		// 否则一旦只保留开放端口，占比会永远是 100%，判定将失真。
+		openRatio := float64(openPorts) / float64(len(collected))
 		if openPorts >= honeypotOpenThreshold && openRatio >= honeypotOpenRatio {
 			suspectedHoneypot = true
-			honeypotReason = fmt.Sprintf("open ports=%d/%d(%.2f%%) >= threshold=%d and ratio=%.2f%%", openPorts, len(final), openRatio*100, honeypotOpenThreshold, honeypotOpenRatio*100)
+			honeypotReason = fmt.Sprintf("open ports=%d/%d(%.2f%%) >= threshold=%d and ratio=%.2f%%", openPorts, len(collected), openRatio*100, honeypotOpenThreshold, honeypotOpenRatio*100)
 		}
 	}
 
 	return &ScanResult{
-		Target:                  targetHost,
-		ResolvedIP:              resolvedIP,
-		Protocol:                req.Protocol,
-		OpenPorts:               openPorts,
-		FingerprintedOpenPorts:  fingerprintedOpenPorts,
-		SkippedFingerprintPorts: skippedFingerprintPorts,
-		SuspectedHoneypot:       suspectedHoneypot,
-		HoneypotReason:          honeypotReason,
-		Ports:                   final,
+		Target:     targetHost,
+		ResolvedIP: resolvedIP,
+		Protocol:   req.Protocol,
+		Meta: ScanMeta{
+			OpenPorts:               openPorts,
+			FingerprintedOpenPorts:  fingerprintedOpenPorts,
+			SkippedFingerprintPorts: skippedFingerprintPorts,
+			SuspectedHoneypot:       suspectedHoneypot,
+			HoneypotReason:          honeypotReason,
+		},
+		Ports: final,
 	}, nil
 }
 
 // Probe 是单端口便捷封装，内部复用 Scan。
+// 由于 Scan 现在只返回开放端口，所以当目标端口关闭时，这里返回一个 Open=false 的占位结果，
+// 避免调用方因为空结果切片而额外处理错误分支。
 func (s *Scanner) Probe(ctx context.Context, target string, port int, protocol Protocol) (*PortResult, error) {
 	result, err := s.Scan(ctx, ScanRequest{
 		Target:   target,
@@ -194,7 +214,7 @@ func (s *Scanner) Probe(ctx context.Context, target string, port int, protocol P
 		return nil, err
 	}
 	if len(result.Ports) == 0 {
-		return nil, errors.New("no probe result")
+		return &PortResult{Port: port, Open: false}, nil
 	}
 	return &result.Ports[0], nil
 }
@@ -222,13 +242,41 @@ func (s *Scanner) DetectHomepage(ctx context.Context, rawURL string) (*HomepageR
 	}, nil
 }
 
-// scanTCPPort 执行 TCP 连接，并在预算内做服务识别；超出指纹预算时仅标记端口开放。
+// ScanDirectories 对单个 URL 执行目录爆破，并返回独立的目录爆破结果模型。
+// 它不会复用 PortResult，避免端口扫描结果混入 Web/目录字段。
+func (s *Scanner) ScanDirectories(ctx context.Context, rawURL string, opts DirBruteOptions) (*DirResult, error) {
+	host, port, err := parseScanURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	resolvedIP, err := resolveTarget(host)
+	if err != nil {
+		return nil, err
+	}
+	page, err := s.DetectHomepage(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return &DirResult{
+		Target:     host,
+		ResolvedIP: resolvedIP,
+		Port:       port,
+		Homepage:   page,
+		Paths:      runDirBrute(*page, &opts),
+	}, nil
+}
+
+// scanTCPPort 执行单个 TCP 端口的完整探测流程：
+// 1) 先做 TCP 建连，失败则认为端口未开放
+// 2) 建连成功后尝试申请“指纹识别令牌”
+// 3) 拿到令牌则继续做 banner / 协议 / 证书等服务识别
+//
+// 端口扫描结果只保留端口资产字段，不再混入首页和目录爆破数据。
+// 当令牌耗尽时，端口仍会被标记为 open，但不会继续做深度识别。
 func (s *Scanner) scanTCPPort(
-	targetHost, resolvedIP string,
+	resolvedIP string,
 	port int,
 	timeout time.Duration,
-	detectHomepage bool,
-	dirBrute *DirBruteOptions,
 	fingerprintSlots chan struct{},
 	fingerprintedCount *int32,
 ) PortResult {
@@ -247,14 +295,13 @@ func (s *Scanner) scanTCPPort(
 		default:
 			result.Open = true
 			result.Service = "open"
-			result.Error = "fingerprint skipped: max fingerprint ports reached"
 			return result
 		}
 	}
-	result.Fingerprinted = true
+	// 能走到这里说明该开放端口获得了深度识别资格。
 	atomic.AddInt32(fingerprintedCount, 1)
 
-	banner, subject, dns, serviceName, version, weakUser, weakPass, timedOut := detectTCPServiceWithBudget(
+	banner, subject, dns, serviceName, version, _ := detectTCPServiceWithBudget(
 		resolvedIP,
 		port,
 		conn,
@@ -267,25 +314,11 @@ func (s *Scanner) scanTCPPort(
 	if result.Service == "" {
 		result.Service = "unknown"
 	}
-	if timedOut {
-		result.Error = "service fingerprint timeout"
-	}
 	result.Version = achieve.SanitizeUTF8(version)
 	result.Banner = achieve.SanitizeUTF8(banner)
 	result.Subject = achieve.SanitizeUTF8(subject)
 	if dns != "" {
 		result.DNSNames = splitAndCleanDNS(dns)
-	}
-	result.WeakUser = weakUser
-	result.WeakPass = weakPass
-
-	if detectHomepage && shouldDetectHomepage(port, result.Service) {
-		if page := detectPortHomepage(targetHost, port, result.Service); page != nil {
-			if dirBrute != nil && dirBrute.Enable {
-				page.Paths = runDirBrute(*page, dirBrute)
-			}
-			result.Homepage = page
-		}
 	}
 
 	return result
@@ -297,32 +330,32 @@ func detectTCPServiceWithBudget(
 	conn net.Conn,
 	disableWeakPassword bool,
 	baseTimeout time.Duration,
-) (banner, subject, dns, serviceName, version, weakUser, weakPass string, timedOut bool) {
+) (banner, subject, dns, serviceName, version string, timedOut bool) {
+	// 将底层较慢的协议识别放到 goroutine 中执行，
+	// 外层通过 time.After 控制最大等待时间，避免单端口探测无限挂起。
 	type detectResult struct {
 		banner      string
 		subject     string
 		dns         string
 		serviceName string
 		version     string
-		weakUser    string
-		weakPass    string
 	}
 
 	resultCh := make(chan detectResult, 1)
 	go func() {
 		buf := make([]byte, 4096)
-		b, s, d, svc, ver, w := tcpservices.TcpPortServer(ip, port, buf, conn, disableWeakPassword)
+		b, s, d, svc, ver, _ := tcpservices.TcpPortServer(ip, port, buf, conn, disableWeakPassword)
 		resultCh <- detectResult{
 			banner:      b,
 			subject:     s,
 			dns:         d,
 			serviceName: svc,
 			version:     ver,
-			weakUser:    w.Username,
-			weakPass:    w.Password,
 		}
 	}()
 
+	// 指纹识别超时预算比普通 TCP 建连更宽松，因为协议交互往往需要多轮读写。
+	// 同时设置一个最小值，避免 baseTimeout 过小时识别阶段几乎无法完成。
 	budget := baseTimeout * 5
 	if budget < 8*time.Second {
 		budget = 8 * time.Second
@@ -330,13 +363,14 @@ func detectTCPServiceWithBudget(
 
 	select {
 	case r := <-resultCh:
-		return r.banner, r.subject, r.dns, r.serviceName, r.version, r.weakUser, r.weakPass, false
+		return r.banner, r.subject, r.dns, r.serviceName, r.version, false
 	case <-time.After(budget):
-		return "", "", "", "unknown", "", "null", "null", true
+		return "", "", "", "unknown", "", true
 	}
 }
 
 // scanUDPPort 基于 UDP 探针与匹配规则做服务识别。
+// UDP 不像 TCP 那样有稳定的建连语义，因此这里只要探针有有效响应，就视为开放并输出识别结果。
 func (s *Scanner) scanUDPPort(_ string, resolvedIP string, port int, timeout time.Duration) PortResult {
 	result := PortResult{Port: port}
 	address := net.JoinHostPort(resolvedIP, strconv.Itoa(port))
@@ -366,7 +400,8 @@ func (s *Scanner) scanUDPPort(_ string, resolvedIP string, port int, timeout tim
 	return result
 }
 
-// initAssets 从探针文件与服务文件加载静态匹配数据。
+// initAssets 从磁盘加载静态识别资产。
+// 这些数据是后续 TCP/UDP 服务识别的基础，包括 nmap 风格探针和端口服务映射。
 func initAssets(opts Options) error {
 	logger.Init(&logger.Args{
 		ServerName: "gomap",
@@ -408,6 +443,8 @@ func moduleRootDir() (string, error) {
 }
 
 // applyDefaults 填充扫描器默认参数。
+// 这些值体现的是“资产探测优先”的默认策略：中等并发、较短超时、默认关闭弱口令探测、
+// 指纹识别做限流、并默认开启蜜罐判定阈值。
 func applyDefaults(opts *Options) {
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 200
@@ -450,6 +487,7 @@ func resolveTarget(target string) (string, error) {
 }
 
 // normalizePorts 合并显式端口与范围表达式，过滤非法端口并去重。
+// 例如 Ports=[80,443] + PortSpec="80,8000-8002" 最终会得到有序唯一集合。
 func normalizePorts(ports []int, spec string) ([]int, error) {
 	if len(ports) == 0 && strings.TrimSpace(spec) == "" {
 		return []int{80, 443}, nil
@@ -518,49 +556,9 @@ func parsePortSpec(spec string) ([]int, error) {
 	return ports, nil
 }
 
-// shouldDetectHomepage 将首页识别限制在常见 HTTP 类服务或端口上。
-func shouldDetectHomepage(port int, service string) bool {
-	s := strings.ToLower(service)
-	if strings.Contains(s, "http") {
-		return true
-	}
-	switch port {
-	case 80, 443, 8080, 8443, 8000, 8888, 9443:
-		return true
-	default:
-		return false
-	}
-}
-
-// detectPortHomepage 按服务特征决定协议尝试顺序，返回首个可达首页。
-func detectPortHomepage(host string, port int, service string) *HomepageResult {
-	hostPort := net.JoinHostPort(host, strconv.Itoa(port))
-	tryURLs := []string{}
-	if strings.Contains(strings.ToLower(service), "ssl") || port == 443 || port == 8443 || port == 9443 {
-		tryURLs = append(tryURLs, "https://"+hostPort, "http://"+hostPort)
-	} else {
-		tryURLs = append(tryURLs, "http://"+hostPort, "https://"+hostPort)
-	}
-	for _, u := range tryURLs {
-		param := crawlweb.AnalyzeWebsite(u, strings.HasPrefix(u, "https://"))
-		if param.Http.StatusCode == 0 || param.Http.Body == "" {
-			continue
-		}
-		return &HomepageResult{
-			URL:           u,
-			Title:         achieve.SanitizeUTF8(param.Http.Title),
-			StatusCode:    param.Http.StatusCode,
-			ContentLength: param.Http.ContentLength,
-			Server:        achieve.SanitizeUTF8(param.Http.Server),
-			HTMLHash:      achieve.SanitizeUTF8(param.Http.HTMLHash),
-			FaviconHash:   achieve.SanitizeUTF8(param.Http.Favicon.Hash),
-			ICP:           achieve.SanitizeUTF8(param.Http.ICP),
-		}
-	}
-	return nil
-}
-
 // runDirBrute 执行可选的字典路径探测，并对相似结果去重。
+// 这里的“去重”主要依赖首页 HTMLHash：如果某个路径返回内容与首页完全一致，
+// 通常意味着是统一跳转页/兜底页，不作为有效目录结果返回。
 func runDirBrute(home HomepageResult, opts *DirBruteOptions) []PathResult {
 	dictFile, err := resolveDictFile(opts)
 	if err != nil {
@@ -589,6 +587,7 @@ func runDirBrute(home HomepageResult, opts *DirBruteOptions) []PathResult {
 	results := make(chan PathResult, len(paths))
 	var wg sync.WaitGroup
 
+	// 目录爆破同样采用 worker pool，避免一次性为所有路径创建 goroutine。
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
@@ -717,4 +716,33 @@ func splitAndCleanDNS(s string) []string {
 		out = append(out, achieve.SanitizeUTF8(item))
 	}
 	return out
+}
+
+func parseScanURL(raw string) (string, int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", 0, errors.New("url is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", 0, errors.New("invalid url")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", 0, errors.New("missing host in url")
+	}
+	if p := u.Port(); p != "" {
+		port, err := strconv.Atoi(p)
+		if err != nil || port < 1 || port > 65535 {
+			return "", 0, errors.New("invalid url port")
+		}
+		return host, port, nil
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return host, 443, nil
+	case "http":
+		return host, 80, nil
+	default:
+		return "", 0, errors.New("url scheme must be http or https")
+	}
 }
