@@ -27,18 +27,26 @@ import (
 )
 
 var (
-	initOnce sync.Once
-	initErr  error
+	initOnce          sync.Once
+	initErr           error
+	portLimiterMu     sync.Mutex
+	portLimiterByRate = make(map[int]*portRateLimiter)
 )
 
 type Scanner struct {
 	opts Options
 }
 
+type portRateLimiter struct {
+	ticker *time.Ticker
+}
+
 // NewScanner 初始化探测所需资源（nmap 探针与服务字典），
 // 每个进程只加载一次，并返回可复用的扫描器实例。
 func NewScanner(opts Options) (*Scanner, error) {
+	// 判断默认值，如果未传参数赋默认值
 	applyDefaults(&opts)
+	// 单例初始化，读配置文件
 	initOnce.Do(func() {
 		initErr = initAssets(opts)
 	})
@@ -85,9 +93,13 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	if req.Timeout > 0 {
 		timeout = req.Timeout
 	}
-	concurrency := s.opts.Concurrency
-	if req.Concurrency > 0 {
-		concurrency = req.Concurrency
+	portConcurrency := s.opts.PortConcurrency
+	if req.PortConcurrency > 0 {
+		portConcurrency = req.PortConcurrency
+	}
+	portRateLimit := s.opts.PortRateLimit
+	if req.PortRateLimit > 0 {
+		portRateLimit = req.PortRateLimit
 	}
 	maxFingerprintPorts := s.opts.MaxFingerprintPorts
 	if req.MaxFingerprintPorts > 0 {
@@ -112,6 +124,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		}
 	}
 	var fingerprintedCount int32
+	portLimiter := getPortRateLimiter(portRateLimit)
 
 	// jobs 负责分发待扫描端口，results 收集每个端口的探测结果。
 	// 两者长度都按端口总数预分配，尽量降低 goroutine 间阻塞。
@@ -121,7 +134,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 
 	// 端口级并发 Worker 池：
 	// 每个 worker 从 jobs 中读取一个端口并执行一次探测，直到队列耗尽或 ctx 被取消。
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < portConcurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -130,6 +143,9 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 				case <-ctx.Done():
 					return
 				default:
+				}
+				if err := waitPortRateLimit(ctx, portLimiter); err != nil {
+					return
 				}
 				var r PortResult
 				switch req.Protocol {
@@ -220,7 +236,13 @@ func (s *Scanner) Probe(ctx context.Context, target string, port int, protocol P
 }
 
 // DetectHomepage 探测单个 URL，并返回标准化首页元信息。
+// 默认返回完整 body，不返回 headers。
 func (s *Scanner) DetectHomepage(ctx context.Context, rawURL string) (*HomepageResult, error) {
+	return s.DetectHomepageWithOptions(ctx, rawURL, HomepageOptions{})
+}
+
+// DetectHomepageWithOptions 探测单个 URL，并允许控制 headers/body 的返回粒度。
+func (s *Scanner) DetectHomepageWithOptions(ctx context.Context, rawURL string, opts HomepageOptions) (*HomepageResult, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -230,15 +252,31 @@ func (s *Scanner) DetectHomepage(ctx context.Context, rawURL string) (*HomepageR
 	if page.Http.StatusCode == 0 || page.Http.Body == "" {
 		return nil, errors.New("homepage not reachable")
 	}
+	body := achieve.SanitizeUTF8(page.Http.Body)
+	if opts.MaxBodyBytes > 0 && len(body) > opts.MaxBodyBytes {
+		body = body[:opts.MaxBodyBytes]
+	}
+	headerMap := ""
+	if opts.IncludeHeaders {
+		headerMap = buildHomepageHeaderMap(page.Http.StatusCode, page.Http.ResponseHeaders)
+	}
 	return &HomepageResult{
-		URL:           rawURL,
-		Title:         achieve.SanitizeUTF8(page.Http.Title),
-		StatusCode:    page.Http.StatusCode,
-		ContentLength: page.Http.ContentLength,
-		Server:        achieve.SanitizeUTF8(page.Http.Server),
-		HTMLHash:      achieve.SanitizeUTF8(page.Http.HTMLHash),
-		FaviconHash:   achieve.SanitizeUTF8(page.Http.Favicon.Hash),
-		ICP:           achieve.SanitizeUTF8(page.Http.ICP),
+		URL:         rawURL,
+		Title:       achieve.SanitizeUTF8(page.Http.Title),
+		HTMLHash:    achieve.SanitizeUTF8(page.Http.HTMLHash),
+		FaviconHash: achieve.SanitizeUTF8(page.Http.Favicon.Hash),
+		ICP:         achieve.SanitizeUTF8(page.Http.ICP),
+		Response: HomepageResponse{
+			HeaderMap: headerMap,
+			Header: HomepageResponseHeader{
+				StatusCode:    page.Http.StatusCode,
+				ContentLength: page.Http.ContentLength,
+				ContentType:   achieve.SanitizeUTF8(page.Http.ContentType),
+				Server:        achieve.SanitizeUTF8(page.Http.Server),
+				RedirectChain: sanitizeStringSlice(page.Http.RedirectChain),
+			},
+			Body: body,
+		},
 	}, nil
 }
 
@@ -446,8 +484,8 @@ func moduleRootDir() (string, error) {
 // 这些值体现的是“资产探测优先”的默认策略：中等并发、较短超时、默认关闭弱口令探测、
 // 指纹识别做限流、并默认开启蜜罐判定阈值。
 func applyDefaults(opts *Options) {
-	if opts.Concurrency <= 0 {
-		opts.Concurrency = 200
+	if opts.PortConcurrency <= 0 {
+		opts.PortConcurrency = 200
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 2 * time.Second
@@ -463,6 +501,38 @@ func applyDefaults(opts *Options) {
 	}
 	if opts.HoneypotOpenRatio <= 0 {
 		opts.HoneypotOpenRatio = 0.85
+	}
+}
+
+func getPortRateLimiter(rate int) *portRateLimiter {
+	if rate <= 0 {
+		return nil
+	}
+	portLimiterMu.Lock()
+	defer portLimiterMu.Unlock()
+
+	if limiter, ok := portLimiterByRate[rate]; ok {
+		return limiter
+	}
+
+	interval := time.Second / time.Duration(rate)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	limiter := &portRateLimiter{ticker: time.NewTicker(interval)}
+	portLimiterByRate[rate] = limiter
+	return limiter
+}
+
+func waitPortRateLimit(ctx context.Context, limiter *portRateLimiter) error {
+	if limiter == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-limiter.ticker.C:
+		return nil
 	}
 }
 
@@ -638,6 +708,32 @@ func runDirBrute(home HomepageResult, opts *DirBruteOptions) []PathResult {
 	return out
 }
 
+func buildHomepageHeaderMap(statusCode int, headers map[string][]string) string {
+	if len(headers) == 0 && statusCode == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	if statusCode > 0 {
+		builder.WriteString(fmt.Sprintf("HTTP %d\n", statusCode))
+	}
+	for _, key := range keys {
+		values := headers[key]
+		for _, value := range values {
+			builder.WriteString(key)
+			builder.WriteString(": ")
+			builder.WriteString(achieve.SanitizeUTF8(value))
+			builder.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
 // resolveDictFile 将爆破级别映射到内置字典文件，或使用自定义字典文件。
 func resolveDictFile(opts *DirBruteOptions) (string, error) {
 	if opts == nil {
@@ -714,6 +810,24 @@ func splitAndCleanDNS(s string) []string {
 			continue
 		}
 		out = append(out, achieve.SanitizeUTF8(item))
+	}
+	return out
+}
+
+func sanitizeStringSlice(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = achieve.SanitizeUTF8(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

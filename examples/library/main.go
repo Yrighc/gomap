@@ -12,21 +12,26 @@ import (
 
 func main() {
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
-		Concurrency:    300,
-		Timeout:        3 * time.Second,
-		DetectHomepage: true,
+		PortConcurrency: 200,
+		PortRateLimit:   3000,
+		Timeout:         3 * time.Second,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := runPortExample(scanner); err != nil {
-		log.Fatal(err)
-	}
+	//if err := runPortExample(scanner); err != nil {
+	//	log.Fatal(err)
+	//}
 
 	//if err := runHomepageExample(scanner); err != nil {
 	//	log.Fatal(err)
 	//}
+
+	if err := runDetectHomepageWithOptions(scanner); err != nil {
+		log.Fatal(err)
+	}
+
 	//if err := runDirExample(scanner); err != nil {
 	//	log.Fatal(err)
 	//}
@@ -34,15 +39,18 @@ func main() {
 
 func runPortExample(scanner *assetprobe.Scanner) error {
 	result, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-		Target:      "pbc.cntd.org.cn",
-		PortSpec:    "1-65535",
-		Protocol:    assetprobe.ProtocolTCP,
-		Concurrency: 10000,
+		Target:   "scanme.nmap.org",
+		PortSpec: "22,80,443",
+		Protocol: assetprobe.ProtocolTCP,
+
+		PortConcurrency: 100,
+		PortRateLimit:   1000,
 	})
 	if err != nil {
 		return err
 	}
 
+	fmt.Println("== Port Example ==")
 	toJSON, err := result.ToJSON(true)
 	fmt.Println(string(toJSON))
 	return nil
@@ -60,6 +68,23 @@ func runHomepageExample(scanner *assetprobe.Scanner) error {
 	return nil
 }
 
+func runDetectHomepageWithOptions(scanner *assetprobe.Scanner) error {
+	result, err := scanner.DetectHomepageWithOptions(
+		context.Background(),
+		"http://pbc.cntd.org.cn:56997",
+		assetprobe.HomepageOptions{
+			IncludeHeaders: true,
+			MaxBodyBytes:   0,
+		})
+	if err != nil {
+		return nil
+	}
+	out, _ := result.ToJSON(true)
+
+	fmt.Println(string(out))
+	return nil
+}
+
 func runDirExample(scanner *assetprobe.Scanner) error {
 	result, err := scanner.ScanDirectories(context.Background(), "https://example.com", assetprobe.DirBruteOptions{
 		Enable:      true,
@@ -72,7 +97,7 @@ func runDirExample(scanner *assetprobe.Scanner) error {
 	}
 
 	fmt.Println("== Dir Example ==")
-	out, _ := json.MarshalIndent(result, "", "  ")
+	out, _ := result.ToJSON(true)
 	fmt.Println(string(out))
 	return nil
 }

@@ -55,13 +55,16 @@ func runPort(args []string) {
 		fs.PrintDefaults()
 		fmt.Println()
 		fmt.Println("示例:")
-		fmt.Println("  gomap port -target example.com -ports 80,443,1-1024")
+		fmt.Println("  gomap port -target example.com -ports 80,443,1-1024 -c 200 -rate 3000")
 	}
 	target := fs.String("target", "", "[必选，和 -ips 二选一] 扫描目标 IP 或域名")
 	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
 	ports := fs.String("ports", "80,443", "[可选] 端口表达式，例如 80,443,1-1024")
 	proto := fs.String("proto", "tcp", "[可选] 扫描协议: tcp|udp")
-	rate := fs.Int("rate", 200, "[可选] 并发数")
+	portConcurrency := fs.Int("concurrency", 200, "[可选] 端口扫描并发数")
+	portConcurrencyShort := fs.Int("c", 200, "[可选] 端口扫描并发数")
+	portRateLimit := fs.Int("ratelimit", 0, "[可选] 端口扫描全局速率限制（每秒）")
+	portRateLimitShort := fs.Int("rate", 0, "[可选] 端口扫描全局速率限制（每秒）")
 	timeout := fs.Int("timeout", 2, "[可选] 超时秒数")
 	maxFingerprintPorts := fs.Int("max-fp", 50, "[可选] 最多做服务识别的开放端口数")
 	maxFingerprintPortsLong := fs.Int("max-fingerprint-ports", 50, "[可选] 最多做服务识别的开放端口数")
@@ -91,12 +94,28 @@ func runPort(args []string) {
 		fmt.Fprintln(os.Stderr, "honeypot-open-ratio 必须在 (0,1] 范围内，例如 0.85")
 		os.Exit(1)
 	}
+	finalPortConcurrency := *portConcurrency
+	if *portConcurrencyShort != 200 {
+		finalPortConcurrency = *portConcurrencyShort
+	}
+	if finalPortConcurrency <= 0 {
+		fmt.Fprintln(os.Stderr, "concurrency 必须大于 0")
+		os.Exit(1)
+	}
+	finalPortRateLimit := *portRateLimit
+	if *portRateLimitShort > 0 {
+		finalPortRateLimit = *portRateLimitShort
+	}
+	if finalPortRateLimit < 0 {
+		fmt.Fprintln(os.Stderr, "ratelimit 不能小于 0")
+		os.Exit(1)
+	}
 
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
-		Concurrency:    *rate,
-		Timeout:        time.Duration(*timeout) * time.Second,
-		DetectHomepage: false,
-		ConsoleLog:     *verbose,
+		PortConcurrency: finalPortConcurrency,
+		PortRateLimit:   finalPortRateLimit,
+		Timeout:         time.Duration(*timeout) * time.Second,
+		ConsoleLog:      *verbose,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -134,6 +153,8 @@ func runPort(args []string) {
 			Target:                t,
 			PortSpec:              *ports,
 			Protocol:              protocol,
+			PortConcurrency:       finalPortConcurrency,
+			PortRateLimit:         finalPortRateLimit,
 			MaxFingerprintPorts:   finalMaxFingerprintPorts,
 			HoneypotOpenThreshold: *honeypotOpenThreshold,
 			HoneypotOpenRatio:     *honeypotOpenRatio,
@@ -191,8 +212,9 @@ func runWeb(args []string) {
 		fmt.Println("  gomap web -url https://example.com")
 	}
 	rawURL := fs.String("url", "", "[必选] 要识别的站点 URL，例如 https://example.com")
-	rate := fs.Int("rate", 100, "[可选] 并发数（保留参数，影响 scanner 初始化）")
 	timeout := fs.Int("timeout", 5, "[可选] 超时秒数")
+	includeHeaders := fs.Bool("include-headers", false, "[可选] 返回响应头")
+	maxBodyBytes := fs.Int("max-body", 0, "[可选] 返回体最大字节数，0 表示完整 body")
 	enableCSV := fs.Bool("csv", false, "[可选] 将识别结果写入 logs/web.csv")
 	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
@@ -208,19 +230,24 @@ func runWeb(args []string) {
 		fmt.Fprintln(os.Stderr, "url 不能为空，例如: gomap web -url https://example.com")
 		os.Exit(1)
 	}
+	if *maxBodyBytes < 0 {
+		fmt.Fprintln(os.Stderr, "max-body 不能小于 0")
+		os.Exit(1)
+	}
 
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
-		Concurrency:    *rate,
-		Timeout:        time.Duration(*timeout) * time.Second,
-		DetectHomepage: true,
-		ConsoleLog:     *verbose,
+		Timeout:    time.Duration(*timeout) * time.Second,
+		ConsoleLog: *verbose,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	page, err := scanner.DetectHomepage(context.Background(), *rawURL)
+	page, err := scanner.DetectHomepageWithOptions(context.Background(), *rawURL, assetprobe.HomepageOptions{
+		IncludeHeaders: *includeHeaders,
+		MaxBodyBytes:   *maxBodyBytes,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -242,9 +269,9 @@ func runWeb(args []string) {
 			time.Now().Format(csvTimeLayout),
 			page.URL,
 			page.Title,
-			strconv.Itoa(page.StatusCode),
-			strconv.FormatInt(page.ContentLength, 10),
-			page.Server,
+			strconv.Itoa(page.Response.Header.StatusCode),
+			strconv.FormatInt(page.Response.Header.ContentLength, 10),
+			page.Response.Header.Server,
 			page.HTMLHash,
 			page.FaviconHash,
 			page.ICP,
@@ -272,7 +299,6 @@ func runDir(args []string) {
 		fmt.Println("  gomap dir -url https://example.com -dict normal -dict-max 500")
 	}
 	rawURL := fs.String("url", "", "[必选] 目录爆破目标 URL，例如 https://example.com")
-	rate := fs.Int("rate", 200, "[可选] 并发数")
 	timeout := fs.Int("timeout", 3, "[可选] 超时秒数")
 	dictLevel := fs.String("dict", "simple", "[可选] 目录爆破字典级别: simple|normal|diff")
 	dictFile := fs.String("dict-file", "", "[可选] 自定义目录爆破字典文件路径")
@@ -290,10 +316,8 @@ func runDir(args []string) {
 	}
 
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
-		Concurrency:    *rate,
-		Timeout:        time.Duration(*timeout) * time.Second,
-		DetectHomepage: true,
-		ConsoleLog:     *verbose,
+		Timeout:    time.Duration(*timeout) * time.Second,
+		ConsoleLog: *verbose,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -344,7 +368,7 @@ func runDir(args []string) {
 				strconv.Itoa(res.Port),
 				res.Homepage.URL,
 				res.Homepage.Title,
-				strconv.Itoa(res.Homepage.StatusCode),
+				strconv.Itoa(res.Homepage.Response.Header.StatusCode),
 				"", "", "", "", "",
 			}
 			if err := csvWriter.Write(row); err != nil {
@@ -359,7 +383,7 @@ func runDir(args []string) {
 					strconv.Itoa(res.Port),
 					res.Homepage.URL,
 					res.Homepage.Title,
-					strconv.Itoa(res.Homepage.StatusCode),
+					strconv.Itoa(res.Homepage.Response.Header.StatusCode),
 					path.URL,
 					path.Title,
 					strconv.Itoa(path.StatusCode),

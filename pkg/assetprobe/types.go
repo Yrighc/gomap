@@ -10,14 +10,14 @@ const (
 )
 
 type Options struct {
-	// Concurrency 控制端口扫描阶段的并发 worker 数量。
-	Concurrency int
+	// PortConcurrency 控制端口扫描阶段的并发 worker 数量。
+	PortConcurrency int
+	// PortRateLimit 控制端口扫描的全局速率限制，单位为每秒发起的探测次数。
+	PortRateLimit int
 	// Timeout 是单次网络探测的基础超时时间。
 	Timeout time.Duration
 	// DisableWeakPassword 控制是否关闭弱口令探测逻辑。
 	DisableWeakPassword bool
-	// DetectHomepage 控制是否对 HTTP 类端口执行首页识别。
-	DetectHomepage bool
 	// MaxFingerprintPorts 限制最多对多少个开放端口做深度服务指纹识别。
 	MaxFingerprintPorts int
 	// HoneypotOpenThreshold 是疑似蜜罐判定所需的最小开放端口数量阈值。
@@ -43,8 +43,10 @@ type ScanRequest struct {
 	PortSpec string
 	// Protocol 指定本次扫描使用 tcp 还是 udp。
 	Protocol Protocol
-	// Concurrency 用于覆盖 Scanner 默认并发配置。
-	Concurrency int
+	// PortConcurrency 用于覆盖 Scanner 默认端口扫描并发配置。
+	PortConcurrency int
+	// PortRateLimit 用于覆盖 Scanner 默认端口扫描全局速率限制。
+	PortRateLimit int
 	// Timeout 用于覆盖 Scanner 默认超时配置。
 	Timeout time.Duration
 	// MaxFingerprintPorts 用于覆盖最多参与服务识别的开放端口数量。
@@ -103,18 +105,43 @@ type HomepageResult struct {
 	URL string
 	// Title 是页面标题。
 	Title string
-	// StatusCode 是首页 HTTP 状态码。
-	StatusCode int
-	// ContentLength 是首页响应体长度。
-	ContentLength int64
-	// Server 是响应头中的服务端标识。
-	Server string
 	// HTMLHash 是首页 HTML 内容指纹。
 	HTMLHash string
 	// FaviconHash 是站点 favicon 指纹。
 	FaviconHash string
 	// ICP 是首页提取出的备案信息。
 	ICP string
+	// Response 是首页的原始响应信息。
+	Response HomepageResponse
+}
+
+type HomepageResponse struct {
+	// HeaderMap 是格式化后的完整响应头文本，便于前端直接整体展示。
+	HeaderMap string
+	// Header 是首页响应头及状态元信息。
+	Header HomepageResponseHeader
+	// Body 是首页响应体原文；默认返回完整内容，可通过选项截断。
+	Body string
+}
+
+type HomepageResponseHeader struct {
+	// StatusCode 是首页 HTTP 状态码。
+	StatusCode int
+	// ContentLength 是首页响应体长度。
+	ContentLength int64
+	// ContentType 是响应头中的 Content-Type。
+	ContentType string
+	// Server 是响应头中的服务端标识。
+	Server string
+	// RedirectChain 是请求过程中经历的重定向链。
+	RedirectChain []string
+}
+
+type HomepageOptions struct {
+	// IncludeHeaders 控制是否在结果中生成 HeaderMap。
+	IncludeHeaders bool
+	// MaxBodyBytes 控制返回体的最大长度；小于等于 0 表示返回完整 body。
+	MaxBodyBytes int
 }
 
 type DirResult struct {

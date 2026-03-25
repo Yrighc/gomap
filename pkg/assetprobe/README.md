@@ -15,8 +15,9 @@
 import "github.com/yrighc/gomap/pkg/assetprobe"
 
 scanner, err := assetprobe.NewScanner(assetprobe.Options{
-    Concurrency: 300,
-    Timeout:     2 * time.Second,
+    PortConcurrency: 300,
+    PortRateLimit:   3000,
+    Timeout:         2 * time.Second,
 })
 if err != nil {
     panic(err)
@@ -24,16 +25,21 @@ if err != nil {
 
 // 端口扫描
 res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-    Target:   "example.com",
-    PortSpec: "80,443,1-1024",
-    Protocol: assetprobe.ProtocolTCP,
+    Target:          "example.com",
+    PortSpec:        "80,443,1-1024",
+    Protocol:        assetprobe.ProtocolTCP,
+    PortConcurrency: 100,
+    PortRateLimit:   1000,
 })
 if err != nil {
     panic(err)
 }
 
 // 首页识别
-web, err := scanner.DetectHomepage(context.Background(), "https://example.com")
+web, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
+    IncludeHeaders: true,
+    MaxBodyBytes:   4096,
+})
 if err != nil {
     panic(err)
 }

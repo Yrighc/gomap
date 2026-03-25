@@ -107,7 +107,8 @@ go run ./cmd \
   -target example.com \
   -ports 80,443,1-1024 \
   -proto tcp \
-  -rate 200 \
+  -c 200 \
+  -rate 3000 \
   -timeout 2 \
   -max-fp 50
 ```
@@ -115,7 +116,28 @@ go run ./cmd \
 ### 5.2 首页识别（web）
 
 ```bash
-go run ./cmd web -url https://example.com
+go run ./cmd web -url https://example.com -include-headers -max-body 4096
+```
+
+如果你要验证 `RedirectChain`，可以先启动本地测试服务：
+
+```bash
+go run ./examples/redirect_server
+```
+
+再执行：
+
+```bash
+go run ./cmd web -url http://127.0.0.1:18080 -include-headers
+```
+
+预期返回结果中的 `Response.Header.RedirectChain` 会包含：
+
+```json
+[
+  "http://127.0.0.1:18080/login",
+  "http://127.0.0.1:18080/home"
+]
 ```
 
 ### 5.3 目录爆破（dir）
@@ -132,6 +154,10 @@ go run ./cmd \
 参数说明：
 - `-proto`: `tcp` 或 `udp`
 - `-ips`: 多目标，逗号分隔（与 `-target` 二选一）
+- `-c`, `-concurrency`: 端口扫描并发数
+- `-rate`, `-ratelimit`: 端口扫描全局速率限制（每秒）
+- `-include-headers`: `web` 模式返回响应头
+- `-max-body`: `web` 模式返回体最大字节数，`0` 表示完整 body
 - `-max-fp`: 最多做服务识别的开放端口数（默认 `50`，也支持 `-max-fingerprint-ports`）
 - `-honeypot-open-threshold`: 疑似蜜罐判定最小开放端口数（默认 `100`）
 - `-honeypot-open-ratio`: 疑似蜜罐判定开放占比阈值（默认 `0.85`，范围 `0~1`）
@@ -164,17 +190,20 @@ import (
 
 func main() {
     scanner, err := assetprobe.NewScanner(assetprobe.Options{
-        Concurrency: 300,
-        Timeout:     2 * time.Second,
+        PortConcurrency: 300,
+        PortRateLimit:   3000,
+        Timeout:         2 * time.Second,
     })
     if err != nil {
         panic(err)
     }
 
     res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-        Target:   "example.com",
-        PortSpec: "80,443,1-1024",
-        Protocol: assetprobe.ProtocolTCP,
+        Target:          "example.com",
+        PortSpec:        "80,443,1-1024",
+        Protocol:        assetprobe.ProtocolTCP,
+        PortConcurrency: 100,
+        PortRateLimit:   1000,
     })
     if err != nil {
         panic(err)
@@ -187,12 +216,15 @@ func main() {
 ### 6.2 首页识别调用
 
 ```go
-page, err := scanner.DetectHomepage(context.Background(), "https://example.com")
+page, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
+    IncludeHeaders: true,
+    MaxBodyBytes:   4096,
+})
 if err != nil {
     panic(err)
 }
 
-fmt.Println(page.Title, page.StatusCode, page.Server)
+fmt.Println(page.Title, page.Response.Header.StatusCode, page.Response.Header.Server, len(page.Response.Body))
 ```
 
 ### 6.3 目录爆破调用
@@ -252,6 +284,8 @@ func (s *Service) Run(ctx context.Context, target string) (*assetprobe.ScanResul
 针对“全端口伪开放/蜜罐”类目标，扫描器默认策略：
 - 当开放端口非常多时，仅对前 `50` 个开放端口做服务指纹识别，其余端口仍标记为 `open`
 - 当满足 `开放端口数 >= 100` 且 `开放占比 >= 85%` 时，结果中会标记 `Meta.SuspectedHoneypot=true`
+- `concurrency` 控制同时运行多少个端口探测任务
+- `ratelimit` 控制整个进程内端口探测的起始速率上限
 
 CSV 输出说明：
 - `gomap port -csv` -> `logs/port.csv`
@@ -285,7 +319,7 @@ go test ./...
 go run ./examples/library
 
 # 主 CLI
-go run ./cmd -target example.com -ports 80,443
+go run ./cmd port -target example.com -ports 80,443 -c 200 -rate 3000
 ```
 
 ## 10. 版本发布与 Changelog
@@ -316,5 +350,5 @@ CD 发布说明（`.github/workflows/release.yml`）：
 ## 11. 注意事项
 
 - 仅在授权范围内进行探测
-- 高并发与大字典爆破会显著增加目标压力，建议控制 `rate/dict-concurrency`
+- 高并发与高探测速率会显著增加目标压力，建议控制 `c/rate/dict-concurrency`
 - 字典文件属于可选资源，可按你的场景裁剪或替换
