@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0-alpha-1](https://github.com/Yrighc/gomap/compare/v0.3.1-alpha-1...v0.4.0-alpha-1) (2026-03-25)
+
+
+### Features
+
+* **assetprobe:** 重构端口与首页扫描结果模型 ([e23e40b](https://github.com/Yrighc/gomap/commit/e23e40b7cc67b7f22d73a6ddfa360dff663fcc2f))
+
 ## [0.3.1-alpha-1](https://github.com/Yrighc/gomap/compare/v0.3.0-alpha-1...v0.3.1-alpha-1) (2026-03-20)
 
 
