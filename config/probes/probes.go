@@ -254,6 +254,19 @@ func ProbesMatchFromFile(serviceProbesPath string) error {
 	return nil
 }
 
+func ProbesMatchFromBytes(data []byte, source string) error {
+	var err error
+	common.NmapData, err = parseServiceProbes(string(data))
+	if err != nil {
+		return err
+	}
+	if source == "" {
+		source = "embedded"
+	}
+	logger.Infof("Probes loaded successfully from %s", source)
+	return nil
+}
+
 func firstExistingPath(candidates ...string) string {
 	for _, p := range candidates {
 		if p == "" {

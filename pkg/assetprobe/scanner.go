@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	appassets "github.com/yrighc/gomap/app"
 	"github.com/yrighc/gomap/config/logger"
 	"github.com/yrighc/gomap/config/probes"
 	"github.com/yrighc/gomap/config/service"
@@ -449,22 +450,12 @@ func initAssets(opts Options) error {
 		MaxSize:    50,
 	})
 
-	root, err := moduleRootDir()
-	if err != nil {
-		return err
-	}
 	probesPath := opts.ProbesFile
-	if probesPath == "" {
-		probesPath = filepath.Join(root, "app", "gomap-service-probes")
-	}
 	servicesPath := opts.ServicesFile
-	if servicesPath == "" {
-		servicesPath = filepath.Join(root, "app", "gomap-services")
-	}
-	if err := probes.ProbesMatchFromFile(probesPath); err != nil {
+	if err := loadProbeAssets(probesPath); err != nil {
 		return fmt.Errorf("load probes failed: %w", err)
 	}
-	if err := service.ServiceStorageFromFile(servicesPath); err != nil {
+	if err := loadServiceAssets(servicesPath); err != nil {
 		return fmt.Errorf("load services failed: %w", err)
 	}
 	probes.ExtractAllHTTPRules()
@@ -631,10 +622,13 @@ func parsePortSpec(spec string) ([]int, error) {
 // 通常意味着是统一跳转页/兜底页，不作为有效目录结果返回。
 func runDirBrute(home HomepageResult, opts *DirBruteOptions) []PathResult {
 	dictFile, err := resolveDictFile(opts)
-	if err != nil {
-		return nil
+	var paths []string
+	if err == nil && dictFile != "" {
+		paths, err = readDictLines(dictFile, opts.MaxPaths)
 	}
-	paths, err := readDictLines(dictFile, opts.MaxPaths)
+	if err != nil || len(paths) == 0 {
+		paths, err = readBuiltinDictLines(opts.Level, opts.MaxPaths)
+	}
 	if err != nil || len(paths) == 0 {
 		return nil
 	}
@@ -742,40 +736,36 @@ func resolveDictFile(opts *DirBruteOptions) (string, error) {
 	if strings.TrimSpace(opts.CustomDictFile) != "" {
 		return opts.CustomDictFile, nil
 	}
-	root, err := moduleRootDir()
-	if err != nil {
-		return "", err
-	}
 	level := opts.Level
 	if level == "" {
 		level = DirBruteSimple
 	}
-	switch level {
-	case DirBruteSimple:
-		path := filepath.Join(root, "app", "dict-simple.txt")
-		if _, err := os.Stat(path); err != nil {
-			return "", errors.New("simple dictionary file not found")
+	root, err := moduleRootDir()
+	if err == nil {
+		var name string
+		switch level {
+		case DirBruteSimple:
+			name = "dict-simple.txt"
+		case DirBruteNormal:
+			name = "dict-normal.txt"
+		case DirBruteDiff:
+			name = "dict-diff.txt"
+		default:
+			return "", fmt.Errorf("unsupported dir brute level: %s", level)
 		}
-		return path, nil
-	case DirBruteNormal:
-		path := filepath.Join(root, "app", "dict-normal.txt")
-		if _, err := os.Stat(path); err != nil {
-			return "", errors.New("normal dictionary file not found")
+		path := filepath.Join(root, "app", name)
+		if _, statErr := os.Stat(path); statErr == nil {
+			return path, nil
 		}
-		return path, nil
-	case DirBruteDiff:
-		path := filepath.Join(root, "app", "dict-diff.txt")
-		if _, err := os.Stat(path); err != nil {
-			return "", errors.New("diff dictionary file not found")
-		}
-		return path, nil
-	default:
-		return "", fmt.Errorf("unsupported dir brute level: %s", level)
 	}
+	return "", os.ErrNotExist
 }
 
 // readDictLines 读取字典行，支持按 max 限制最大加载条数。
 func readDictLines(path string, max int) ([]string, error) {
+	if path == "" {
+		return nil, os.ErrNotExist
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -784,6 +774,67 @@ func readDictLines(path string, max int) ([]string, error) {
 
 	out := make([]string, 0, 1024)
 	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+		if max > 0 && len(out) >= max {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func loadProbeAssets(path string) error {
+	if strings.TrimSpace(path) != "" {
+		return probes.ProbesMatchFromFile(path)
+	}
+	if root, err := moduleRootDir(); err == nil {
+		candidate := filepath.Join(root, "app", "gomap-service-probes")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return probes.ProbesMatchFromFile(candidate)
+		}
+	}
+	data, err := appassets.ServiceProbes()
+	if err != nil {
+		return err
+	}
+	return probes.ProbesMatchFromBytes(data, "embedded app/gomap-service-probes")
+}
+
+func loadServiceAssets(path string) error {
+	if strings.TrimSpace(path) != "" {
+		return service.ServiceStorageFromFile(path)
+	}
+	if root, err := moduleRootDir(); err == nil {
+		candidate := filepath.Join(root, "app", "gomap-services")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return service.ServiceStorageFromFile(candidate)
+		}
+	}
+	data, err := appassets.Services()
+	if err != nil {
+		return err
+	}
+	return service.ServiceStorageFromBytes(data, "embedded app/gomap-services")
+}
+
+func readBuiltinDictLines(level DirBruteLevel, max int) ([]string, error) {
+	if level == "" {
+		level = DirBruteSimple
+	}
+	data, err := appassets.Dict(string(level))
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, 1024)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
