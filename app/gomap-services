@@ -12208,8 +12208,8 @@ xmltec-xmlmail	9091/tcp	0.000304
 xmltec-xmlmail	9091/udp	0.000330
 kafka	9092/tcp	0.000000	# Xml-Ipc Server Reg
 XmlIpcRegSvc	9092/udp	0.000000	# Xml-Ipc Server Reg
-copycat	9093/tcp	0.000000	# Copycat database replication service
-Kafka   9094/tcp	0.000000	# Copycat database replication service
+kafka	9093/tcp	0.000000	# Apache Kafka SSL broker
+kafka	9094/tcp	0.000000	# Apache Kafka broker
 unknown	9098/tcp	0.000152
 unknown	9098/udp	0.000330
 unknown	9099/tcp	0.000228

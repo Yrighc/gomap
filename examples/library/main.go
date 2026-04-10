@@ -20,17 +20,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//if err := runPortExample(scanner); err != nil {
-	//	log.Fatal(err)
-	//}
+	if err := runPortExample(scanner); err != nil {
+		log.Fatal(err)
+	}
 
 	//if err := runHomepageExample(scanner); err != nil {
 	//	log.Fatal(err)
 	//}
 
-	if err := runDetectHomepageWithOptions(scanner); err != nil {
-		log.Fatal(err)
-	}
+	//if err := runDetectHomepageWithOptions(scanner); err != nil {
+	//	log.Fatal(err)
+	//}
 
 	//if err := runDirExample(scanner); err != nil {
 	//	log.Fatal(err)
@@ -39,12 +39,12 @@ func main() {
 
 func runPortExample(scanner *assetprobe.Scanner) error {
 	result, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-		Target:   "scanme.nmap.org",
-		PortSpec: "22,80,443",
+		Target:   "42.194.159.250",
+		PortSpec: "80",
 		Protocol: assetprobe.ProtocolTCP,
 
-		PortConcurrency: 100,
-		PortRateLimit:   1000,
+		PortConcurrency: 5000,
+		PortRateLimit:   7000,
 	})
 	if err != nil {
 		return err

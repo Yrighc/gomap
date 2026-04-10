@@ -115,7 +115,7 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 	// 判断是否是 SSL 端口
 	// fmt.Println("SSL length", len(common.SslPortsMap))
 
-	if common.SslPortsMap[port] {
+	if shouldTreatAsSSLPort(port) {
 		for _, probeRule := range result {
 			if probeRule.Protocol != "TCP" {
 				continue
@@ -173,6 +173,11 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 				}
 			}
 		}
+		if service == "" && common.ServiceMap[port]["tcp"] != "" {
+			subject, dns = separate.ParseHTTPS(ip, port)
+			service = common.ServiceMap[port]["tcp"] + "/ssl?"
+			return banner, subject, dns, service, version, weak
+		}
 	}
 
 	// 非 SSL 处理
@@ -211,6 +216,21 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 		}
 	}
 	return banner, subject, dns, service, version, weak
+}
+
+func shouldTreatAsSSLPort(port int) bool {
+	if common.SslPortsMap[port] {
+		return true
+	}
+
+	switch port {
+	case 9093:
+		// Kafka 常见的 TLS 端口；很多场景不会主动返回可匹配 banner，
+		// 但 TLS 握手本身是可成立的，因此这里强制走 TLS 识别分支。
+		return true
+	default:
+		return false
+	}
 }
 
 func HttpOnlyPortServer(ip string, port int, buf []byte) (string, string, string, string, string) {
