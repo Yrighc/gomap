@@ -213,7 +213,32 @@ func main() {
 }
 ```
 
-### 6.2 首页识别调用
+### 6.2 多目标端口扫描调用
+
+```go
+batch, err := scanner.ScanTargets(context.Background(), []string{
+    "192.168.1.10",
+    "192.168.1.11",
+    "example.com",
+}, assetprobe.ScanCommonOptions{
+    PortSpec:        "80,443",
+    Protocol:        assetprobe.ProtocolTCP,
+    PortConcurrency: 300, // 多目标时表示全局总并发
+})
+if err != nil {
+    panic(err)
+}
+
+for _, item := range batch.Results {
+    if item.Error != "" {
+        fmt.Println(item.Target, "scan failed:", item.Error)
+        continue
+    }
+    fmt.Println(item.Result.Target, item.Result.Meta.OpenPorts)
+}
+```
+
+### 6.3 首页识别调用
 
 ```go
 page, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
@@ -227,7 +252,7 @@ if err != nil {
 fmt.Println(page.Title, page.Response.Header.StatusCode, page.Response.Header.Server, len(page.Response.Body))
 ```
 
-### 6.3 目录爆破调用
+### 6.4 目录爆破调用
 
 ```go
 dirs, err := scanner.ScanDirectories(context.Background(), "https://example.com", assetprobe.DirBruteOptions{
@@ -242,7 +267,7 @@ if err != nil {
 fmt.Println(dirs.Target, dirs.Port, len(dirs.Paths))
 ```
 
-### 6.4 依赖注入（DI）集成示例
+### 6.5 依赖注入（DI）集成示例
 
 适合在你的业务服务中抽象接口，便于测试替换：
 

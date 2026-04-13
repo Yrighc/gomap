@@ -84,3 +84,71 @@ func TestDetectHomepageWithOptions(t *testing.T) {
 		t.Fatalf("expected truncated body length 10, got %d", len(result.Response.Body))
 	}
 }
+
+func TestNormalizeTargets(t *testing.T) {
+	got := normalizeTargets([]string{" 127.0.0.1 ", "", "127.0.0.1", "example.com"})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(got))
+	}
+	if got[0] != "127.0.0.1" || got[1] != "example.com" {
+		t.Fatalf("unexpected target order: %#v", got)
+	}
+}
+
+func TestScanTargetsKeepsOrderAndPerTargetErrors(t *testing.T) {
+	scanner, err := NewScanner(Options{Timeout: 500 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{
+		"127.0.0.1",
+		"invalid.invalid",
+	}, ScanCommonOptions{
+		PortSpec: "1",
+		Protocol: ProtocolTCP,
+	})
+	if err != nil {
+		t.Fatalf("unexpected batch error: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 batch results, got %d", len(result.Results))
+	}
+	if result.Results[0].Target != "127.0.0.1" {
+		t.Fatalf("unexpected first target: %s", result.Results[0].Target)
+	}
+	if result.Results[0].Result == nil {
+		t.Fatal("expected first target result")
+	}
+	if result.Results[1].Target != "invalid.invalid" {
+		t.Fatalf("unexpected second target: %s", result.Results[1].Target)
+	}
+	if result.Results[1].Error == "" {
+		t.Fatal("expected second target error")
+	}
+}
+
+func TestScanTargetsReturnsResultsInInputOrder(t *testing.T) {
+	scanner, err := NewScanner(Options{Timeout: 500 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{
+		"example.com",
+		"127.0.0.1",
+	}, ScanCommonOptions{
+		PortSpec:        "1",
+		Protocol:        ProtocolTCP,
+		PortConcurrency: 4,
+	})
+	if err != nil {
+		t.Fatalf("unexpected batch error: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 batch results, got %d", len(result.Results))
+	}
+	if result.Results[0].Target != "example.com" || result.Results[1].Target != "127.0.0.1" {
+		t.Fatalf("unexpected result order: %#v", result.Results)
+	}
+}

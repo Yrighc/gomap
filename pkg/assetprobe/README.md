@@ -35,6 +35,20 @@ if err != nil {
     panic(err)
 }
 
+// 多目标端口扫描
+batch, err := scanner.ScanTargets(context.Background(), []string{
+    "192.168.1.10",
+    "192.168.1.11",
+    "example.com",
+}, assetprobe.ScanCommonOptions{
+    PortSpec:        "80,443,1-1024",
+    Protocol:        assetprobe.ProtocolTCP,
+    PortConcurrency: 300, // 多目标时表示全局总并发
+})
+if err != nil {
+    panic(err)
+}
+
 // 首页识别
 web, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
     IncludeHeaders: true,
@@ -54,7 +68,7 @@ if err != nil {
     panic(err)
 }
 
-_, _, _ = res, web, dirs
+_, _, _, _ = res, batch, web, dirs
 ```
 
 示例代码见：`examples/library/main.go`

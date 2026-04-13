@@ -57,6 +57,29 @@ type ScanRequest struct {
 	HoneypotOpenRatio float64
 }
 
+// ScanCommonOptions 定义批量目标扫描时共享的一组扫描参数。
+// 它与 ScanRequest 的区别在于不包含 Target，由 ScanTargets 单独接收目标列表。
+type ScanCommonOptions struct {
+	// Ports 是显式传入的端口列表。
+	Ports []int
+	// PortSpec 是形如 "80,443,1-1024" 的端口表达式。
+	PortSpec string
+	// Protocol 指定本次扫描使用 tcp 还是 udp。
+	Protocol Protocol
+	// PortConcurrency 用于覆盖 Scanner 默认端口扫描并发配置。
+	PortConcurrency int
+	// PortRateLimit 用于覆盖 Scanner 默认端口扫描全局速率限制。
+	PortRateLimit int
+	// Timeout 用于覆盖 Scanner 默认超时配置。
+	Timeout time.Duration
+	// MaxFingerprintPorts 用于覆盖最多参与服务识别的开放端口数量。
+	MaxFingerprintPorts int
+	// HoneypotOpenThreshold 用于覆盖疑似蜜罐判定的开放端口数量阈值。
+	HoneypotOpenThreshold int
+	// HoneypotOpenRatio 用于覆盖疑似蜜罐判定的开放占比阈值。
+	HoneypotOpenRatio float64
+}
+
 type ScanResult struct {
 	// Target 是请求中的原始目标。
 	Target string
@@ -68,6 +91,22 @@ type ScanResult struct {
 	Meta ScanMeta
 	// Ports 是最终返回的开放端口结果列表。
 	Ports []PortResult
+}
+
+// BatchScanResult 表示一次多目标扫描的聚合结果。
+type BatchScanResult struct {
+	// Results 按输入目标顺序返回每个目标的扫描结果或错误。
+	Results []TargetScanResult
+}
+
+// TargetScanResult 表示单个目标在批量扫描中的结果。
+type TargetScanResult struct {
+	// Target 是本次处理的原始目标。
+	Target string
+	// Result 是该目标的扫描结果；如果扫描失败则为 nil。
+	Result *ScanResult
+	// Error 是该目标扫描失败时的错误信息；成功时为空。
+	Error string
 }
 
 type ScanMeta struct {

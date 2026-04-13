@@ -110,7 +110,6 @@ func runPort(args []string) {
 		fmt.Fprintln(os.Stderr, "ratelimit 不能小于 0")
 		os.Exit(1)
 	}
-
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
 		PortConcurrency: finalPortConcurrency,
 		PortRateLimit:   finalPortRateLimit,
@@ -144,23 +143,33 @@ func runPort(args []string) {
 		defer csvWriter.Flush()
 	}
 
-	for _, t := range targets {
-		finalMaxFingerprintPorts := *maxFingerprintPorts
-		if *maxFingerprintPortsLong != 50 {
-			finalMaxFingerprintPorts = *maxFingerprintPortsLong
+	finalMaxFingerprintPorts := *maxFingerprintPorts
+	if *maxFingerprintPortsLong != 50 {
+		finalMaxFingerprintPorts = *maxFingerprintPortsLong
+	}
+
+	batchRes, err := scanner.ScanTargets(context.Background(), targets, assetprobe.ScanCommonOptions{
+		PortSpec:              *ports,
+		Protocol:              protocol,
+		PortConcurrency:       finalPortConcurrency,
+		PortRateLimit:         finalPortRateLimit,
+		Timeout:               time.Duration(*timeout) * time.Second,
+		MaxFingerprintPorts:   finalMaxFingerprintPorts,
+		HoneypotOpenThreshold: *honeypotOpenThreshold,
+		HoneypotOpenRatio:     *honeypotOpenRatio,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "batch scan finished with error: %v\n", err)
+	}
+
+	for _, item := range batchRes.Results {
+		if item.Error != "" {
+			fmt.Fprintf(os.Stderr, "scan %s failed: %s\n", item.Target, item.Error)
+			continue
 		}
-		res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
-			Target:                t,
-			PortSpec:              *ports,
-			Protocol:              protocol,
-			PortConcurrency:       finalPortConcurrency,
-			PortRateLimit:         finalPortRateLimit,
-			MaxFingerprintPorts:   finalMaxFingerprintPorts,
-			HoneypotOpenThreshold: *honeypotOpenThreshold,
-			HoneypotOpenRatio:     *honeypotOpenRatio,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "scan %s failed: %v\n", t, err)
+		res := item.Result
+		if res == nil {
+			fmt.Fprintf(os.Stderr, "scan %s failed: empty result\n", item.Target)
 			continue
 		}
 		output, _ := res.ToJSON(true)

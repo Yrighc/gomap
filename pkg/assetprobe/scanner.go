@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/url"
 	"os"
@@ -40,6 +41,23 @@ type Scanner struct {
 
 type portRateLimiter struct {
 	ticker *time.Ticker
+}
+
+type batchTargetContext struct {
+	index              int
+	target             string
+	resolvedIP         string
+	protocol           Protocol
+	timeout            time.Duration
+	fingerprintSlots   chan struct{}
+	fingerprintedCount int32
+	collected          []PortResult
+	mu                 sync.Mutex
+}
+
+type batchJob struct {
+	targetIndex int
+	port        int
 }
 
 // NewScanner 初始化探测所需资源（nmap 探针与服务字典），
@@ -216,6 +234,173 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		},
 		Ports: final,
 	}, nil
+}
+
+// ScanTargets 批量扫描多个目标，并复用同一组公共扫描参数。
+// 它会把所有 (target, port) 任务展开到同一个全局任务池中，由 PortConcurrency 控制总并发，
+// 并默认打乱执行顺序，以降低多目标顺序探测带来的规则化特征。
+//
+// 行为说明：
+// 1) 目标会先做去空、去重，并保持输入顺序用于最终结果输出
+// 2) 任务执行顺序会随机化，但返回结果仍按输入顺序组织
+// 3) 单目标失败不会影响其他目标，失败信息会写入对应 TargetScanResult.Error
+func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCommonOptions) (*BatchScanResult, error) {
+	normalized := normalizeTargets(targets)
+	if len(normalized) == 0 {
+		return nil, errors.New("targets is required")
+	}
+
+	if opts.Protocol == "" {
+		opts.Protocol = ProtocolTCP
+	}
+	ports, err := normalizePorts(opts.Ports, opts.PortSpec)
+	if err != nil {
+		return nil, err
+	}
+	if len(ports) == 0 {
+		return nil, errors.New("no valid ports")
+	}
+
+	timeout := s.opts.Timeout
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	portConcurrency := s.opts.PortConcurrency
+	if opts.PortConcurrency > 0 {
+		portConcurrency = opts.PortConcurrency
+	}
+	portRateLimit := s.opts.PortRateLimit
+	if opts.PortRateLimit > 0 {
+		portRateLimit = opts.PortRateLimit
+	}
+	maxFingerprintPorts := s.opts.MaxFingerprintPorts
+	if opts.MaxFingerprintPorts > 0 {
+		maxFingerprintPorts = opts.MaxFingerprintPorts
+	}
+	honeypotOpenThreshold := s.opts.HoneypotOpenThreshold
+	if opts.HoneypotOpenThreshold > 0 {
+		honeypotOpenThreshold = opts.HoneypotOpenThreshold
+	}
+	honeypotOpenRatio := s.opts.HoneypotOpenRatio
+	if opts.HoneypotOpenRatio > 0 {
+		honeypotOpenRatio = opts.HoneypotOpenRatio
+	}
+
+	results := make([]TargetScanResult, len(normalized))
+	contexts := make([]*batchTargetContext, len(normalized))
+	for i, target := range normalized {
+		results[i].Target = target
+		resolvedIP, resolveErr := resolveTarget(target)
+		if resolveErr != nil {
+			results[i].Error = resolveErr.Error()
+			continue
+		}
+
+		var fingerprintSlots chan struct{}
+		if opts.Protocol == ProtocolTCP && maxFingerprintPorts > 0 {
+			fingerprintSlots = make(chan struct{}, maxFingerprintPorts)
+			for j := 0; j < maxFingerprintPorts; j++ {
+				fingerprintSlots <- struct{}{}
+			}
+		}
+
+		contexts[i] = &batchTargetContext{
+			index:            i,
+			target:           target,
+			resolvedIP:       resolvedIP,
+			protocol:         opts.Protocol,
+			timeout:          timeout,
+			fingerprintSlots: fingerprintSlots,
+		}
+	}
+
+	jobs := make([]batchJob, 0, len(normalized)*len(ports))
+	for idx, targetCtx := range contexts {
+		if targetCtx == nil {
+			continue
+		}
+		for _, port := range ports {
+			jobs = append(jobs, batchJob{targetIndex: idx, port: port})
+		}
+	}
+	shuffleBatchJobs(jobs)
+
+	if portConcurrency <= 0 {
+		portConcurrency = 1
+	}
+	if portConcurrency > len(jobs) && len(jobs) > 0 {
+		portConcurrency = len(jobs)
+	}
+
+	jobCh := make(chan batchJob, len(jobs))
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+
+	portLimiter := getPortRateLimiter(portRateLimit)
+	var wg sync.WaitGroup
+	for i := 0; i < portConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := waitPortRateLimit(ctx, portLimiter); err != nil {
+					return
+				}
+
+				targetCtx := contexts[job.targetIndex]
+				if targetCtx == nil {
+					continue
+				}
+
+				var portResult PortResult
+				switch opts.Protocol {
+				case ProtocolUDP:
+					portResult = s.scanUDPPort(targetCtx.target, targetCtx.resolvedIP, job.port, timeout)
+				default:
+					portResult = s.scanTCPPort(
+						targetCtx.resolvedIP,
+						job.port,
+						timeout,
+						targetCtx.fingerprintSlots,
+						&targetCtx.fingerprintedCount,
+					)
+				}
+
+				targetCtx.mu.Lock()
+				targetCtx.collected = append(targetCtx.collected, portResult)
+				targetCtx.mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, targetCtx := range contexts {
+		if results[i].Error != "" || targetCtx == nil {
+			if results[i].Error == "" {
+				results[i].Error = "target context not initialized"
+			}
+			continue
+		}
+		results[i].Result = finalizeBatchTargetResult(targetCtx, honeypotOpenThreshold, honeypotOpenRatio)
+	}
+
+	if err := ctx.Err(); err != nil {
+		for i := range results {
+			if results[i].Result == nil && results[i].Error == "" {
+				results[i].Error = err.Error()
+			}
+		}
+		return &BatchScanResult{Results: results}, err
+	}
+
+	return &BatchScanResult{Results: results}, nil
 }
 
 // Probe 是单端口便捷封装，内部复用 Scan。
@@ -881,6 +1066,93 @@ func sanitizeStringSlice(items []string) []string {
 		return nil
 	}
 	return out
+}
+
+func normalizeTargets(targets []string) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		out = append(out, target)
+	}
+	return out
+}
+
+func shuffleBatchJobs(jobs []batchJob) {
+	if len(jobs) <= 1 {
+		return
+	}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng.Shuffle(len(jobs), func(i, j int) {
+		jobs[i], jobs[j] = jobs[j], jobs[i]
+	})
+}
+
+func finalizeBatchTargetResult(targetCtx *batchTargetContext, honeypotOpenThreshold int, honeypotOpenRatio float64) *ScanResult {
+	targetCtx.mu.Lock()
+	collected := make([]PortResult, len(targetCtx.collected))
+	copy(collected, targetCtx.collected)
+	targetCtx.mu.Unlock()
+
+	sort.Slice(collected, func(i, j int) bool { return collected[i].Port < collected[j].Port })
+
+	openPorts := 0
+	final := make([]PortResult, 0, len(collected))
+	for _, r := range collected {
+		if !r.Open {
+			continue
+		}
+		openPorts++
+		final = append(final, r)
+	}
+
+	fingerprintedOpenPorts := int(atomic.LoadInt32(&targetCtx.fingerprintedCount))
+	skippedFingerprintPorts := openPorts - fingerprintedOpenPorts
+	if skippedFingerprintPorts < 0 {
+		skippedFingerprintPorts = 0
+	}
+
+	suspectedHoneypot := false
+	honeypotReason := ""
+	if targetCtx.protocol == ProtocolTCP && len(collected) > 0 {
+		openRatio := float64(openPorts) / float64(len(collected))
+		if openPorts >= honeypotOpenThreshold && openRatio >= honeypotOpenRatio {
+			suspectedHoneypot = true
+			honeypotReason = fmt.Sprintf(
+				"open ports=%d/%d(%.2f%%) >= threshold=%d and ratio=%.2f%%",
+				openPorts,
+				len(collected),
+				openRatio*100,
+				honeypotOpenThreshold,
+				honeypotOpenRatio*100,
+			)
+		}
+	}
+
+	return &ScanResult{
+		Target:     targetCtx.target,
+		ResolvedIP: targetCtx.resolvedIP,
+		Protocol:   targetCtx.protocol,
+		Meta: ScanMeta{
+			OpenPorts:               openPorts,
+			FingerprintedOpenPorts:  fingerprintedOpenPorts,
+			SkippedFingerprintPorts: skippedFingerprintPorts,
+			SuspectedHoneypot:       suspectedHoneypot,
+			HoneypotReason:          honeypotReason,
+		},
+		Ports: final,
+	}
 }
 
 func parseScanURL(raw string) (string, int, error) {

@@ -20,13 +20,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := runPortExample(scanner); err != nil {
-		log.Fatal(err)
-	}
-
-	//if err := runHomepageExample(scanner); err != nil {
+	//if err := runPortExample(scanner); err != nil {
 	//	log.Fatal(err)
 	//}
+
+	//if err := runBatchPortExample(scanner); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	if err := runHomepageExample(scanner); err != nil {
+		log.Fatal(err)
+	}
 
 	//if err := runDetectHomepageWithOptions(scanner); err != nil {
 	//	log.Fatal(err)
@@ -56,8 +60,27 @@ func runPortExample(scanner *assetprobe.Scanner) error {
 	return nil
 }
 
+func runBatchPortExample(scanner *assetprobe.Scanner) error {
+	result, err := scanner.ScanTargets(context.Background(), []string{
+		"127.0.0.1",
+		"example.com",
+	}, assetprobe.ScanCommonOptions{
+		PortSpec:        "80,443",
+		Protocol:        assetprobe.ProtocolTCP,
+		PortConcurrency: 100,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("== Batch Port Example ==")
+	out, _ := result.ToJSON(true)
+	fmt.Println(string(out))
+	return nil
+}
+
 func runHomepageExample(scanner *assetprobe.Scanner) error {
-	result, err := scanner.DetectHomepage(context.Background(), "https://pbc.cntd.org.cn:56997")
+	result, err := scanner.DetectHomepage(context.Background(), "http://192.168.100.100:8080")
 	if err != nil {
 		return err
 	}
