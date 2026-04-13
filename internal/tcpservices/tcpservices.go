@@ -74,7 +74,7 @@ func TLSReadWithProbe(ip string, port int, buf []byte, timeout time.Duration, co
 }
 
 // TcpPortServer 对指定 IP 与端口进行 TCP 探测，返回 banner、subject、dns、service、version 以及 weak（弱口令）信息。
-func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) (string, string, string, string, string, common.UsePwd) {
+func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.Conn, unweak bool) (string, string, string, string, string, common.UsePwd) {
 	var banner, subject, dns, service, version string
 	var count = 0
 	var weak = common.UsePwd{
@@ -134,12 +134,12 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 				if err == nil && initialResponse != "" {
 					if svc, ver, w, ok := connect.MatchRules(initialResponse, probeRule.Msg, true, unweak, ip, port); ok {
 						service, version, weak = svc, ver, w
-						subject, dns = separate.ParseHTTPS(ip, port)
+						subject, dns = parseTLSCertificate(ip, targetHost, port)
 						return SanitizeBanner(initialResponse), subject, dns, service, version, weak
 					}
 					if svc, ver, w, ok := connect.MatchRules(initialResponse, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
 						service, version, weak = svc, ver, w
-						subject, dns = separate.ParseHTTPS(ip, port)
+						subject, dns = parseTLSCertificate(ip, targetHost, port)
 						return SanitizeBanner(initialResponse), subject, dns, service, version, weak
 					}
 				}
@@ -158,11 +158,11 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 			}
 			if response != "" {
 				if svc, ver, w, ok := connect.MatchRules(response, probeRule.Msg, true, unweak, ip, port); ok {
-					subject, dns = separate.ParseHTTPS(ip, port)
+					subject, dns = parseTLSCertificate(ip, targetHost, port)
 					return SanitizeBanner(response), subject, dns, svc, ver, w
 				}
 				if svc, ver, w, ok := connect.MatchRules(response, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
-					subject, dns = separate.ParseHTTPS(ip, port)
+					subject, dns = parseTLSCertificate(ip, targetHost, port)
 					return SanitizeBanner(response), subject, dns, svc, ver, w
 				}
 				if service == "" && common.ServiceMap[port]["tcp"] != "" {
@@ -174,7 +174,7 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 			}
 		}
 		if service == "" && common.ServiceMap[port]["tcp"] != "" {
-			subject, dns = separate.ParseHTTPS(ip, port)
+			subject, dns = parseTLSCertificate(ip, targetHost, port)
 			service = common.ServiceMap[port]["tcp"] + "/ssl?"
 			return banner, subject, dns, service, version, weak
 		}
@@ -215,6 +215,11 @@ func TcpPortServer(ip string, port int, buf []byte, conn net.Conn, unweak bool) 
 			service = "unknown"
 		}
 	}
+	if isUnknownService(service) {
+		if banner, subject, dns, svc, ver, ok := detectWebServiceWithHost(ip, targetHost, port, timeout, buf); ok {
+			return banner, subject, dns, svc, ver, weak
+		}
+	}
 	return banner, subject, dns, service, version, weak
 }
 
@@ -231,6 +236,111 @@ func shouldTreatAsSSLPort(port int) bool {
 	default:
 		return false
 	}
+}
+
+func isUnknownService(service string) bool {
+	service = strings.TrimSpace(strings.ToLower(service))
+	return service == "" || service == "unknown" || service == "unknown?" || service == "unknown/ssl" || service == "unknown/ssl?"
+}
+
+func shouldTryWebFallback(port int) bool {
+	switch port {
+	case 80, 81, 443, 444, 591, 593, 8000, 8008, 8080, 8081, 8088, 8443, 8843, 8888:
+		return true
+	default:
+		return false
+	}
+}
+
+func parseTLSCertificate(ip, targetHost string, port int) (string, string) {
+	if targetHost != "" && net.ParseIP(targetHost) == nil {
+		return separate.ParseHTTPSWithServerName(ip, port, targetHost)
+	}
+	return separate.ParseHTTPS(ip, port)
+}
+
+func detectWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte) (string, string, string, string, string, bool) {
+	if !shouldTryWebFallback(port) {
+		return "", "", "", "", "", false
+	}
+	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
+		return banner, subject, dns, service, version, true
+	}
+	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false); service != "" {
+		return banner, subject, dns, service, version, true
+	}
+	return "", "", "", "", "", false
+}
+
+func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration, buf []byte, isTLS bool) (string, string, string, string, string) {
+	addr := net.JoinHostPort(ip, strconv.Itoa(port))
+	hostHeader := targetHost
+	if hostHeader == "" {
+		hostHeader = ip
+	}
+	request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nUser-Agent: gomap\r\nAccept: */*\r\nConnection: close\r\n\r\n", hostHeader)
+
+	var (
+		conn net.Conn
+		err  error
+	)
+	if isTLS {
+		cfg := &tls.Config{
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS10,
+			MaxVersion:         tls.VersionTLS13,
+		}
+		if targetHost != "" && net.ParseIP(targetHost) == nil {
+			cfg.ServerName = targetHost
+		}
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", addr, cfg)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, timeout)
+	}
+	if err != nil {
+		return "", "", "", "", ""
+	}
+	defer conn.Close()
+
+	conn.SetWriteDeadline(time.Now().Add(timeout))
+	if _, err := conn.Write([]byte(request)); err != nil {
+		return "", "", "", "", ""
+	}
+
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	response := connect.ReadWithTimeout(conn, buf, timeout)
+	if response == "" {
+		return "", "", "", "", ""
+	}
+
+	subject, dns := "", ""
+	service := "http"
+	if isTLS {
+		service = "https"
+		subject, dns = parseTLSCertificate(ip, targetHost, port)
+	}
+
+	for _, rule := range common.AllHTTPRules {
+		if rule.Regex == nil {
+			continue
+		}
+		if match, _ := rule.Regex.FindStringMatch(response); match != nil {
+			name := rule.Name
+			if isTLS {
+				if strings.HasPrefix(strings.ToLower(name), "http") {
+					name = "https"
+				} else {
+					name = name + "/ssl"
+				}
+			}
+			return SanitizeBanner(response), subject, dns, name, rule.Service
+		}
+	}
+
+	if strings.HasPrefix(response, "HTTP/") {
+		return SanitizeBanner(response), subject, dns, service, ""
+	}
+	return "", "", "", "", ""
 }
 
 func HttpOnlyPortServer(ip string, port int, buf []byte) (string, string, string, string, string) {

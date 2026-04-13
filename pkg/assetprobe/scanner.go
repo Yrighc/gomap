@@ -171,7 +171,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 				case ProtocolUDP:
 					r = s.scanUDPPort(targetHost, resolvedIP, p, timeout)
 				default:
-					r = s.scanTCPPort(resolvedIP, p, timeout, fingerprintSlots, &fingerprintedCount)
+					r = s.scanTCPPort(targetHost, resolvedIP, p, timeout, fingerprintSlots, &fingerprintedCount)
 				}
 				results <- r
 			}
@@ -365,6 +365,7 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 					portResult = s.scanUDPPort(targetCtx.target, targetCtx.resolvedIP, job.port, timeout)
 				default:
 					portResult = s.scanTCPPort(
+						targetCtx.target,
 						targetCtx.resolvedIP,
 						job.port,
 						timeout,
@@ -498,6 +499,7 @@ func (s *Scanner) ScanDirectories(ctx context.Context, rawURL string, opts DirBr
 // 端口扫描结果只保留端口资产字段，不再混入首页和目录爆破数据。
 // 当令牌耗尽时，端口仍会被标记为 open，但不会继续做深度识别。
 func (s *Scanner) scanTCPPort(
+	targetHost string,
 	resolvedIP string,
 	port int,
 	timeout time.Duration,
@@ -527,6 +529,7 @@ func (s *Scanner) scanTCPPort(
 
 	banner, subject, dns, serviceName, version, _ := detectTCPServiceWithBudget(
 		resolvedIP,
+		targetHost,
 		port,
 		conn,
 		s.opts.DisableWeakPassword,
@@ -537,6 +540,11 @@ func (s *Scanner) scanTCPPort(
 	result.Service = strings.TrimSuffix(serviceName, "?")
 	if result.Service == "" {
 		result.Service = "unknown"
+	}
+	if isUnknownPortService(result.Service) {
+		if svc := detectWebServiceByURL(targetHost, port); svc != "" {
+			result.Service = svc
+		}
 	}
 	result.Version = achieve.SanitizeUTF8(version)
 	result.Banner = achieve.SanitizeUTF8(banner)
@@ -550,6 +558,7 @@ func (s *Scanner) scanTCPPort(
 
 func detectTCPServiceWithBudget(
 	ip string,
+	targetHost string,
 	port int,
 	conn net.Conn,
 	disableWeakPassword bool,
@@ -568,7 +577,7 @@ func detectTCPServiceWithBudget(
 	resultCh := make(chan detectResult, 1)
 	go func() {
 		buf := make([]byte, 4096)
-		b, s, d, svc, ver, _ := tcpservices.TcpPortServer(ip, port, buf, conn, disableWeakPassword)
+		b, s, d, svc, ver, _ := tcpservices.TcpPortServer(ip, targetHost, port, buf, conn, disableWeakPassword)
 		resultCh <- detectResult{
 			banner:      b,
 			subject:     s,
@@ -1066,6 +1075,54 @@ func sanitizeStringSlice(items []string) []string {
 		return nil
 	}
 	return out
+}
+
+func isUnknownPortService(service string) bool {
+	service = strings.TrimSpace(strings.ToLower(service))
+	return service == "" || service == "unknown"
+}
+
+func detectWebServiceByURL(targetHost string, port int) string {
+	if strings.TrimSpace(targetHost) == "" {
+		return ""
+	}
+
+	for _, candidate := range buildWebFallbackURLs(targetHost, port) {
+		page := crawlweb.AnalyzeWebsite(candidate.rawURL, candidate.isHTTPS)
+		if page.Http.StatusCode == 0 {
+			continue
+		}
+		if strings.HasPrefix(page.Http.ContentType, "text/html") || strings.HasPrefix(page.Http.ContentType, "application/json") || len(page.Http.ResponseHeaders) > 0 {
+			if candidate.isHTTPS {
+				return "https"
+			}
+			return "http"
+		}
+	}
+	return ""
+}
+
+type webFallbackURL struct {
+	rawURL  string
+	isHTTPS bool
+}
+
+func buildWebFallbackURLs(targetHost string, port int) []webFallbackURL {
+	switch port {
+	case 443:
+		return []webFallbackURL{{rawURL: "https://" + targetHost, isHTTPS: true}}
+	case 8443, 9443:
+		return []webFallbackURL{{rawURL: fmt.Sprintf("https://%s:%d", targetHost, port), isHTTPS: true}}
+	case 80:
+		return []webFallbackURL{{rawURL: "http://" + targetHost, isHTTPS: false}}
+	case 8080, 8081, 8000, 8008, 8088, 8888:
+		return []webFallbackURL{
+			{rawURL: fmt.Sprintf("http://%s:%d", targetHost, port), isHTTPS: false},
+			{rawURL: fmt.Sprintf("https://%s:%d", targetHost, port), isHTTPS: true},
+		}
+	default:
+		return nil
+	}
 }
 
 func normalizeTargets(targets []string) []string {

@@ -20,8 +20,12 @@ import (
 )
 
 func ParseHTTPS(ip string, port int) (string, string) {
+	subject, dns := getCertificate(ip, port, "")
+	return subject, dns
+}
 
-	subject, dns := getCertificate(ip, port)
+func ParseHTTPSWithServerName(ip string, port int, serverName string) (string, string) {
+	subject, dns := getCertificate(ip, port, serverName)
 	return subject, dns
 }
 
@@ -98,11 +102,15 @@ func ParseTelnet(ip string, port int) string {
 }
 
 // 获取 HTTPS 服务的证书
-func getCertificate(ip string, port int) (string, string) {
+func getCertificate(ip string, port int, serverName string) (string, string) {
 	address := net.JoinHostPort(ip, strconv.Itoa(port))
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", address, &tls.Config{
+	cfg := &tls.Config{
 		InsecureSkipVerify: true,
-	})
+	}
+	if serverName != "" && net.ParseIP(serverName) == nil {
+		cfg.ServerName = serverName
+	}
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", address, cfg)
 	if err != nil {
 		return "", ""
 	}
