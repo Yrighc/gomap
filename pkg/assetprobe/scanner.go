@@ -983,12 +983,6 @@ func loadProbeAssets(path string) error {
 	if strings.TrimSpace(path) != "" {
 		return probes.ProbesMatchFromFile(path)
 	}
-	if root, err := moduleRootDir(); err == nil {
-		candidate := filepath.Join(root, "app", "gomap-service-probes")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return probes.ProbesMatchFromFile(candidate)
-		}
-	}
 	data, err := appassets.ServiceProbes()
 	if err != nil {
 		return err
@@ -999,12 +993,6 @@ func loadProbeAssets(path string) error {
 func loadServiceAssets(path string) error {
 	if strings.TrimSpace(path) != "" {
 		return service.ServiceStorageFromFile(path)
-	}
-	if root, err := moduleRootDir(); err == nil {
-		candidate := filepath.Join(root, "app", "gomap-services")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return service.ServiceStorageFromFile(candidate)
-		}
 	}
 	data, err := appassets.Services()
 	if err != nil {
