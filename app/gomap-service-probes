@@ -13767,14 +13767,6 @@ match xmpp-transport m|^\x05\xff$| p/Spectrum XMPP file transfer/
 softmatch smtp m|^220[\s-].*smtp[^\r]*\r\n214[\s-]|i
 softmatch ftp m|^220[\s-].*ftp[^\r]*\r\n214[\s-]|i
 
-#新增Probe
-Probe TCP GetRequest q|GET / HTTP/1.0\r\n\r\n|
-rarity 10
-ports 1-65535
-sslports 1-65535
-
-match http m|^HTTP/*| 
-
 ##############################NEXT PROBE##############################
 # SSLv3 ClientHello probe. Will be able to reliably identify the SSL version
 # used, unless the server is running SSLv2 only. Note that it will also detect

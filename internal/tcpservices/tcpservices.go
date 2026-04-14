@@ -20,8 +20,9 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// TLSReadWithProbe 封装 TLS 连接 + probeBytes 发送 + 读取 + 解码逻辑
-func TLSReadWithProbe(ip string, port int, buf []byte, timeout time.Duration, compatibleTLS bool, probe []byte) (string, error) {
+// TLSReadWithProbe 封装 TLS 连接 + probeBytes 发送 + 读取 + 解码逻辑。
+// 当 targetHost 是域名时会自动携带 SNI，避免站点因为缺少 ServerName 而拒绝返回证书或 HTTP 响应。
+func TLSReadWithProbe(ip string, targetHost string, port int, buf []byte, timeout time.Duration, compatibleTLS bool, probe []byte) (string, error) {
 	var tlsConf *tls.Config
 	if !compatibleTLS {
 		tlsConf = &tls.Config{
@@ -42,6 +43,9 @@ func TLSReadWithProbe(ip string, port int, buf []byte, timeout time.Duration, co
 		}
 	} else {
 		tlsConf = &tls.Config{InsecureSkipVerify: true}
+	}
+	if targetHost != "" && net.ParseIP(targetHost) == nil {
+		tlsConf.ServerName = targetHost
 	}
 
 	dialer := &net.Dialer{Timeout: timeout}
@@ -84,6 +88,13 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 	timeout := 3 * time.Second
 	tlstimeout := 4 * time.Second
 	result := probes.QueryProbes(common.NmapData, port)
+
+	// 常见 Web 端口优先走一次快速协议确认。
+	// 这类端口往往不会主动回 banner，先等被动读取很容易白白消耗 2~3 秒，
+	// 直接发送原始 GET 请求更符合 Web 服务的真实交互方式，也能更稳定识别 80/443。
+	if banner, subject, dns, svc, ver, ok := detectPreferredWebServiceWithHost(ip, targetHost, port, timeout, buf); ok {
+		return banner, subject, dns, svc, ver, weak
+	}
 
 	conn.SetDeadline(time.Now().Add(timeout))
 	// 如果没有匹配规则，尝试读取数据并检查 NullProbeMatchRules
@@ -128,11 +139,11 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 			if count == 0 {
 				// 第一次尝试直接读取 TLS 初始响应（普通 TLS）
 				count++
-				initialResponse, err := TLSReadWithProbe(ip, port, buf, timeout, false, nil)
+				initialResponse, err := TLSReadWithProbe(ip, targetHost, port, buf, timeout, false, nil)
 				if err != nil {
 					// 如果 TLS 握手失败，切换兼容套件重试
 					if strings.Contains(err.Error(), "handshake failure") || strings.Contains(err.Error(), "protocol version") {
-						initialResponse, err = TLSReadWithProbe(ip, port, buf, timeout, true, nil)
+						initialResponse, err = TLSReadWithProbe(ip, targetHost, port, buf, timeout, true, nil)
 					}
 				}
 				if err == nil && initialResponse != "" {
@@ -156,11 +167,11 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 
 			// TLS 探测：发送 probeBytes
 			probeBytes := connect.GetProbeBytes(probeRule.ProbeBytes)
-			response, err := TLSReadWithProbe(ip, port, buf, tlstimeout, false, probeBytes)
+			response, err := TLSReadWithProbe(ip, targetHost, port, buf, tlstimeout, false, probeBytes)
 			if err != nil {
 				// 遇到 handshake failure 切换兼容套件
 				if strings.Contains(err.Error(), "handshake failure") || strings.Contains(err.Error(), "protocol version") {
-					response, _ = TLSReadWithProbe(ip, port, buf, tlstimeout, true, probeBytes)
+					response, _ = TLSReadWithProbe(ip, targetHost, port, buf, tlstimeout, true, probeBytes)
 				} else {
 					continue
 				}
@@ -256,6 +267,19 @@ func detectHTTPServiceByPrefix(response string, isTLS bool) (string, bool) {
 }
 
 func shouldTreatAsSSLPort(port int) bool {
+	// nmap 的 GetRequest probe 带有非常宽泛的 sslports 80-65535。
+	// 这些配置的含义是“该 probe 可用于 TLS 端口”，不是“这些端口默认就是 TLS 端口”。
+	// 如果这里直接照单全收，会把 80/8080 这类明文 HTTP 端口误导到 SSL 识别分支。
+	switch port {
+	case 80, 81, 591, 593, 8000, 8008, 8080, 8081, 8088, 8888:
+		return false
+	}
+
+	serviceName := strings.ToLower(strings.TrimSpace(common.ServiceMap[port]["tcp"]))
+	if strings.Contains(serviceName, "https") || strings.Contains(serviceName, "ssl") {
+		return true
+	}
+
 	if common.SslPortsMap[port] {
 		return true
 	}
@@ -295,13 +319,39 @@ func detectWebServiceWithHost(ip, targetHost string, port int, timeout time.Dura
 	if !shouldTryWebFallback(port) {
 		return "", "", "", "", "", false
 	}
-	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
-		return banner, subject, dns, service, version, true
+
+	if preferTLSFirst(port) {
+		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
+			return banner, subject, dns, service, version, true
+		}
+		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false); service != "" {
+			return banner, subject, dns, service, version, true
+		}
+		return "", "", "", "", "", false
 	}
+
 	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false); service != "" {
 		return banner, subject, dns, service, version, true
 	}
+	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
+		return banner, subject, dns, service, version, true
+	}
 	return "", "", "", "", "", false
+}
+
+// detectPreferredWebServiceWithHost 是常见 Web 端口的快速识别入口。
+// 与底部的未知服务回退不同，这里会在通用探针前优先执行，从而减少 443 等端口因为等待 banner 或遍历大量探针导致的超时。
+func detectPreferredWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte) (string, string, string, string, string, bool) {
+	return detectWebServiceWithHost(ip, targetHost, port, timeout, buf)
+}
+
+func preferTLSFirst(port int) bool {
+	switch port {
+	case 443, 444, 465, 563, 585, 636, 853, 989, 990, 992, 993, 994, 995, 8443, 8843, 9443, 10443, 14443:
+		return true
+	default:
+		return shouldTreatAsSSLPort(port)
+	}
 }
 
 func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration, buf []byte, isTLS bool) (string, string, string, string, string) {
