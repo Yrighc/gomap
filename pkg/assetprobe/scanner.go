@@ -541,11 +541,6 @@ func (s *Scanner) scanTCPPort(
 	if result.Service == "" {
 		result.Service = "unknown"
 	}
-	if isUnknownPortService(result.Service) {
-		if svc := detectWebServiceByURL(targetHost, port); svc != "" {
-			result.Service = svc
-		}
-	}
 	result.Version = achieve.SanitizeUTF8(version)
 	result.Banner = achieve.SanitizeUTF8(banner)
 	result.Subject = achieve.SanitizeUTF8(subject)
@@ -1075,54 +1070,6 @@ func sanitizeStringSlice(items []string) []string {
 		return nil
 	}
 	return out
-}
-
-func isUnknownPortService(service string) bool {
-	service = strings.TrimSpace(strings.ToLower(service))
-	return service == "" || service == "unknown"
-}
-
-func detectWebServiceByURL(targetHost string, port int) string {
-	if strings.TrimSpace(targetHost) == "" {
-		return ""
-	}
-
-	for _, candidate := range buildWebFallbackURLs(targetHost, port) {
-		page := crawlweb.AnalyzeWebsite(candidate.rawURL, candidate.isHTTPS)
-		if page.Http.StatusCode == 0 {
-			continue
-		}
-		if strings.HasPrefix(page.Http.ContentType, "text/html") || strings.HasPrefix(page.Http.ContentType, "application/json") || len(page.Http.ResponseHeaders) > 0 {
-			if candidate.isHTTPS {
-				return "https"
-			}
-			return "http"
-		}
-	}
-	return ""
-}
-
-type webFallbackURL struct {
-	rawURL  string
-	isHTTPS bool
-}
-
-func buildWebFallbackURLs(targetHost string, port int) []webFallbackURL {
-	switch port {
-	case 443:
-		return []webFallbackURL{{rawURL: "https://" + targetHost, isHTTPS: true}}
-	case 8443, 9443:
-		return []webFallbackURL{{rawURL: fmt.Sprintf("https://%s:%d", targetHost, port), isHTTPS: true}}
-	case 80:
-		return []webFallbackURL{{rawURL: "http://" + targetHost, isHTTPS: false}}
-	case 8080, 8081, 8000, 8008, 8088, 8888:
-		return []webFallbackURL{
-			{rawURL: fmt.Sprintf("http://%s:%d", targetHost, port), isHTTPS: false},
-			{rawURL: fmt.Sprintf("https://%s:%d", targetHost, port), isHTTPS: true},
-		}
-	default:
-		return nil
-	}
 }
 
 func normalizeTargets(targets []string) []string {

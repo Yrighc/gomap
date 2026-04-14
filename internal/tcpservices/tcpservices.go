@@ -92,6 +92,7 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 		banner = string(buf[:n])
 		// fmt.Println("detect 直接 banner", banner)
 		if banner != "" {
+			httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(banner, false)
 			for _, rule := range common.NmapData.NullProbeMatchRules {
 				if match, _ := rule.Regex.FindStringMatch(banner); match != nil {
 					service = rule.Name
@@ -103,6 +104,9 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 					}
 					return SanitizeBanner(banner), subject, dns, service, version, weak
 				}
+			}
+			if hasHTTPFallback {
+				return SanitizeBanner(banner), subject, dns, httpFallback, "", weak
 			}
 		}
 	}
@@ -132,6 +136,7 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 					}
 				}
 				if err == nil && initialResponse != "" {
+					httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(initialResponse, true)
 					if svc, ver, w, ok := connect.MatchRules(initialResponse, probeRule.Msg, true, unweak, ip, port); ok {
 						service, version, weak = svc, ver, w
 						subject, dns = parseTLSCertificate(ip, targetHost, port)
@@ -141,6 +146,10 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 						service, version, weak = svc, ver, w
 						subject, dns = parseTLSCertificate(ip, targetHost, port)
 						return SanitizeBanner(initialResponse), subject, dns, service, version, weak
+					}
+					if hasHTTPFallback {
+						subject, dns = parseTLSCertificate(ip, targetHost, port)
+						return SanitizeBanner(initialResponse), subject, dns, httpFallback, "", weak
 					}
 				}
 			}
@@ -157,6 +166,7 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 				}
 			}
 			if response != "" {
+				httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(response, true)
 				if svc, ver, w, ok := connect.MatchRules(response, probeRule.Msg, true, unweak, ip, port); ok {
 					subject, dns = parseTLSCertificate(ip, targetHost, port)
 					return SanitizeBanner(response), subject, dns, svc, ver, w
@@ -164,6 +174,10 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 				if svc, ver, w, ok := connect.MatchRules(response, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
 					subject, dns = parseTLSCertificate(ip, targetHost, port)
 					return SanitizeBanner(response), subject, dns, svc, ver, w
+				}
+				if hasHTTPFallback {
+					subject, dns = parseTLSCertificate(ip, targetHost, port)
+					return SanitizeBanner(response), subject, dns, httpFallback, "", weak
 				}
 				if service == "" && common.ServiceMap[port]["tcp"] != "" {
 					service = common.ServiceMap[port]["tcp"] + "/ssl?"
@@ -200,11 +214,15 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 		tcpConn.SetReadDeadline(time.Now().Add(timeout))
 		response := connect.ReadWithTimeout(tcpConn, buf, timeout)
 		if response != "" {
+			httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(response, false)
 			if svc, ver, w, ok := connect.MatchRules(response, probeRule.Msg, false, unweak, ip, port); ok {
 				return SanitizeBanner(response), subject, dns, svc, ver, w
 			}
 			if svc, ver, w, ok := connect.MatchRules(response, common.NmapData.NullProbeMatchRules, false, unweak, ip, port); ok {
 				return SanitizeBanner(response), subject, dns, svc, ver, w
+			}
+			if hasHTTPFallback {
+				return SanitizeBanner(response), subject, dns, httpFallback, "", weak
 			}
 		}
 	}
@@ -221,6 +239,20 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 		}
 	}
 	return banner, subject, dns, service, version, weak
+}
+
+// detectHTTPServiceByPrefix 负责在规则精确匹配之前，先做协议级粗识别。
+// 只要响应已经明确以 HTTP 状态行开头，就优先认定为 HTTP/HTTPS，
+// 避免因为未命中某条细粒度 nmap 指纹而退化成 unknown。
+func detectHTTPServiceByPrefix(response string, isTLS bool) (string, bool) {
+	response = strings.TrimSpace(response)
+	if !strings.HasPrefix(response, "HTTP/") {
+		return "", false
+	}
+	if isTLS {
+		return "https", true
+	}
+	return "http", true
 }
 
 func shouldTreatAsSSLPort(port int) bool {
