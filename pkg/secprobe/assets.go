@@ -15,6 +15,27 @@ func BuiltinCredentials(protocol string) ([]Credential, error) {
 	return parseCredentialLines(string(data))
 }
 
+func CredentialsFor(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
+	if len(opts.Credentials) > 0 {
+		return dedupeCredentials(opts.Credentials), nil
+	}
+	return BuiltinCredentials(protocol)
+}
+
+func dedupeCredentials(in []Credential) []Credential {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]Credential, 0, len(in))
+	for _, cred := range in {
+		key := cred.Username + "\x00" + cred.Password
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, cred)
+	}
+	return out
+}
+
 func parseCredentialLines(raw string) ([]Credential, error) {
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
 	out := make([]Credential, 0, len(lines))
