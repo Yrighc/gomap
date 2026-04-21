@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"net/url"
 
 	_ "github.com/lib/pq"
 	"github.com/yrighc/gomap/internal/secprobe/core"
@@ -40,13 +41,17 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			return result
 		}
 
+		query := url.Values{
+			"dbname":          []string{"postgres"},
+			"sslmode":         []string{"disable"},
+			"connect_timeout": []string{fmt.Sprintf("%d", connectTimeout)},
+		}
 		dsn := fmt.Sprintf(
-			"host=%s port=%d user=%s password=%s dbname=postgres sslmode=disable connect_timeout=%d",
+			"postgres://%s@%s:%d?%s",
+			url.UserPassword(cred.Username, cred.Password).String(),
 			candidate.ResolvedIP,
 			candidate.Port,
-			cred.Username,
-			cred.Password,
-			connectTimeout,
+			query.Encode(),
 		)
 
 		db, err := sql.Open("postgres", dsn)

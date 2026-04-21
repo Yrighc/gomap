@@ -65,3 +65,29 @@ func TestPostgreSQLProberReturnsErrorOnFailure(t *testing.T) {
 		t.Fatalf("expected postgresql failure error, got %+v", result)
 	}
 }
+
+func TestPostgreSQLProberHandlesSpecialCharactersInPassword(t *testing.T) {
+	container := testutil.StartPostgreSQL(t, testutil.PostgreSQLConfig{
+		Database: "gomap",
+		Username: "gomap",
+		Password: "pa ss",
+	})
+
+	prober := postgresqlprobe.New()
+	result := prober.Probe(context.Background(), secprobe.SecurityCandidate{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "postgresql",
+	}, secprobe.CredentialProbeOptions{
+		Timeout:       5 * time.Second,
+		StopOnSuccess: true,
+	}, []secprobe.Credential{
+		{Username: "gomap", Password: "wrong-pass"},
+		{Username: "gomap", Password: "pa ss"},
+	})
+
+	if !result.Success {
+		t.Fatalf("expected postgresql success with spaced password, got %+v", result)
+	}
+}
