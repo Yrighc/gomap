@@ -1,4 +1,4 @@
-package secprobe
+package core
 
 import "encoding/json"
 

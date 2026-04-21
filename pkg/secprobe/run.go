@@ -1,6 +1,20 @@
 package secprobe
 
-import "context"
+import (
+	"context"
+
+	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
+	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
+	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
+)
+
+func DefaultRegistry() *Registry {
+	r := NewRegistry()
+	r.Register(sshprobe.New())
+	r.Register(ftpprobe.New())
+	r.Register(telnetprobe.New())
+	return r
+}
 
 func RunWithRegistry(ctx context.Context, registry *Registry, candidates []SecurityCandidate, opts CredentialProbeOptions) RunResult {
 	_ = opts

@@ -15,3 +15,16 @@ func TestRunSkipsUnsupportedCandidates(t *testing.T) {
 		t.Fatalf("expected one skipped candidate, got %+v", result.Meta)
 	}
 }
+
+func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
+	r := DefaultRegistry()
+	for _, candidate := range []SecurityCandidate{
+		{Service: "ssh", Port: 22},
+		{Service: "ftp", Port: 21},
+		{Service: "telnet", Port: 23},
+	} {
+		if _, ok := r.Lookup(candidate); !ok {
+			t.Fatalf("expected prober for service %q", candidate.Service)
+		}
+	}
+}

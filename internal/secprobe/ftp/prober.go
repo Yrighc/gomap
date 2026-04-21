@@ -1,0 +1,58 @@
+package ftp
+
+import (
+	"context"
+	"net"
+	"strconv"
+
+	jftp "github.com/jlaffaye/ftp"
+	"github.com/yrighc/gomap/internal/secprobe/core"
+)
+
+func New() core.Prober { return prober{} }
+
+type prober struct{}
+
+func (prober) Name() string { return "ftp" }
+
+func (prober) Match(candidate core.SecurityCandidate) bool {
+	return candidate.Service == "ftp"
+}
+
+func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {
+	result := core.SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		FindingType: core.FindingTypeCredentialValid,
+	}
+
+	addr := net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port))
+	for _, cred := range creds {
+		if err := ctx.Err(); err != nil {
+			result.Error = err.Error()
+			return result
+		}
+
+		conn, err := jftp.Dial(addr, jftp.DialWithTimeout(opts.Timeout))
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+
+		err = conn.Login(cred.Username, cred.Password)
+		_ = conn.Quit()
+		if err == nil {
+			result.Success = true
+			result.Username = cred.Username
+			result.Password = cred.Password
+			result.Evidence = "FTP authentication succeeded"
+			return result
+		}
+
+		result.Error = err.Error()
+	}
+
+	return result
+}
