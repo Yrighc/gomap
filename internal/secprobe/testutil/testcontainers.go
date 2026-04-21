@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -50,7 +51,7 @@ func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 
 	ports := map[string]int{}
 	for _, port := range req.ExposedPorts {
-		mapped, err := container.MappedPort(ctx, port)
+		mapped, err := container.MappedPort(ctx, nat.Port(port))
 		if err == nil {
 			mappedPort, convErr := strconv.Atoi(mapped.Port())
 			if convErr == nil {
@@ -65,7 +66,7 @@ func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 func linuxServerRequest(cfg LinuxServerConfig) testcontainers.ContainerRequest {
 	if len(cfg.Services) == 1 && cfg.Services[0] == "ssh" {
 		return testcontainers.ContainerRequest{
-			Image:        "linuxserver/openssh-server:latest",
+			Image:        "linuxserver/openssh-server:version-9.7_p1-r4",
 			ExposedPorts: []string{"2222/tcp"},
 			Env: map[string]string{
 				"USER_NAME":       cfg.Username,
@@ -80,7 +81,7 @@ func linuxServerRequest(cfg LinuxServerConfig) testcontainers.ContainerRequest {
 	services := strings.Join(cfg.Services, ",")
 	if services == "ftp" {
 		return testcontainers.ContainerRequest{
-			Image:        "delfer/alpine-ftp-server:latest",
+			Image:        "delfer/alpine-ftp-server@sha256:60bb774d8408d9d4d5c74d05d1c086a34ce192c6c1a142ffac268cac0dbc6fac",
 			ExposedPorts: []string{"21/tcp"},
 			Env: map[string]string{
 				"USERS":    fmt.Sprintf("%s|%s|/home/%s|1000", cfg.Username, cfg.Password, cfg.Username),
@@ -92,7 +93,7 @@ func linuxServerRequest(cfg LinuxServerConfig) testcontainers.ContainerRequest {
 	}
 
 	return testcontainers.ContainerRequest{
-		Image:        "delfer/alpine-ftp-server:latest",
+		Image:        "delfer/alpine-ftp-server@sha256:60bb774d8408d9d4d5c74d05d1c086a34ce192c6c1a142ffac268cac0dbc6fac",
 		ExposedPorts: []string{"21/tcp"},
 		Env: map[string]string{
 			"USERS":    fmt.Sprintf("%s|%s", cfg.Username, cfg.Password),
