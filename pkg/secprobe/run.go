@@ -63,13 +63,22 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	if len(candidates) == 0 {
 		return result
 	}
+	if err := ctx.Err(); err != nil {
+		results := make([]SecurityResult, len(candidates))
+		for i, candidate := range candidates {
+			results[i] = canceledResult(candidate, err)
+		}
+		result.Meta.Failed = len(candidates)
+		result.Results = results
+		return result
+	}
 
 	type indexedCandidate struct {
 		index     int
 		candidate SecurityCandidate
 	}
 
-	jobs := make(chan indexedCandidate)
+	jobs := make(chan indexedCandidate, len(candidates))
 	results := make([]SecurityResult, len(candidates))
 
 	var (
@@ -102,27 +111,22 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 		}
 	}
 
+	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			for j := i; j < len(candidates); j++ {
+				results[j] = canceledResult(candidates[j], err)
+				result.Meta.Failed++
+			}
+			break
+		}
+		jobs <- indexedCandidate{index: i, candidate: candidate}
+	}
+	close(jobs)
+
 	for i := 0; i < opts.Concurrency; i++ {
 		wg.Add(1)
 		go worker()
 	}
-
-	for i, candidate := range candidates {
-		select {
-		case <-ctx.Done():
-			cancelErr := ctx.Err()
-			for j := i; j < len(candidates); j++ {
-				results[j] = canceledResult(candidates[j], cancelErr)
-				result.Meta.Failed++
-			}
-			close(jobs)
-			wg.Wait()
-			result.Results = results
-			return result
-		case jobs <- indexedCandidate{index: i, candidate: candidate}:
-		}
-	}
-	close(jobs)
 	wg.Wait()
 
 	result.Results = results
