@@ -1,0 +1,4 @@
+root : root
+root : 123456
+mysql : mysql
+admin : admin

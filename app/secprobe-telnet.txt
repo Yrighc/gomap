@@ -1,0 +1,4 @@
+admin : admin
+root : root
+root : 123456
+user : user

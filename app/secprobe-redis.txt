@@ -1,0 +1,4 @@
+default : 123456
+default : redis
+redis : redis
+redis : {{key}}

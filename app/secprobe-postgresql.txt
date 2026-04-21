@@ -1,0 +1,4 @@
+postgres : postgres
+postgres : 123456
+admin : admin
+test : test
