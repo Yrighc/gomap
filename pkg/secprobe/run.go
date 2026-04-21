@@ -107,18 +107,25 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 		go worker()
 	}
 
-enqueue:
 	for i, candidate := range candidates {
 		select {
 		case <-ctx.Done():
-			break enqueue
+			cancelErr := ctx.Err()
+			for j := i; j < len(candidates); j++ {
+				results[j] = canceledResult(candidates[j], cancelErr)
+				result.Meta.Failed++
+			}
+			close(jobs)
+			wg.Wait()
+			result.Results = results
+			return result
 		case jobs <- indexedCandidate{index: i, candidate: candidate}:
 		}
 	}
 	close(jobs)
 	wg.Wait()
 
-	result.Results = trimZeroResults(results)
+	result.Results = results
 	return result
 }
 
@@ -209,13 +216,16 @@ func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
 	return nil, fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
-func trimZeroResults(results []SecurityResult) []SecurityResult {
-	out := make([]SecurityResult, 0, len(results))
-	for _, item := range results {
-		if item.Target == "" && item.ResolvedIP == "" && item.Port == 0 && item.Service == "" && item.FindingType == "" && !item.Success && item.Username == "" && item.Password == "" && item.Evidence == "" && item.Error == "" {
-			continue
-		}
-		out = append(out, item)
+func canceledResult(candidate SecurityCandidate, err error) SecurityResult {
+	result := SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		FindingType: FindingTypeCredentialValid,
 	}
-	return out
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result
 }

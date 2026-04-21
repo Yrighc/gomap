@@ -637,11 +637,13 @@ func collectTargets(target, ips string) []string {
 }
 
 func collectCredentials(inline, file string) ([]secprobe.Credential, error) {
+	hasInline := strings.TrimSpace(inline) != ""
+	hasFile := strings.TrimSpace(file) != ""
 	lines := make([]string, 0)
-	if strings.TrimSpace(inline) != "" {
+	if hasInline {
 		lines = append(lines, splitComma(inline)...)
 	}
-	if strings.TrimSpace(file) != "" {
+	if hasFile {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, err
@@ -651,14 +653,21 @@ func collectCredentials(inline, file string) ([]secprobe.Credential, error) {
 
 	out := make([]secprobe.Credential, 0, len(lines))
 	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 		username, password, ok := parseCredentialPair(line)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("invalid credential pair %q, expected 'username : password'", line)
 		}
 		out = append(out, secprobe.Credential{
 			Username: username,
 			Password: password,
 		})
+	}
+	if (hasInline || hasFile) && len(out) == 0 {
+		return nil, errors.New("no valid explicit credentials found")
 	}
 	return out, nil
 }

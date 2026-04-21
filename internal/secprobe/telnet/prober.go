@@ -30,10 +30,15 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		Service:     candidate.Service,
 		FindingType: core.FindingTypeCredentialValid,
 	}
+	successResult := result
+	successFound := false
 
 	addr := net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port))
 	for _, cred := range creds {
 		if err := ctx.Err(); err != nil {
+			if successFound {
+				return successResult
+			}
 			result.Error = err.Error()
 			return result
 		}
@@ -72,11 +77,16 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		line, err := reader.ReadString('\n')
 		_ = conn.Close()
 		if err == nil && strings.Contains(line, "Welcome") {
-			result.Success = true
-			result.Username = cred.Username
-			result.Password = cred.Password
-			result.Evidence = "Telnet authentication succeeded"
-			return result
+			successResult.Success = true
+			successResult.Username = cred.Username
+			successResult.Password = cred.Password
+			successResult.Evidence = "Telnet authentication succeeded"
+			successResult.Error = ""
+			successFound = true
+			if opts.StopOnSuccess {
+				return successResult
+			}
+			continue
 		}
 		if err != nil {
 			result.Error = err.Error()
@@ -85,5 +95,8 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		}
 	}
 
+	if successFound {
+		return successResult
+	}
 	return result
 }

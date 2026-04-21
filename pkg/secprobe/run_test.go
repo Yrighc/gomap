@@ -2,6 +2,8 @@ package secprobe
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +52,60 @@ func TestApplyDefaultsFillsCredentialProbeOptions(t *testing.T) {
 	}
 	if opts.Timeout != 5*time.Second {
 		t.Fatalf("expected default timeout 5s, got %s", opts.Timeout)
+	}
+}
+
+func TestRunUsesDictDirBeforeBuiltinCredentials(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte("custom : secret\n"), 0o600); err != nil {
+		t.Fatalf("write dict file: %v", err)
+	}
+
+	registry := NewRegistry()
+	prober := &stubSuccessProber{name: "ssh"}
+	registry.Register(prober)
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       22,
+		Service:    "ssh",
+	}}, CredentialProbeOptions{
+		Timeout: time.Second,
+		DictDir: dir,
+	})
+
+	if !result.Results[0].Success {
+		t.Fatalf("expected dict-dir credentials to succeed, got %+v", result.Results[0])
+	}
+	if result.Results[0].Username != "custom" || result.Results[0].Password != "secret" {
+		t.Fatalf("expected dict-dir credentials, got %+v", result.Results[0])
+	}
+}
+
+func TestRunAccountsCanceledCandidates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	candidates := []SecurityCandidate{
+		{Target: "a", ResolvedIP: "127.0.0.1", Port: 22, Service: "ssh"},
+		{Target: "b", ResolvedIP: "127.0.0.1", Port: 23, Service: "telnet"},
+	}
+	result := RunWithRegistry(ctx, NewRegistry(), candidates, CredentialProbeOptions{})
+
+	if result.Meta.Candidates != len(candidates) {
+		t.Fatalf("expected %d candidates, got %+v", len(candidates), result.Meta)
+	}
+	if len(result.Results) != len(candidates) {
+		t.Fatalf("expected %d results, got %d", len(candidates), len(result.Results))
+	}
+	if result.Meta.Failed != len(candidates) {
+		t.Fatalf("expected %d failed canceled candidates, got %+v", len(candidates), result.Meta)
+	}
+	for i, item := range result.Results {
+		if item.Target != candidates[i].Target || item.Error == "" {
+			t.Fatalf("expected canceled result for candidate %d, got %+v", i, item)
+		}
 	}
 }
 

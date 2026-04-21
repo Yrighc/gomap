@@ -29,6 +29,8 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		Service:     candidate.Service,
 		FindingType: core.FindingTypeCredentialValid,
 	}
+	successResult := result
+	successFound := false
 
 	connectTimeout := int(math.Ceil(opts.Timeout.Seconds()))
 	if connectTimeout < 1 {
@@ -37,6 +39,9 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 
 	for _, cred := range creds {
 		if err := ctx.Err(); err != nil {
+			if successFound {
+				return successResult
+			}
 			result.Error = err.Error()
 			return result
 		}
@@ -65,16 +70,23 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		cancel()
 		_ = db.Close()
 		if err == nil {
-			result.Success = true
-			result.Username = cred.Username
-			result.Password = cred.Password
-			result.Evidence = "PostgreSQL authentication succeeded"
-			result.Error = ""
-			return result
+			successResult.Success = true
+			successResult.Username = cred.Username
+			successResult.Password = cred.Password
+			successResult.Evidence = "PostgreSQL authentication succeeded"
+			successResult.Error = ""
+			successFound = true
+			if opts.StopOnSuccess {
+				return successResult
+			}
+			continue
 		}
 
 		result.Error = err.Error()
 	}
 
+	if successFound {
+		return successResult
+	}
 	return result
 }
