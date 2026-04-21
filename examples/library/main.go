@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/pkg/assetprobe"
+	"github.com/yrighc/gomap/pkg/secprobe"
 )
 
 func main() {
@@ -37,6 +38,10 @@ func main() {
 	//}
 
 	//if err := runDirExample(scanner); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	//if err := runWeakExample(scanner); err != nil {
 	//	log.Fatal(err)
 	//}
 }
@@ -121,6 +126,28 @@ func runDirExample(scanner *assetprobe.Scanner) error {
 
 	fmt.Println("== Dir Example ==")
 	out, _ := result.ToJSON(true)
+	fmt.Println(string(out))
+	return nil
+}
+
+func runWeakExample(scanner *assetprobe.Scanner) error {
+	result, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
+		Target:   "127.0.0.1",
+		PortSpec: "21,22,3306,5432,6379",
+		Protocol: assetprobe.ProtocolTCP,
+	})
+	if err != nil {
+		return err
+	}
+
+	security := secprobe.Run(
+		context.Background(),
+		secprobe.BuildCandidates(result, secprobe.CredentialProbeOptions{}),
+		secprobe.CredentialProbeOptions{},
+	)
+	out, _ := security.ToJSON(true)
+
+	fmt.Println("== Weak Example ==")
 	fmt.Println(string(out))
 	return nil
 }

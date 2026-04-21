@@ -10,6 +10,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 - 服务识别（基于 nmap probes 规则增强）
 - 首页识别（标题、状态码、响应特征、favicon hash）
 - 可选目录爆破（简单/一般/复杂字典）
+- 可选协议账号口令探测（`weak` / `port -weak`）
 
 ## 1. 项目定位
 
@@ -27,13 +28,18 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 │   ├── gomap-services            # 端口服务映射
 │   ├── dict-simple.txt           # 目录爆破字典（simple）
 │   ├── dict-normal.txt           # 目录爆破字典（normal）
-│   └── dict-diff.txt             # 目录爆破字典（diff）
+│   ├── dict-diff.txt             # 目录爆破字典（diff）
+│   └── secprobe-*.txt            # 内置协议口令字典
 ├── cmd/
-│   └── main.go                   # 主 CLI（port/web/dir 子命令）
+│   └── main.go                   # 主 CLI（port/web/dir/weak 子命令）
 ├── pkg/assetprobe/
 │   ├── types.go                  # 对外类型定义
 │   ├── scanner.go                # 主流程与核心算法
 │   └── json.go                   # JSON 序列化辅助
+├── pkg/secprobe/
+│   ├── types.go                  # 协议安全探测对外类型
+│   ├── run.go                    # 协议账号口令探测执行入口
+│   └── candidates.go             # 资产结果转安全探测候选
 ├── internal/
 │   ├── tcpservices/              # TCP 服务识别
 │   ├── updservices/              # UDP 服务识别
@@ -151,6 +157,18 @@ go run ./cmd \
   -dict-concurrency=50
 ```
 
+### 5.4 协议账号口令探测（weak）
+
+```bash
+go run ./cmd weak -target example.com -ports 21,22,3306,5432,6379
+```
+
+### 5.5 端口扫描后附加弱口令探测
+
+```bash
+go run ./cmd port -target example.com -ports 21,22,3306,5432,6379 -weak
+```
+
 参数说明：
 - `-proto`: `tcp` 或 `udp`
 - `-ips`: 多目标，逗号分隔（与 `-target` 二选一）
@@ -163,6 +181,11 @@ go run ./cmd \
 - `-honeypot-open-ratio`: 疑似蜜罐判定开放占比阈值（默认 `0.85`，范围 `0~1`）
 - `-csv`: 是否写入 CSV 结果文件（默认关闭）
 - `-csv-mode`: CSV 写入模式，`append|overwrite`（默认 `append`）
+- `-weak`: `port` 模式下附加协议账号口令探测
+- `-weak-protocols`: `port` 模式下仅探测指定协议，逗号分隔
+- `-weak-concurrency`: `port` 模式下 secprobe 并发数
+- `-weak-stop-on-success`: `port` 模式下单目标命中后停止继续尝试
+- `-weak-dict-dir`: `port` 模式下自定义协议字典目录
 - `-dict`: `simple|normal|diff`
 - `-dict-file`: 自定义字典文件路径
 - `-dict-max`: 最大加载字典行数，`0` 表示不限制
@@ -267,7 +290,29 @@ if err != nil {
 fmt.Println(dirs.Target, dirs.Port, len(dirs.Paths))
 ```
 
-### 6.5 依赖注入（DI）集成示例
+### 6.5 协议账号口令探测调用
+
+```go
+scanResult, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
+    Target:   "127.0.0.1",
+    PortSpec: "21,22,3306,5432,6379",
+    Protocol: assetprobe.ProtocolTCP,
+})
+if err != nil {
+    panic(err)
+}
+
+security := secprobe.Run(
+    context.Background(),
+    secprobe.BuildCandidates(scanResult, secprobe.CredentialProbeOptions{}),
+    secprobe.CredentialProbeOptions{},
+)
+
+out, _ := security.ToJSON(true)
+fmt.Println(string(out))
+```
+
+### 6.6 依赖注入（DI）集成示例
 
 适合在你的业务服务中抽象接口，便于测试替换：
 

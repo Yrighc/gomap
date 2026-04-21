@@ -20,6 +20,11 @@ import (
 
 const csvTimeLayout = "2006-01-02 15:04:05"
 
+type portWithWeakOutput struct {
+	Asset    *assetprobe.ScanResult `json:"asset"`
+	Security *secprobe.RunResult    `json:"security"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printRootUsage()
@@ -179,6 +184,11 @@ func runPort(args []string) {
 	enableCSV := fs.Bool("csv", false, "[可选] 将扫描结果写入 logs/port.csv")
 	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	enableWeak := fs.Bool("weak", false, "[可选] 在端口扫描后执行账号口令探测")
+	weakProtocols := fs.String("weak-protocols", "", "[可选] 限定 weak 探测协议，逗号分隔")
+	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] weak 探测并发数")
+	weakStopOnSuccess := fs.Bool("weak-stop-on-success", true, "[可选] weak 命中后停止继续尝试")
+	weakDictDir := fs.String("weak-dict-dir", "", "[可选] 自定义 weak 字典目录")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -214,6 +224,10 @@ func runPort(args []string) {
 	}
 	if finalPortRateLimit < 0 {
 		fmt.Fprintln(os.Stderr, "ratelimit 不能小于 0")
+		os.Exit(1)
+	}
+	if *enableWeak && *weakConcurrency <= 0 {
+		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
 		os.Exit(1)
 	}
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
@@ -278,7 +292,15 @@ func runPort(args []string) {
 			fmt.Fprintf(os.Stderr, "scan %s failed: empty result\n", item.Target)
 			continue
 		}
-		output, _ := res.ToJSON(true)
+		var security *secprobe.RunResult
+		if *enableWeak {
+			weakOpts := buildPortWeakProbeOptions(*weakProtocols, *weakConcurrency, time.Duration(*timeout)*time.Second, *weakStopOnSuccess, *weakDictDir)
+			candidates := secprobe.BuildCandidates(res, weakOpts)
+			weakResult := secprobe.Run(context.Background(), candidates, weakOpts)
+			security = &weakResult
+		}
+
+		output, _ := marshalPortOutput(res, security, true)
 		fmt.Println(string(output))
 
 		if csvWriter != nil {
@@ -702,4 +724,24 @@ func splitComma(v string) []string {
 		}
 	}
 	return out
+}
+
+func buildPortWeakProbeOptions(protocols string, concurrency int, timeout time.Duration, stopOnSuccess bool, dictDir string) secprobe.CredentialProbeOptions {
+	return secprobe.CredentialProbeOptions{
+		Protocols:     splitComma(protocols),
+		Concurrency:   concurrency,
+		Timeout:       timeout,
+		StopOnSuccess: stopOnSuccess,
+		DictDir:       strings.TrimSpace(dictDir),
+	}
+}
+
+func marshalPortOutput(asset *assetprobe.ScanResult, security *secprobe.RunResult, pretty bool) ([]byte, error) {
+	if security == nil {
+		return assetprobe.MarshalJSON(asset, pretty)
+	}
+	return assetprobe.MarshalJSON(portWithWeakOutput{
+		Asset:    asset,
+		Security: security,
+	}, pretty)
 }
