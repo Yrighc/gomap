@@ -21,6 +21,9 @@ func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
 	for _, candidate := range []SecurityCandidate{
 		{Service: "ssh", Port: 22},
 		{Service: "ftp", Port: 21},
+		{Service: "mysql", Port: 3306},
+		{Service: "postgresql", Port: 5432},
+		{Service: "redis", Port: 6379},
 		{Service: "telnet", Port: 23},
 	} {
 		if _, ok := r.Lookup(candidate); !ok {

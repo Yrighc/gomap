@@ -4,6 +4,9 @@ import (
 	"context"
 
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
+	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
+	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
+	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 )
@@ -12,6 +15,9 @@ func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(sshprobe.New())
 	r.Register(ftpprobe.New())
+	r.Register(mysqlprobe.New())
+	r.Register(postgresqlprobe.New())
+	r.Register(redisprobe.New())
 	r.Register(telnetprobe.New())
 	return r
 }
