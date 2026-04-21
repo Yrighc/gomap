@@ -3,9 +3,6 @@ package secprobe
 import "encoding/json"
 
 func marshalJSON(v any, pretty bool) ([]byte, error) {
-	if v == nil {
-		return []byte("null"), nil
-	}
 	if pretty {
 		return json.MarshalIndent(v, "", "  ")
 	}
