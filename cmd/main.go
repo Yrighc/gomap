@@ -7,13 +7,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/yrighc/gomap/pkg/assetprobe"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yrighc/gomap/pkg/assetprobe"
+	"github.com/yrighc/gomap/pkg/secprobe"
 )
 
 const csvTimeLayout = "2006-01-02 15:04:05"
@@ -31,6 +33,8 @@ func main() {
 		runWeb(os.Args[2:])
 	case "dir":
 		runDir(os.Args[2:])
+	case "weak":
+		runWeak(os.Args[2:])
 	case "help", "-h", "--help":
 		printRootUsage()
 	default:
@@ -43,6 +47,108 @@ func main() {
 		printRootUsage()
 		os.Exit(1)
 	}
+}
+
+func runWeak(args []string) {
+	fs := flag.NewFlagSet("weak", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	fs.Usage = func() {
+		fmt.Println("用法: gomap weak [options]")
+		fmt.Println()
+		fmt.Println("选项:")
+		fs.PrintDefaults()
+		fmt.Println()
+		fmt.Println("示例:")
+		fmt.Println("  gomap weak -target example.com -ports 21,22,3306,5432,6379")
+	}
+
+	target := fs.String("target", "", "[必选，和 -ips 二选一] 扫描目标 IP 或域名")
+	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
+	ports := fs.String("ports", "21,22,23,3306,5432,6379", "[可选] 端口表达式，例如 21,22,3306")
+	protocols := fs.String("protocols", "", "[可选] 仅探测指定协议，逗号分隔")
+	timeout := fs.Int("timeout", 3, "[可选] 资产发现与 secprobe 超时秒数")
+	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] secprobe 并发数")
+	dictDir := fs.String("dict-dir", "", "[可选] 自定义协议字典目录")
+	inlineCreds := fs.String("up", "", "[可选] 内联凭证，格式 'admin : admin,root : root'")
+	credFile := fs.String("upf", "", "[可选] 凭证文件，一行一个 'admin : admin'")
+	stopOnSuccess := fs.Bool("stop-on-success", true, "[可选] 单目标命中后停止继续尝试")
+	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+
+	targets := collectTargets(*target, *ips)
+	if len(targets) == 0 {
+		fmt.Fprintln(os.Stderr, "target 不能为空，例如: gomap weak -target example.com 或 -ips 1.1.1.1,example.com")
+		os.Exit(1)
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, "timeout 必须大于 0")
+		os.Exit(1)
+	}
+	if *weakConcurrency <= 0 {
+		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
+		os.Exit(1)
+	}
+
+	creds, err := collectCredentials(*inlineCreds, *credFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	discoveryTimeout := time.Duration(*timeout) * time.Second
+	scanner, err := assetprobe.NewScanner(assetprobe.Options{
+		Timeout:    discoveryTimeout,
+		ConsoleLog: *verbose,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	batchRes, err := scanner.ScanTargets(context.Background(), targets, assetprobe.ScanCommonOptions{
+		PortSpec: *ports,
+		Protocol: assetprobe.ProtocolTCP,
+		Timeout:  discoveryTimeout,
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "batch scan finished with error: %v\n", err)
+	}
+
+	secprobeOpts := secprobe.CredentialProbeOptions{
+		Protocols:     splitComma(*protocols),
+		Concurrency:   *weakConcurrency,
+		Timeout:       discoveryTimeout,
+		StopOnSuccess: *stopOnSuccess,
+		DictDir:       strings.TrimSpace(*dictDir),
+		Credentials:   creds,
+	}
+
+	candidates := make([]secprobe.SecurityCandidate, 0)
+	for _, item := range batchRes.Results {
+		if item.Error != "" {
+			fmt.Fprintf(os.Stderr, "scan %s failed: %s\n", item.Target, item.Error)
+			continue
+		}
+		if item.Result == nil {
+			fmt.Fprintf(os.Stderr, "scan %s failed: empty result\n", item.Target)
+			continue
+		}
+		candidates = append(candidates, secprobe.BuildCandidates(item.Result, secprobeOpts)...)
+	}
+
+	result := secprobe.Run(context.Background(), candidates, secprobeOpts)
+	output, err := result.ToJSON(true)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(string(output))
 }
 
 func runPort(args []string) {
@@ -500,11 +606,13 @@ func printRootUsage() {
 	fmt.Println("  port   端口扫描与服务识别")
 	fmt.Println("  web    首页识别")
 	fmt.Println("  dir    目录爆破")
+	fmt.Println("  weak   协议账号口令探测")
 	fmt.Println()
 	fmt.Println("示例:")
 	fmt.Println("  gomap port -target example.com -ports 80,443,1-1024")
 	fmt.Println("  gomap web -url https://example.com")
 	fmt.Println("  gomap dir -url https://example.com -dict normal -dict-max 500")
+	fmt.Println("  gomap weak -target example.com -ports 21,22,3306,5432,6379")
 }
 
 func collectTargets(target, ips string) []string {
@@ -524,6 +632,65 @@ func collectTargets(target, ips string) []string {
 	add(target)
 	for _, item := range strings.Split(ips, ",") {
 		add(item)
+	}
+	return out
+}
+
+func collectCredentials(inline, file string) ([]secprobe.Credential, error) {
+	lines := make([]string, 0)
+	if strings.TrimSpace(inline) != "" {
+		lines = append(lines, splitComma(inline)...)
+	}
+	if strings.TrimSpace(file) != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")...)
+	}
+
+	out := make([]secprobe.Credential, 0, len(lines))
+	for _, line := range lines {
+		username, password, ok := parseCredentialPair(line)
+		if !ok {
+			continue
+		}
+		out = append(out, secprobe.Credential{
+			Username: username,
+			Password: password,
+		})
+	}
+	return out, nil
+}
+
+func parseCredentialPair(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	username := strings.TrimSpace(parts[0])
+	password := strings.TrimSpace(parts[1])
+	if username == "" || password == "" {
+		return "", "", false
+	}
+	return username, password, true
+}
+
+func splitComma(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
 	}
 	return out
 }
