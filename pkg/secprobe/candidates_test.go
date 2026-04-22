@@ -57,6 +57,27 @@ func TestNormalizeServiceNameSupportsWeakAuthAliases(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceNameSupportsGenericSSLSuffixCompatibility(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		want    string
+	}{
+		{name: "ssh ssl suffix", service: "ssh/ssl", want: "ssh"},
+		{name: "mysql ssl suffix", service: "mysql/ssl", want: "mysql"},
+		{name: "postgresql ssl suffix", service: "postgresql/ssl", want: "postgresql"},
+		{name: "postgres alias ssl suffix", service: "postgres/ssl", want: "postgresql"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeServiceName(tt.service, 0); got != tt.want {
+				t.Fatalf("NormalizeServiceName(%q, 0) = %q, want %q", tt.service, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeServiceNameDoesNotBroadenUnknownTLSAliases(t *testing.T) {
 	if got := NormalizeServiceName("ssh/tls", 0); got != "" {
 		t.Fatalf("expected ssh/tls without known port to stay unsupported, got %q", got)

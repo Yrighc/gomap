@@ -66,11 +66,11 @@ func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	if token != "" {
 		for _, spec := range builtinProtocolSpecs {
 			if spec.Name == token {
-				return spec, true
+				return cloneProtocolSpec(spec), true
 			}
 			for _, alias := range spec.Aliases {
 				if alias == token {
-					return spec, true
+					return cloneProtocolSpec(spec), true
 				}
 			}
 		}
@@ -80,7 +80,7 @@ func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 		for _, spec := range builtinProtocolSpecs {
 			for _, candidatePort := range spec.Ports {
 				if candidatePort == port {
-					return spec, true
+					return cloneProtocolSpec(spec), true
 				}
 			}
 		}
@@ -105,5 +105,14 @@ func ProtocolSupportsKind(service string, kind ProbeKind) bool {
 func normalizeProtocolToken(service string) string {
 	service = strings.ToLower(strings.TrimSpace(service))
 	service = strings.TrimSuffix(service, "?")
+	service = strings.TrimSuffix(service, "/ssl")
 	return service
+}
+
+func cloneProtocolSpec(spec ProtocolSpec) ProtocolSpec {
+	spec.Aliases = append([]string(nil), spec.Aliases...)
+	spec.Ports = append([]int(nil), spec.Ports...)
+	spec.DictNames = append([]string(nil), spec.DictNames...)
+	spec.ProbeKinds = append([]ProbeKind(nil), spec.ProbeKinds...)
+	return spec
 }

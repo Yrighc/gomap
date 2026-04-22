@@ -1,6 +1,9 @@
 package secprobe
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 	tests := []struct {
@@ -8,12 +11,14 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 		service string
 		port    int
 		want    string
+		dicts   []string
+		enrich  bool
 	}{
-		{name: "postgres alias", service: "postgres", want: "postgresql"},
-		{name: "pgsql alias", service: "pgsql", want: "postgresql"},
-		{name: "mongo alias", service: "mongo", want: "mongodb"},
-		{name: "redis tls alias", service: "redis/tls", want: "redis"},
-		{name: "mongodb port fallback", port: 27017, want: "mongodb"},
+		{name: "postgres alias", service: "postgres", want: "postgresql", dicts: []string{"postgresql", "postgres"}},
+		{name: "pgsql alias", service: "pgsql", want: "postgresql", dicts: []string{"postgresql", "postgres"}},
+		{name: "mongo alias", service: "mongo", want: "mongodb", dicts: []string{"mongodb", "mongo"}, enrich: true},
+		{name: "redis tls alias", service: "redis/tls", want: "redis", dicts: []string{"redis"}, enrich: true},
+		{name: "mongodb port fallback", port: 27017, want: "mongodb", dicts: []string{"mongodb", "mongo"}, enrich: true},
 	}
 
 	for _, tt := range tests {
@@ -25,7 +30,43 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 			if spec.Name != tt.want {
 				t.Fatalf("expected %q, got %q", tt.want, spec.Name)
 			}
+			if !reflect.DeepEqual(spec.DictNames, tt.dicts) {
+				t.Fatalf("expected dict names %v, got %v", tt.dicts, spec.DictNames)
+			}
+			if spec.SupportsEnrichment != tt.enrich {
+				t.Fatalf("expected SupportsEnrichment=%v, got %v", tt.enrich, spec.SupportsEnrichment)
+			}
 		})
+	}
+}
+
+func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
+	spec, ok := LookupProtocolSpec("redis", 0)
+	if !ok {
+		t.Fatal("expected redis protocol spec")
+	}
+
+	spec.Aliases[0] = "mutated"
+	spec.Ports[0] = 1
+	spec.DictNames[0] = "changed"
+	spec.ProbeKinds[0] = ProbeKindUnauthorized
+
+	again, ok := LookupProtocolSpec("redis", 0)
+	if !ok {
+		t.Fatal("expected redis protocol spec on second lookup")
+	}
+
+	if again.Aliases[0] != "redis/tls" {
+		t.Fatalf("expected aliases to stay isolated, got %v", again.Aliases)
+	}
+	if again.Ports[0] != 6379 {
+		t.Fatalf("expected ports to stay isolated, got %v", again.Ports)
+	}
+	if again.DictNames[0] != "redis" {
+		t.Fatalf("expected dict names to stay isolated, got %v", again.DictNames)
+	}
+	if again.ProbeKinds[0] != ProbeKindCredential {
+		t.Fatalf("expected probe kinds to stay isolated, got %v", again.ProbeKinds)
 	}
 }
 
