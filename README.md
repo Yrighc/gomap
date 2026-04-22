@@ -189,6 +189,12 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 - `v1.3` 已增强内部执行状态与失败分类，但 CLI / JSON 仍保持兼容，不额外暴露 `Stage`、`FailureReason`、`Capabilities` 等内部字段
 - `v1.3` 继续保持默认保守策略，不新增额外显示控制参数
 
+### 5.4.1 secprobe v1.4 扩展模式说明
+
+- `secprobe` 在 `v1.4` 之后采用“代码驱动协议实现 + 配置驱动协议元数据”的扩展模式：协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中，协议名、别名、默认端口、字典名、能力声明等元数据集中收敛。
+- 新增协议不建议只改配置文件；仅补 catalog / 字典等配置并不能让协议自动可用，通常仍需要补充 `internal/secprobe/<protocol>/` 下的协议实现代码，并完成默认 registry / enrichment router 的显式接线。
+- 扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
+
 ### 5.5 端口扫描后附加弱口令探测
 
 ```bash
