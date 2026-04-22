@@ -81,8 +81,15 @@ func TestRunWithRegistrySkipsUnauthorizedProbeWhenDisabled(t *testing.T) {
 	if len(result.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(result.Results))
 	}
-	if got := result.Results[0]; got.Error != "unsupported protocol" {
+	got := result.Results[0]
+	if got.Error != "unsupported protocol" {
 		t.Fatalf("expected unsupported protocol when unauth disabled, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindCredential {
+		t.Fatalf("expected public probe kind to keep credential default when unauth disabled, got %+v", got)
+	}
+	if got.FindingType != FindingTypeCredentialValid {
+		t.Fatalf("expected public finding type to keep credential default when unauth disabled, got %+v", got)
 	}
 }
 
@@ -163,6 +170,37 @@ func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testi
 	}
 	if got.FindingType != FindingTypeUnauthorizedAccess {
 		t.Fatalf("expected unauthorized finding type after credential setup failure, got %+v", got)
+	}
+}
+
+func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "customsvc-credential",
+		kind:    ProbeKindCredential,
+		service: "customsvc",
+	})
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       1234,
+		Service:    "customsvc",
+	}}, CredentialProbeOptions{
+		DictDir: filepath.Join(t.TempDir(), "missing"),
+	})
+
+	if result.Meta.Failed != 1 {
+		t.Fatalf("expected missing credentials to count as failed, got %+v", result.Meta)
+	}
+	if result.Meta.Skipped != 0 {
+		t.Fatalf("expected missing credentials not to count as skipped, got %+v", result.Meta)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if result.Results[0].Error == "" {
+		t.Fatalf("expected missing credentials result to keep error detail, got %+v", result.Results[0])
 	}
 }
 

@@ -61,13 +61,20 @@ func (r *SecurityResult) ToJSON(pretty bool) ([]byte, error) { return marshalJSO
 func (r *RunResult) ToJSON(pretty bool) ([]byte, error)      { return marshalJSON(r, pretty) }
 
 func exportSecurityResult(result core.SecurityResult) SecurityResult {
+	probeKind := result.ProbeKind
+	findingType := result.FindingType
+	if result.SkipReason == core.SkipReasonProbeDisabled && result.ProbeKind == core.ProbeKindUnauthorized {
+		probeKind = core.ProbeKindCredential
+		findingType = core.FindingTypeCredentialValid
+	}
+
 	return SecurityResult{
 		Target:      result.Target,
 		ResolvedIP:  result.ResolvedIP,
 		Port:        result.Port,
 		Service:     result.Service,
-		ProbeKind:   result.ProbeKind,
-		FindingType: result.FindingType,
+		ProbeKind:   probeKind,
+		FindingType: findingType,
 		Success:     result.Success,
 		Username:    result.Username,
 		Password:    result.Password,

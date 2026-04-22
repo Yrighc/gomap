@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,48 +148,77 @@ func runWithRegistryInternal(ctx context.Context, registry *Registry, candidates
 }
 
 func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (core.SecurityResult, probeStatus) {
-	base := defaultResultForCandidate(registry, candidate, opts)
+	credentialProber, hasCredential := registry.lookupCore(candidate, ProbeKindCredential)
+	unauthorizedProber, hasUnauthorized := registry.lookupCore(candidate, ProbeKindUnauthorized)
 
+	if !hasCredential && hasUnauthorized && !opts.EnableUnauthorized {
+		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
+		return markSkipped(result, core.SkipReasonProbeDisabled, "unsupported protocol"), probeSkipped
+	}
+
+	active := make([]struct {
+		kind   ProbeKind
+		prober core.Prober
+	}, 0, 2)
+	if hasCredential {
+		active = append(active, struct {
+			kind   ProbeKind
+			prober core.Prober
+		}{kind: ProbeKindCredential, prober: credentialProber})
+	}
+	if opts.EnableUnauthorized && hasUnauthorized {
+		active = append(active, struct {
+			kind   ProbeKind
+			prober core.Prober
+		}{kind: ProbeKindUnauthorized, prober: unauthorizedProber})
+	}
+
+	if len(active) == 0 {
+		result := defaultResultForCandidate(registry, candidate, opts)
+		return markSkipped(result, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
+	}
+
+	base := defaultResultForCandidate(registry, candidate, opts)
 	attempted := false
-	for _, kind := range probeKindsForCandidate(opts) {
-		prober, ok := registry.lookupCore(candidate, kind)
-		if !ok {
-			continue
-		}
+	for _, item := range active {
+		current := markMatched(defaultResultForCandidateKind(candidate, item.kind))
 
 		var (
 			creds []Credential
 			err   error
 		)
-		if kind == ProbeKindCredential {
+		if item.kind == ProbeKindCredential {
 			creds, err = credentialsForCandidate(candidate.Service, opts)
 			if err != nil {
-				base.ProbeKind = kind
-				base.FindingType = defaultFindingTypeForKind(kind)
-				base.Error = err.Error()
+				base = markSkipped(current, core.SkipReasonNoCredentials, err.Error())
 				continue
 			}
 		}
 
 		probeCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
-		result := normalizeResult(base, prober.Probe(probeCtx, candidate, opts, creds), kind)
+		result := normalizeResult(current, item.prober.Probe(probeCtx, candidate, opts, creds), item.kind)
 		cancel()
 		attempted = true
 		if result.Success {
-			return result, probeAttemptSucceeded
+			return markConfirmed(result), probeAttemptSucceeded
 		}
-		base = result
+		base = markAttemptFailure(result)
 	}
 
 	if attempted {
 		return base, probeAttemptFailed
 	}
+	if base.SkipReason == core.SkipReasonNoCredentials {
+		return markFailedBeforeAttempt(base), probeFailedBeforeAttempt
+	}
+	if base.SkipReason != "" {
+		return base, probeSkipped
+	}
 	if base.Error != "" {
-		return base, probeFailedBeforeAttempt
+		return markFailedBeforeAttempt(base), probeFailedBeforeAttempt
 	}
 
-	base.Error = "unsupported protocol"
-	return base, probeSkipped
+	return markSkipped(base, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
 }
 
 func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
@@ -235,11 +266,15 @@ func canceledResult(registry *Registry, candidate SecurityCandidate, opts Creden
 	if err != nil {
 		result.Error = err.Error()
 	}
-	return result
+	return markFailedBeforeAttempt(result)
 }
 
 func defaultResultForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) core.SecurityResult {
 	kind := defaultProbeKindForCandidate(registry, candidate, opts)
+	return defaultResultForCandidateKind(candidate, kind)
+}
+
+func defaultResultForCandidateKind(candidate SecurityCandidate, kind ProbeKind) core.SecurityResult {
 	return core.SecurityResult{
 		Target:      candidate.Target,
 		ResolvedIP:  candidate.ResolvedIP,
@@ -283,7 +318,8 @@ func applyEnrichment(ctx context.Context, results []core.SecurityResult, opts Cr
 		if !item.Success {
 			continue
 		}
-		out[i] = runEnrichment(ctx, item, opts)
+		enriched := runEnrichment(ctx, item, opts)
+		out[i] = markEnriched(item, enriched)
 	}
 	return out
 }
@@ -323,4 +359,71 @@ func probeKindsForCandidate(opts CredentialProbeOptions) []ProbeKind {
 		kinds = append(kinds, ProbeKindUnauthorized)
 	}
 	return kinds
+}
+
+func markMatched(result core.SecurityResult) core.SecurityResult {
+	result.Stage = core.StageMatched
+	result.SkipReason = ""
+	return result
+}
+
+func markSkipped(result core.SecurityResult, reason core.SkipReason, message string) core.SecurityResult {
+	result.SkipReason = reason
+	if message != "" {
+		result.Error = message
+	}
+	return result
+}
+
+func markAttemptFailure(result core.SecurityResult) core.SecurityResult {
+	result.Stage = core.StageAttempted
+	result.SkipReason = ""
+	if result.FailureReason == "" {
+		result.FailureReason = inferFailureReason(result.Error)
+	}
+	return result
+}
+
+func markFailedBeforeAttempt(result core.SecurityResult) core.SecurityResult {
+	if result.FailureReason == "" {
+		result.FailureReason = inferFailureReason(result.Error)
+	}
+	return result
+}
+
+func markConfirmed(result core.SecurityResult) core.SecurityResult {
+	result.Stage = core.StageConfirmed
+	result.SkipReason = ""
+	return result
+}
+
+func markEnriched(before core.SecurityResult, after core.SecurityResult) core.SecurityResult {
+	if after.Success && enrichmentAdded(before.Enrichment, after.Enrichment) {
+		after.Stage = core.StageEnriched
+		return after
+	}
+	after.Stage = before.Stage
+	return after
+}
+
+func enrichmentAdded(before map[string]any, after map[string]any) bool {
+	return len(after) > 0 && !reflect.DeepEqual(before, after)
+}
+
+func inferFailureReason(message string) core.FailureReason {
+	text := strings.ToLower(message)
+	switch {
+	case text == "":
+		return core.FailureReasonInsufficientConfirmation
+	case strings.Contains(text, "context canceled"):
+		return core.FailureReasonCanceled
+	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"), strings.Contains(text, "timed out"):
+		return core.FailureReasonTimeout
+	case strings.Contains(text, "auth"), strings.Contains(text, "password"), strings.Contains(text, "login"), strings.Contains(text, "access denied"), strings.Contains(text, "permission denied"):
+		return core.FailureReasonAuthentication
+	case strings.Contains(text, "dial"), strings.Contains(text, "connect"), strings.Contains(text, "connection"), strings.Contains(text, "refused"), strings.Contains(text, "reset by peer"), strings.Contains(text, "no route"):
+		return core.FailureReasonConnection
+	default:
+		return core.FailureReasonInsufficientConfirmation
+	}
 }
