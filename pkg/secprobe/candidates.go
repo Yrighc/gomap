@@ -11,6 +11,7 @@ var supportedByPort = map[int]string{
 	21:   "ftp",
 	22:   "ssh",
 	23:   "telnet",
+	27017: "mongodb",
 	3306: "mysql",
 	5432: "postgresql",
 	6379: "redis",
@@ -19,9 +20,18 @@ var supportedByPort = map[int]string{
 func NormalizeServiceName(service string, port int) string {
 	service = strings.ToLower(strings.TrimSpace(service))
 	service = strings.TrimSuffix(service, "?")
+	if service == "redis/tls" {
+		service = "redis"
+	}
 	service = strings.TrimSuffix(service, "/ssl")
 	switch service {
-	case "ftp", "ssh", "mysql", "postgresql", "redis", "telnet":
+	case "postgres", "pgsql":
+		service = "postgresql"
+	case "mongo":
+		service = "mongodb"
+	}
+	switch service {
+	case "ftp", "ssh", "mysql", "postgresql", "redis", "telnet", "mongodb":
 		return service
 	case "":
 		return supportedByPort[port]

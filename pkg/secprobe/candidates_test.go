@@ -33,6 +33,36 @@ func TestNormalizeServiceNameUsesKnownPortFallback(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceNameSupportsWeakAuthAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		port    int
+		want    string
+	}{
+		{name: "postgres alias", service: "postgres", want: "postgresql"},
+		{name: "pgsql alias", service: "pgsql", want: "postgresql"},
+		{name: "mongo alias", service: "mongo", want: "mongodb"},
+		{name: "redis tls suffix", service: "redis/tls", want: "redis"},
+		{name: "redis ssl suffix", service: "redis/ssl", want: "redis"},
+		{name: "mongodb port fallback", port: 27017, want: "mongodb"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeServiceName(tt.service, tt.port); got != tt.want {
+				t.Fatalf("NormalizeServiceName(%q, %d) = %q, want %q", tt.service, tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeServiceNameDoesNotBroadenUnknownTLSAliases(t *testing.T) {
+	if got := NormalizeServiceName("ssh/tls", 0); got != "" {
+		t.Fatalf("expected ssh/tls without known port to stay unsupported, got %q", got)
+	}
+}
+
 func TestRegisterAndLookupProber(t *testing.T) {
 	r := NewRegistry()
 	r.Register(stubProber{name: "ssh"})
