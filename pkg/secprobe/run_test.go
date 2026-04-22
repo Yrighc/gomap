@@ -2,6 +2,7 @@ package secprobe
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yrighc/gomap/internal/secprobe/core"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
 )
 
@@ -145,7 +147,7 @@ func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testi
 		Port:       6379,
 		Service:    "redis",
 	}}, CredentialProbeOptions{
-		DictDir:             filepath.Join(t.TempDir(), "missing"),
+		DictDir:            filepath.Join(t.TempDir(), "missing"),
 		EnableUnauthorized: true,
 	})
 
@@ -173,7 +175,7 @@ func TestRunUsesDefaultRegistryForRedisUnauthorized(t *testing.T) {
 		Port:       container.Port,
 		Service:    "redis",
 	}}, CredentialProbeOptions{
-		DictDir:             filepath.Join(t.TempDir(), "missing"),
+		DictDir:            filepath.Join(t.TempDir(), "missing"),
 		Timeout:            5 * time.Second,
 		EnableUnauthorized: true,
 	})
@@ -252,6 +254,83 @@ func TestRunUsesBuiltinCredentialsWhenOverridesMissing(t *testing.T) {
 	}
 	if result.Results[0].Username == "" || result.Results[0].Password == "" {
 		t.Fatalf("expected result to include credential evidence, got %+v", result.Results[0])
+	}
+}
+
+func TestRunWithRegistryInternalKeepsCoreOnlyStateAfterEnrichment(t *testing.T) {
+	registry := NewRegistry()
+	registry.registerCoreProber(coreStateProber{
+		name:    "ssh-core",
+		service: "ssh",
+		result: core.SecurityResult{
+			Service:       "ssh",
+			ProbeKind:     ProbeKindCredential,
+			FindingType:   FindingTypeCredentialValid,
+			Success:       true,
+			Stage:         core.StageConfirmed,
+			FailureReason: core.FailureReasonAuthentication,
+			Capabilities:  []core.Capability{core.CapabilityReadable},
+			Risk:          core.RiskHigh,
+		},
+	})
+
+	restore := stubCoreEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
+		result.Stage = core.StageEnriched
+		result.Enrichment = map[string]any{"source": "stub"}
+		return result
+	})
+	defer restore()
+
+	result := runWithRegistryInternal(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       22,
+		Service:    "ssh",
+	}}, CredentialProbeOptions{
+		EnableEnrichment: true,
+		Credentials:      []Credential{{Username: "root", Password: "root"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 internal result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if got.Stage != core.StageEnriched {
+		t.Fatalf("expected stage to survive enrichment, got %+v", got)
+	}
+	if got.FailureReason != core.FailureReasonAuthentication {
+		t.Fatalf("expected failure reason to be preserved, got %+v", got)
+	}
+	if !reflect.DeepEqual(got.Capabilities, []core.Capability{core.CapabilityReadable}) {
+		t.Fatalf("expected capabilities to be preserved, got %+v", got)
+	}
+	if got.Risk != core.RiskHigh {
+		t.Fatalf("expected risk to be preserved, got %+v", got)
+	}
+}
+
+func TestRunWithRegistryZeroCandidatesKeepsNilResults(t *testing.T) {
+	result := RunWithRegistry(context.Background(), NewRegistry(), nil, CredentialProbeOptions{})
+	if result.Results != nil {
+		t.Fatalf("expected nil results for zero candidates, got %#v", result.Results)
+	}
+
+	data, err := result.ToJSON(false)
+	if err != nil {
+		t.Fatalf("marshal zero-candidate result: %v", err)
+	}
+
+	var decoded struct {
+		Results []SecurityResult `json:"Results"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal zero-candidate json: %v", err)
+	}
+	if decoded.Results != nil {
+		t.Fatalf("expected JSON null results to decode as nil slice, got %#v", decoded.Results)
+	}
+	if string(data) != `{"Meta":{"Candidates":0,"Attempted":0,"Succeeded":0,"Failed":0,"Skipped":0},"Results":null}` {
+		t.Fatalf("unexpected zero-candidate JSON: %s", string(data))
 	}
 }
 
@@ -460,4 +539,28 @@ func (s *stubCountingProber) Probe(_ context.Context, candidate SecurityCandidat
 		result.Password = creds[0].Password
 	}
 	return result
+}
+
+type coreStateProber struct {
+	name    string
+	service string
+	result  core.SecurityResult
+}
+
+func (s coreStateProber) Name() string { return s.name }
+
+func (s coreStateProber) Kind() core.ProbeKind { return core.ProbeKindCredential }
+
+func (s coreStateProber) Match(candidate core.SecurityCandidate) bool {
+	return candidate.Service == s.service
+}
+
+func (s coreStateProber) Probe(context.Context, core.SecurityCandidate, core.CredentialProbeOptions, []core.Credential) core.SecurityResult {
+	return s.result
+}
+
+func stubCoreEnrichmentRunner(fn func(context.Context, core.SecurityResult, CredentialProbeOptions) core.SecurityResult) func() {
+	old := runEnrichment
+	runEnrichment = fn
+	return func() { runEnrichment = old }
 }

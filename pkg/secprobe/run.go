@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yrighc/gomap/internal/secprobe/core"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
@@ -27,20 +28,20 @@ const (
 	probeAttemptSucceeded
 )
 
-var runEnrichment = func(ctx context.Context, result SecurityResult, opts CredentialProbeOptions) SecurityResult {
+var runEnrichment = func(ctx context.Context, result core.SecurityResult, opts CredentialProbeOptions) core.SecurityResult {
 	return enrichResult(ctx, result, opts)
 }
 
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
-	r.Register(sshprobe.New())
-	r.Register(ftpprobe.New())
-	r.Register(mysqlprobe.New())
-	r.Register(postgresqlprobe.New())
-	r.Register(redisprobe.New())
-	r.Register(redisprobe.NewUnauthorized())
-	r.Register(telnetprobe.New())
-	r.Register(mongodbprobe.NewUnauthorized())
+	r.registerCoreProber(sshprobe.New())
+	r.registerCoreProber(ftpprobe.New())
+	r.registerCoreProber(mysqlprobe.New())
+	r.registerCoreProber(postgresqlprobe.New())
+	r.registerCoreProber(redisprobe.New())
+	r.registerCoreProber(redisprobe.NewUnauthorized())
+	r.registerCoreProber(telnetprobe.New())
+	r.registerCoreProber(mongodbprobe.NewUnauthorized())
 	return r
 }
 
@@ -58,20 +59,24 @@ func Run(ctx context.Context, candidates []SecurityCandidate, opts CredentialPro
 }
 
 func RunWithRegistry(ctx context.Context, registry *Registry, candidates []SecurityCandidate, opts CredentialProbeOptions) RunResult {
+	return exportRunResult(runWithRegistryInternal(ctx, registry, candidates, opts))
+}
+
+func runWithRegistryInternal(ctx context.Context, registry *Registry, candidates []SecurityCandidate, opts CredentialProbeOptions) core.RunResult {
 	applyDefaults(&opts)
 
 	if registry == nil {
 		registry = DefaultRegistry()
 	}
 
-	result := RunResult{
-		Meta: SecurityMeta{Candidates: len(candidates)},
+	result := core.RunResult{
+		Meta: core.SecurityMeta{Candidates: len(candidates)},
 	}
 	if len(candidates) == 0 {
 		return result
 	}
 	if err := ctx.Err(); err != nil {
-		results := make([]SecurityResult, len(candidates))
+		results := make([]core.SecurityResult, len(candidates))
 		for i, candidate := range candidates {
 			results[i] = canceledResult(registry, candidate, opts, err)
 		}
@@ -86,7 +91,7 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	}
 
 	jobs := make(chan indexedCandidate, len(candidates))
-	results := make([]SecurityResult, len(candidates))
+	results := make([]core.SecurityResult, len(candidates))
 
 	var (
 		mu sync.Mutex
@@ -140,12 +145,12 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	return result
 }
 
-func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (SecurityResult, probeStatus) {
+func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (core.SecurityResult, probeStatus) {
 	base := defaultResultForCandidate(registry, candidate, opts)
 
 	attempted := false
 	for _, kind := range probeKindsForCandidate(opts) {
-		prober, ok := registry.Lookup(candidate, kind)
+		prober, ok := registry.lookupCore(candidate, kind)
 		if !ok {
 			continue
 		}
@@ -225,7 +230,7 @@ func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
 	return nil, fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
-func canceledResult(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions, err error) SecurityResult {
+func canceledResult(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions, err error) core.SecurityResult {
 	result := defaultResultForCandidate(registry, candidate, opts)
 	if err != nil {
 		result.Error = err.Error()
@@ -233,9 +238,9 @@ func canceledResult(registry *Registry, candidate SecurityCandidate, opts Creden
 	return result
 }
 
-func defaultResultForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) SecurityResult {
+func defaultResultForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) core.SecurityResult {
 	kind := defaultProbeKindForCandidate(registry, candidate, opts)
-	return SecurityResult{
+	return core.SecurityResult{
 		Target:      candidate.Target,
 		ResolvedIP:  candidate.ResolvedIP,
 		Port:        candidate.Port,
@@ -245,7 +250,7 @@ func defaultResultForCandidate(registry *Registry, candidate SecurityCandidate, 
 	}
 }
 
-func normalizeResult(base SecurityResult, result SecurityResult, kind ProbeKind) SecurityResult {
+func normalizeResult(base core.SecurityResult, result core.SecurityResult, kind ProbeKind) core.SecurityResult {
 	if result.Target == "" {
 		result.Target = base.Target
 	}
@@ -267,12 +272,12 @@ func normalizeResult(base SecurityResult, result SecurityResult, kind ProbeKind)
 	return result
 }
 
-func applyEnrichment(ctx context.Context, results []SecurityResult, opts CredentialProbeOptions) []SecurityResult {
+func applyEnrichment(ctx context.Context, results []core.SecurityResult, opts CredentialProbeOptions) []core.SecurityResult {
 	if !opts.EnableEnrichment || len(results) == 0 {
 		return results
 	}
 
-	out := make([]SecurityResult, len(results))
+	out := make([]core.SecurityResult, len(results))
 	copy(out, results)
 	for i, item := range out {
 		if !item.Success {
@@ -283,7 +288,7 @@ func applyEnrichment(ctx context.Context, results []SecurityResult, opts Credent
 	return out
 }
 
-func enrichResult(ctx context.Context, result SecurityResult, opts CredentialProbeOptions) SecurityResult {
+func enrichResult(ctx context.Context, result core.SecurityResult, opts CredentialProbeOptions) core.SecurityResult {
 	switch result.Service {
 	case "redis":
 		return redisprobe.Enrich(ctx, result, opts)
@@ -297,7 +302,7 @@ func enrichResult(ctx context.Context, result SecurityResult, opts CredentialPro
 func defaultProbeKindForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) ProbeKind {
 	for _, kind := range probeKindsForCandidate(opts) {
 		if registry != nil {
-			if _, ok := registry.Lookup(candidate, kind); ok {
+			if _, ok := registry.lookupCore(candidate, kind); ok {
 				return kind
 			}
 		}

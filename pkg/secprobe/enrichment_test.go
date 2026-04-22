@@ -4,6 +4,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/yrighc/gomap/internal/secprobe/core"
 )
 
 func TestRunWithRegistryAddsRedisEnrichmentWhenEnabled(t *testing.T) {
@@ -21,7 +23,7 @@ func TestRunWithRegistryAddsRedisEnrichmentWhenEnabled(t *testing.T) {
 		},
 	})
 
-	restore := stubEnrichmentRunner(func(_ context.Context, result SecurityResult, _ CredentialProbeOptions) SecurityResult {
+	restore := stubEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
 		result.Enrichment = map[string]any{"info_excerpt": "# Server\r\nredis_version:7.4.2"}
 		return result
 	})
@@ -57,7 +59,7 @@ func TestRunWithRegistrySkipsEnrichmentWhenDisabled(t *testing.T) {
 	})
 
 	calls := 0
-	restore := stubEnrichmentRunner(func(_ context.Context, result SecurityResult, _ CredentialProbeOptions) SecurityResult {
+	restore := stubEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
 		calls++
 		result.Enrichment = map[string]any{"info_excerpt": "should not run"}
 		return result
@@ -96,7 +98,7 @@ func TestRunWithRegistrySkipsEnrichmentForFailedResult(t *testing.T) {
 	})
 
 	calls := 0
-	restore := stubEnrichmentRunner(func(_ context.Context, result SecurityResult, _ CredentialProbeOptions) SecurityResult {
+	restore := stubEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
 		calls++
 		result.Enrichment = map[string]any{"info_excerpt": "should not run"}
 		return result
@@ -136,7 +138,7 @@ func TestRunWithRegistryKeepsFindingSemanticsWhenEnrichmentReturnsError(t *testi
 		},
 	})
 
-	restore := stubEnrichmentRunner(func(_ context.Context, result SecurityResult, _ CredentialProbeOptions) SecurityResult {
+	restore := stubEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
 		result.Enrichment = map[string]any{"error": "enrichment failed"}
 		return result
 	})
@@ -168,14 +170,14 @@ func TestRunWithRegistryKeepsFindingSemanticsWhenEnrichmentReturnsError(t *testi
 }
 
 func TestApplyEnrichmentReturnsCopy(t *testing.T) {
-	original := []SecurityResult{{
+	original := []core.SecurityResult{{
 		Service:     "redis",
 		ProbeKind:   ProbeKindUnauthorized,
 		FindingType: FindingTypeUnauthorizedAccess,
 		Success:     true,
 	}}
 
-	restore := stubEnrichmentRunner(func(_ context.Context, result SecurityResult, _ CredentialProbeOptions) SecurityResult {
+	restore := stubEnrichmentRunner(func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
 		result.Enrichment = map[string]any{"info_excerpt": "copied"}
 		return result
 	})
@@ -193,7 +195,7 @@ func TestApplyEnrichmentReturnsCopy(t *testing.T) {
 	}
 }
 
-func stubEnrichmentRunner(fn func(context.Context, SecurityResult, CredentialProbeOptions) SecurityResult) func() {
+func stubEnrichmentRunner(fn func(context.Context, core.SecurityResult, CredentialProbeOptions) core.SecurityResult) func() {
 	old := runEnrichment
 	runEnrichment = fn
 	return func() { runEnrichment = old }

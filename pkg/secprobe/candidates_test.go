@@ -66,8 +66,38 @@ func TestNormalizeServiceNameDoesNotBroadenUnknownTLSAliases(t *testing.T) {
 func TestRegisterAndLookupProber(t *testing.T) {
 	r := NewRegistry()
 	r.Register(stubProber{name: "ssh"})
-	if _, ok := r.Lookup(SecurityCandidate{Service: "ssh", Port: 22}); !ok {
+	prober, ok := r.Lookup(SecurityCandidate{Service: "ssh", Port: 22})
+	if !ok {
 		t.Fatal("expected ssh prober")
+	}
+	if got := prober.Name(); got != "ssh" {
+		t.Fatalf("expected public prober name ssh, got %q", got)
+	}
+}
+
+func TestBuildCandidatesUsesRegistryLookup(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 22, Open: true, Service: "ssh"},
+		},
+	}
+
+	candidates := BuildCandidates(res, CredentialProbeOptions{})
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+
+	r := NewRegistry()
+	r.Register(stubProber{name: "ssh"})
+
+	prober, ok := r.Lookup(candidates[0], ProbeKindCredential)
+	if !ok {
+		t.Fatal("expected lookup to return public prober")
+	}
+	if got := prober.Name(); got != "ssh" {
+		t.Fatalf("expected public prober name ssh, got %q", got)
 	}
 }
 
