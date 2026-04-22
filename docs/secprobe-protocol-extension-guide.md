@@ -24,7 +24,7 @@
 - `prober.go`
   - 凭证探测实现，适用于 `credential` 能力
 - `unauthorized_prober.go`
-  - 未授权探测实现，适用于 `unauthorized` 能力
+  - 推荐作为未授权探测实现文件名，适用于 `unauthorized` 能力
 - `enrichment.go`
   - 命中后的补采逻辑，适用于 `enrichment` 能力
 - `*_test.go`
@@ -67,6 +67,13 @@
 
 新增协议时，优先先补协议目录，再接入实现与注册表。
 
+注意：
+
+- `protocol_catalog` 负责收敛协议元数据和能力声明。
+- catalog 中声明某个能力，不等于默认 registry 会自动注册对应 prober。
+- `SupportsEnrichment` 也不等于 enrichment router 会自动接通对应协议。
+- registry 和 router 仍需单独补齐显式接线。
+
 ### 4. 字典候选路径
 
 如果协议支持凭证探测，字典候选路径由：
@@ -79,7 +86,8 @@
 
 - 优先复用 `DictNames`，不要在协议实现里手拼字典路径。
 - 当前候选文件名规则是 `<name>.txt` 和 `secprobe-<name>.txt`。
-- 内置字典加载仍通过 `pkg/secprobe/assets.go` 和 `app` 内嵌资源处理。
+- 默认内置字典加载仍通过 `pkg/secprobe/assets.go` 和 `app` 内嵌资源处理。
+- 对 `Run()` / 默认 CLI 路径来说，仅补 `DictNames` 还不够；若协议支持内置 credential 字典，还需要同步补齐 `app/assets.go` 中的 embed 资源和 `SecprobeDict` 分支，否则默认内置字典不可用。
 
 ## 哪些内容允许配置化
 
@@ -102,8 +110,9 @@
 推荐做法：
 
 - 优先在 `pkg/secprobe/protocol_catalog.go` 中声明
-- 让 `candidates.go`、`dictionaries.go`、默认能力判断都消费同一份目录
+- 让 `candidates.go`、`dictionaries.go`、默认能力判断尽量消费同一份目录
 - 把“协议有哪些能力”当作元数据声明，而不是在多个调用点各写一份 `switch`
+- 同时明确 registry 注册和 enrichment router 仍是独立接线点，不由 catalog 自动生成
 
 ## 哪些内容必须代码实现
 
@@ -117,7 +126,7 @@
 - 成功确认条件
 - 错误识别与失败分类
 - 证据文本生成
-- 能力标记和风险判断
+- 命中后能力标记
 
 原因：
 
@@ -142,7 +151,7 @@
 5. 在 `internal/secprobe/<protocol>/` 新建协议目录。
 6. 实现对应 prober：
    - `credential` 用 `prober.go`
-   - `unauthorized` 用 `unauthorized_prober.go`
+   - `unauthorized` 优先采用 `unauthorized_prober.go`
 7. 如果协议支持命中后补采，实现 `enrichment.go`。
 8. 在 `pkg/secprobe/default_registry.go` 注册新 prober。
 9. 如果协议支持 enrichment，把路由接入 `pkg/secprobe/enrichment_router.go`。
@@ -152,8 +161,12 @@
    - 超时或取消
    - 证据填写
    - 结果阶段与失败原因填写
-11. 复查字典加载链路是否走协议目录，而不是协议实现私有路径。
-12. 复查新增协议不会修改 `pkg/secprobe` 对外 API、CLI 参数语义和结果导出结构。
+11. 如果协议支持默认内置 credential 字典，复查 `DictNames` 之外的内置字典接线是否补齐：
+   - `app` 内嵌资源已包含对应 `secprobe-*.txt`
+   - `app/assets.go` 的 `SecprobeDict` 已增加协议分支
+   - 默认 `Run()` / CLI 路径可实际加载该协议内置字典
+12. 复查字典加载链路是否走协议目录，而不是协议实现私有路径。
+13. 复查新增协议不会修改 `pkg/secprobe` 对外 API、CLI 参数语义和结果导出结构。
 
 ## 结果语义要求
 
@@ -250,7 +263,8 @@
 
 - enrichment 只能发生在成功结果上。
 - enrichment 负责补充上下文，不负责篡改核心命中结论。
-- enrichment 可以补 `Enrichment` 数据、能力细化或风险信息，但不能把未确认结果“补采成成功”。
+- 当前实现里，`StageEnriched` 的前提是 `Enrichment` map 产生了新的补采数据。
+- enrichment 当前主要用于补 `Enrichment` 数据，不应把未确认结果“补采成成功”，也不应把 `Risk` 当作现阶段接入必填项。
 
 ## 建议的最小交付面
 
