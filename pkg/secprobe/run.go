@@ -66,7 +66,7 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	if err := ctx.Err(); err != nil {
 		results := make([]SecurityResult, len(candidates))
 		for i, candidate := range candidates {
-			results[i] = canceledResult(candidate, err)
+			results[i] = canceledResult(registry, candidate, opts, err)
 		}
 		result.Meta.Failed = len(candidates)
 		result.Results = results
@@ -114,7 +114,7 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	for i, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			for j := i; j < len(candidates); j++ {
-				results[j] = canceledResult(candidates[j], err)
+				results[j] = canceledResult(registry, candidates[j], opts, err)
 				result.Meta.Failed++
 			}
 			break
@@ -134,50 +134,48 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 }
 
 func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (SecurityResult, probeStatus) {
-	base := SecurityResult{
-		Target:      candidate.Target,
-		ResolvedIP:  candidate.ResolvedIP,
-		Port:        candidate.Port,
-		Service:     candidate.Service,
-		FindingType: FindingTypeCredentialValid,
+	base := defaultResultForCandidate(registry, candidate, opts)
+
+	attempted := false
+	for _, kind := range probeKindsForCandidate(opts) {
+		prober, ok := registry.Lookup(candidate, kind)
+		if !ok {
+			continue
+		}
+
+		var (
+			creds []Credential
+			err   error
+		)
+		if kind == ProbeKindCredential {
+			creds, err = credentialsForCandidate(candidate.Service, opts)
+			if err != nil {
+				base.ProbeKind = kind
+				base.FindingType = defaultFindingTypeForKind(kind)
+				base.Error = err.Error()
+				continue
+			}
+		}
+
+		probeCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+		result := normalizeResult(base, prober.Probe(probeCtx, candidate, opts, creds), kind)
+		cancel()
+		attempted = true
+		if result.Success {
+			return result, probeAttemptSucceeded
+		}
+		base = result
 	}
 
-	prober, ok := registry.Lookup(candidate)
-	if !ok {
-		base.Error = "unsupported protocol"
-		return base, probeSkipped
+	if attempted {
+		return base, probeAttemptFailed
 	}
-
-	creds, err := credentialsForCandidate(candidate.Service, opts)
-	if err != nil {
-		base.Error = err.Error()
+	if base.Error != "" {
 		return base, probeFailedBeforeAttempt
 	}
 
-	probeCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
-
-	result := prober.Probe(probeCtx, candidate, opts, creds)
-	if result.Target == "" {
-		result.Target = base.Target
-	}
-	if result.ResolvedIP == "" {
-		result.ResolvedIP = base.ResolvedIP
-	}
-	if result.Port == 0 {
-		result.Port = base.Port
-	}
-	if result.Service == "" {
-		result.Service = base.Service
-	}
-	if result.FindingType == "" {
-		result.FindingType = base.FindingType
-	}
-
-	if result.Success {
-		return result, probeAttemptSucceeded
-	}
-	return result, probeAttemptFailed
+	base.Error = "unsupported protocol"
+	return base, probeSkipped
 }
 
 func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
@@ -220,16 +218,70 @@ func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
 	return nil, fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
-func canceledResult(candidate SecurityCandidate, err error) SecurityResult {
-	result := SecurityResult{
-		Target:      candidate.Target,
-		ResolvedIP:  candidate.ResolvedIP,
-		Port:        candidate.Port,
-		Service:     candidate.Service,
-		FindingType: FindingTypeCredentialValid,
-	}
+func canceledResult(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions, err error) SecurityResult {
+	result := defaultResultForCandidate(registry, candidate, opts)
 	if err != nil {
 		result.Error = err.Error()
 	}
 	return result
+}
+
+func defaultResultForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) SecurityResult {
+	kind := defaultProbeKindForCandidate(registry, candidate, opts)
+	return SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   kind,
+		FindingType: defaultFindingTypeForKind(kind),
+	}
+}
+
+func normalizeResult(base SecurityResult, result SecurityResult, kind ProbeKind) SecurityResult {
+	if result.Target == "" {
+		result.Target = base.Target
+	}
+	if result.ResolvedIP == "" {
+		result.ResolvedIP = base.ResolvedIP
+	}
+	if result.Port == 0 {
+		result.Port = base.Port
+	}
+	if result.Service == "" {
+		result.Service = base.Service
+	}
+	if result.ProbeKind == "" {
+		result.ProbeKind = kind
+	}
+	if result.FindingType == "" {
+		result.FindingType = defaultFindingTypeForKind(kind)
+	}
+	return result
+}
+
+func defaultProbeKindForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) ProbeKind {
+	for _, kind := range probeKindsForCandidate(opts) {
+		if registry != nil {
+			if _, ok := registry.Lookup(candidate, kind); ok {
+				return kind
+			}
+		}
+	}
+	return ProbeKindCredential
+}
+
+func defaultFindingTypeForKind(kind ProbeKind) string {
+	if kind == ProbeKindUnauthorized {
+		return FindingTypeUnauthorizedAccess
+	}
+	return FindingTypeCredentialValid
+}
+
+func probeKindsForCandidate(opts CredentialProbeOptions) []ProbeKind {
+	kinds := []ProbeKind{ProbeKindCredential}
+	if opts.EnableUnauthorized {
+		kinds = append(kinds, ProbeKindUnauthorized)
+	}
+	return kinds
 }

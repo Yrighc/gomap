@@ -2,7 +2,17 @@ package secprobe
 
 import "github.com/yrighc/gomap/internal/secprobe/core"
 
-const FindingTypeCredentialValid = core.FindingTypeCredentialValid
+type ProbeKind = core.ProbeKind
+
+const (
+	FindingTypeCredentialValid    = core.FindingTypeCredentialValid
+	FindingTypeUnauthorizedAccess = core.FindingTypeUnauthorizedAccess
+)
+
+const (
+	ProbeKindCredential   = core.ProbeKindCredential
+	ProbeKindUnauthorized = core.ProbeKindUnauthorized
+)
 
 type SecurityCandidate = core.SecurityCandidate
 type Credential = core.Credential

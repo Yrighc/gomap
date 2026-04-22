@@ -16,6 +16,8 @@ type prober struct{}
 
 func (prober) Name() string { return "ssh" }
 
+func (prober) Kind() core.ProbeKind { return core.ProbeKindCredential }
+
 func (prober) Match(candidate core.SecurityCandidate) bool {
 	return candidate.Service == "ssh"
 }

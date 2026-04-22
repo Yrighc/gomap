@@ -4,10 +4,163 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRunWithRegistryRoutesCandidateToUnauthorizedProber(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Success:     true,
+			Evidence:    "INFO returned redis_version",
+		},
+	})
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+
+	want := SecurityResult{
+		Target:      "demo",
+		ResolvedIP:  "127.0.0.1",
+		Port:        6379,
+		Service:     "redis",
+		ProbeKind:   ProbeKindUnauthorized,
+		FindingType: FindingTypeUnauthorizedAccess,
+		Success:     true,
+		Evidence:    "INFO returned redis_version",
+	}
+	if got := result.Results[0]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected unauthorized result %+v, got %+v", want, got)
+	}
+}
+
+func TestRunWithRegistrySkipsUnauthorizedProbeWhenDisabled(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Success:     true,
+		},
+	})
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if got := result.Results[0]; got.Error != "unsupported protocol" {
+		t.Fatalf("expected unsupported protocol when unauth disabled, got %+v", got)
+	}
+}
+
+func TestRunWithRegistryCanceledUnauthorizedCandidateUsesUnauthorizedDefaults(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+	})
+
+	result := RunWithRegistry(ctx, registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected unauthorized probe kind for canceled result, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected unauthorized finding type for canceled result, got %+v", got)
+	}
+	if got.Error == "" {
+		t.Fatalf("expected canceled result to carry context error, got %+v", got)
+	}
+}
+
+func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "redis-credential",
+		kind:    ProbeKindCredential,
+		service: "redis",
+	})
+	registry.Register(&stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Success:     true,
+			Evidence:    "INFO returned redis_version",
+		},
+	})
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		DictDir:             filepath.Join(t.TempDir(), "missing"),
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected unauthorized fallback success, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected unauthorized probe kind after credential setup failure, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected unauthorized finding type after credential setup failure, got %+v", got)
+	}
+}
 
 func TestRunSkipsUnsupportedCandidates(t *testing.T) {
 	r := NewRegistry()
@@ -151,10 +304,29 @@ func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
 		{Service: "redis", Port: 6379},
 		{Service: "telnet", Port: 23},
 	} {
-		if _, ok := r.Lookup(candidate); !ok {
+		if _, ok := r.Lookup(candidate, ProbeKindCredential); !ok {
 			t.Fatalf("expected prober for service %q", candidate.Service)
 		}
 	}
+}
+
+type stubKindedProber struct {
+	name    string
+	kind    ProbeKind
+	service string
+	result  SecurityResult
+}
+
+func (s *stubKindedProber) Name() string { return s.name }
+
+func (s *stubKindedProber) Kind() ProbeKind { return s.kind }
+
+func (s *stubKindedProber) Match(candidate SecurityCandidate) bool {
+	return candidate.Service == s.service
+}
+
+func (s *stubKindedProber) Probe(context.Context, SecurityCandidate, CredentialProbeOptions, []Credential) SecurityResult {
+	return s.result
 }
 
 type stubSuccessProber struct {
@@ -163,6 +335,8 @@ type stubSuccessProber struct {
 }
 
 func (s *stubSuccessProber) Name() string { return s.name }
+
+func (s *stubSuccessProber) Kind() ProbeKind { return ProbeKindCredential }
 
 func (s *stubSuccessProber) Match(candidate SecurityCandidate) bool {
 	return candidate.Service == s.name
@@ -193,6 +367,8 @@ type stubCountingProber struct {
 }
 
 func (s *stubCountingProber) Name() string { return s.name }
+
+func (s *stubCountingProber) Kind() ProbeKind { return ProbeKindCredential }
 
 func (s *stubCountingProber) Match(candidate SecurityCandidate) bool {
 	return candidate.Service == s.name

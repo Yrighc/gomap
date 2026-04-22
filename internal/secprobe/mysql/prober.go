@@ -16,6 +16,8 @@ type prober struct{}
 
 func (prober) Name() string { return "mysql" }
 
+func (prober) Kind() core.ProbeKind { return core.ProbeKindCredential }
+
 func (prober) Match(candidate core.SecurityCandidate) bool {
 	return candidate.Service == "mysql"
 }

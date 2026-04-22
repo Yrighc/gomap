@@ -45,6 +45,8 @@ type stubProber struct{ name string }
 
 func (s stubProber) Name() string { return s.name }
 
+func (s stubProber) Kind() ProbeKind { return ProbeKindCredential }
+
 func (s stubProber) Match(candidate SecurityCandidate) bool {
 	return candidate.Service == s.name
 }

@@ -2,7 +2,17 @@ package core
 
 import "time"
 
-const FindingTypeCredentialValid = "credential-valid"
+type ProbeKind string
+
+const (
+	ProbeKindCredential   ProbeKind = "credential"
+	ProbeKindUnauthorized ProbeKind = "unauthorized"
+)
+
+const (
+	FindingTypeCredentialValid    = "credential-valid"
+	FindingTypeUnauthorizedAccess = "unauthorized-access"
+)
 
 type SecurityCandidate struct {
 	Target     string
@@ -19,12 +29,14 @@ type Credential struct {
 }
 
 type CredentialProbeOptions struct {
-	Protocols     []string
-	Concurrency   int
-	Timeout       time.Duration
-	StopOnSuccess bool
-	DictDir       string
-	Credentials   []Credential
+	Protocols          []string
+	Concurrency        int
+	Timeout            time.Duration
+	StopOnSuccess      bool
+	DictDir            string
+	Credentials        []Credential
+	EnableUnauthorized bool
+	EnableEnrichment   bool
 }
 
 type SecurityResult struct {
@@ -32,11 +44,13 @@ type SecurityResult struct {
 	ResolvedIP  string
 	Port        int
 	Service     string
+	ProbeKind   ProbeKind
 	FindingType string
 	Success     bool
 	Username    string
 	Password    string
 	Evidence    string
+	Enrichment  map[string]any
 	Error       string
 }
 
