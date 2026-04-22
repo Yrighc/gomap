@@ -2,45 +2,16 @@ package secprobe
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/yrighc/gomap/pkg/assetprobe"
 )
 
-var supportedByPort = map[int]string{
-	21:   "ftp",
-	22:   "ssh",
-	23:   "telnet",
-	27017: "mongodb",
-	3306: "mysql",
-	5432: "postgresql",
-	6379: "redis",
-}
-
 func NormalizeServiceName(service string, port int) string {
-	service = strings.ToLower(strings.TrimSpace(service))
-	service = strings.TrimSuffix(service, "?")
-	if service == "redis/tls" {
-		service = "redis"
+	spec, ok := LookupProtocolSpec(service, port)
+	if !ok {
+		return ""
 	}
-	service = strings.TrimSuffix(service, "/ssl")
-	switch service {
-	case "postgres", "pgsql":
-		service = "postgresql"
-	case "mongo":
-		service = "mongodb"
-	}
-	switch service {
-	case "ftp", "ssh", "mysql", "postgresql", "redis", "telnet", "mongodb":
-		return service
-	case "":
-		return supportedByPort[port]
-	default:
-		if v, ok := supportedByPort[port]; ok && strings.Contains(service, v) {
-			return v
-		}
-		return supportedByPort[port]
-	}
+	return spec.Name
 }
 
 func BuildCandidates(res *assetprobe.ScanResult, opts CredentialProbeOptions) []SecurityCandidate {

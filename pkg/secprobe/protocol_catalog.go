@@ -1,0 +1,109 @@
+package secprobe
+
+import "strings"
+
+type ProtocolSpec struct {
+	Name               string
+	Aliases            []string
+	Ports              []int
+	DictNames          []string
+	ProbeKinds         []ProbeKind
+	SupportsEnrichment bool
+}
+
+var builtinProtocolSpecs = []ProtocolSpec{
+	{
+		Name:       "ftp",
+		Ports:      []int{21},
+		DictNames:  []string{"ftp"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "ssh",
+		Ports:      []int{22},
+		DictNames:  []string{"ssh"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "telnet",
+		Ports:      []int{23},
+		DictNames:  []string{"telnet"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "mysql",
+		Ports:      []int{3306},
+		DictNames:  []string{"mysql"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "postgresql",
+		Aliases:    []string{"postgres", "pgsql"},
+		Ports:      []int{5432},
+		DictNames:  []string{"postgresql", "postgres"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:               "redis",
+		Aliases:            []string{"redis/tls", "redis/ssl"},
+		Ports:              []int{6379},
+		DictNames:          []string{"redis"},
+		ProbeKinds:         []ProbeKind{ProbeKindCredential, ProbeKindUnauthorized},
+		SupportsEnrichment: true,
+	},
+	{
+		Name:               "mongodb",
+		Aliases:            []string{"mongo"},
+		Ports:              []int{27017},
+		DictNames:          []string{"mongodb", "mongo"},
+		ProbeKinds:         []ProbeKind{ProbeKindUnauthorized},
+		SupportsEnrichment: true,
+	},
+}
+
+func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
+	token := normalizeProtocolToken(service)
+	if token != "" {
+		for _, spec := range builtinProtocolSpecs {
+			if spec.Name == token {
+				return spec, true
+			}
+			for _, alias := range spec.Aliases {
+				if alias == token {
+					return spec, true
+				}
+			}
+		}
+	}
+
+	if port != 0 {
+		for _, spec := range builtinProtocolSpecs {
+			for _, candidatePort := range spec.Ports {
+				if candidatePort == port {
+					return spec, true
+				}
+			}
+		}
+	}
+
+	return ProtocolSpec{}, false
+}
+
+func ProtocolSupportsKind(service string, kind ProbeKind) bool {
+	spec, ok := LookupProtocolSpec(service, 0)
+	if !ok {
+		return false
+	}
+	for _, declared := range spec.ProbeKinds {
+		if declared == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeProtocolToken(service string) string {
+	service = strings.ToLower(strings.TrimSpace(service))
+	service = strings.TrimSuffix(service, "?")
+	return service
+}
