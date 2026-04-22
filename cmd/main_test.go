@@ -155,6 +155,31 @@ func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
 	}
 }
 
+func TestPortWithWeakOutputOmitsInternalStateFields(t *testing.T) {
+	security := &secprobe.RunResult{
+		Meta: secprobe.SecurityMeta{Candidates: 1, Attempted: 1, Succeeded: 1},
+		Results: []secprobe.SecurityResult{{
+			Target:      "demo",
+			Service:     "redis",
+			ProbeKind:   secprobe.ProbeKindUnauthorized,
+			FindingType: secprobe.FindingTypeUnauthorizedAccess,
+			Success:     true,
+			Evidence:    "INFO returned redis_version without authentication",
+		}},
+	}
+
+	raw, err := security.ToJSON(false)
+	if err != nil {
+		t.Fatalf("marshal security result: %v", err)
+	}
+
+	for _, field := range []string{`"Stage"`, `"FailureReason"`, `"Capabilities"`} {
+		if bytes.Contains(raw, []byte(field)) {
+			t.Fatalf("expected %s to stay internal, got %s", field, string(raw))
+		}
+	}
+}
+
 func TestBuildPortWeakProbeOptions(t *testing.T) {
 	opts := buildPortWeakProbeOptions("ssh, redis", 7, 3*time.Second, false, "  ./dicts  ", false, false)
 

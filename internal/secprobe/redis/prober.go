@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"strings"
 
 	gredis "github.com/redis/go-redis/v9"
 	"github.com/yrighc/gomap/internal/secprobe/core"
@@ -27,10 +28,12 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		ResolvedIP:  candidate.ResolvedIP,
 		Port:        candidate.Port,
 		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindCredential,
 		FindingType: core.FindingTypeCredentialValid,
 	}
 	successResult := result
 	successFound := false
+	attempted := false
 
 	addr := net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port))
 	for _, cred := range creds {
@@ -39,7 +42,12 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 				return successResult
 			}
 			result.Error = err.Error()
+			result.FailureReason = classifyRedisCredentialFailure(err)
 			return result
+		}
+		if !attempted {
+			attempted = true
+			result.Stage = core.StageAttempted
 		}
 
 		client := gredis.NewClient(&gredis.Options{
@@ -61,6 +69,8 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			successResult.Password = cred.Password
 			successResult.Evidence = "Redis authentication succeeded"
 			successResult.Error = ""
+			successResult.Stage = core.StageConfirmed
+			successResult.FailureReason = ""
 			successFound = true
 			if opts.StopOnSuccess {
 				return successResult
@@ -69,10 +79,36 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		}
 
 		result.Error = err.Error()
+		result.FailureReason = classifyRedisCredentialFailure(err)
+		if result.FailureReason == core.FailureReasonCanceled || result.FailureReason == core.FailureReasonTimeout {
+			if successFound {
+				return successResult
+			}
+			return result
+		}
 	}
 
 	if successFound {
 		return successResult
 	}
 	return result
+}
+
+func classifyRedisCredentialFailure(err error) core.FailureReason {
+	if err == nil {
+		return ""
+	}
+	if reason := ctxFailureReason(err); reason != "" {
+		return reason
+	}
+
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "wrongpass"), strings.Contains(text, "noauth"), strings.Contains(text, "authentication"), strings.Contains(text, "password"), strings.Contains(text, "user is disabled"):
+		return core.FailureReasonAuthentication
+	case strings.Contains(text, "dial"), strings.Contains(text, "connect"), strings.Contains(text, "connection"), strings.Contains(text, "refused"), strings.Contains(text, "reset by peer"), strings.Contains(text, "no route"):
+		return core.FailureReasonConnection
+	default:
+		return core.FailureReasonInsufficientConfirmation
+	}
 }

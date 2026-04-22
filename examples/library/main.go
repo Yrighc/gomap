@@ -151,6 +151,9 @@ func runWeakExample(scanner *assetprobe.Scanner) error {
 			EnableEnrichment:   true,
 		},
 	)
+
+	// v1.3 新增的 Stage / FailureReason / Capabilities 仅用于内部执行和测试，
+	// 对外仍通过 ToJSON 输出兼容结果结构，方便继续给外部平台集成。
 	out, _ := security.ToJSON(true)
 
 	fmt.Println("== Weak Example ==")

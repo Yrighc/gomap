@@ -186,6 +186,8 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 说明：
 - 默认仍只执行 credential 探测
 - `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
+- `v1.3` 已增强内部执行状态与失败分类，但 CLI / JSON 仍保持兼容，不额外暴露 `Stage`、`FailureReason`、`Capabilities` 等内部字段
+- `v1.3` 继续保持默认保守策略，不新增额外显示控制参数
 
 ### 5.5 端口扫描后附加弱口令探测
 
@@ -344,6 +346,8 @@ security := secprobe.Run(
     secprobe.CredentialProbeOptions{},
 )
 
+// v1.3 新增的 Stage / FailureReason / Capabilities 仅用于内部执行与测试，
+// 这里继续通过 ToJSON 输出兼容的公开结果结构。
 out, _ := security.ToJSON(true)
 fmt.Println(string(out))
 ```
