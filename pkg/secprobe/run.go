@@ -27,6 +27,10 @@ const (
 	probeAttemptSucceeded
 )
 
+var runEnrichment = func(ctx context.Context, result SecurityResult, opts CredentialProbeOptions) SecurityResult {
+	return enrichResult(ctx, result, opts)
+}
+
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(sshprobe.New())
@@ -132,7 +136,7 @@ func RunWithRegistry(ctx context.Context, registry *Registry, candidates []Secur
 	}
 	wg.Wait()
 
-	result.Results = results
+	result.Results = applyEnrichment(ctx, results, opts)
 	return result
 }
 
@@ -261,6 +265,33 @@ func normalizeResult(base SecurityResult, result SecurityResult, kind ProbeKind)
 		result.FindingType = defaultFindingTypeForKind(kind)
 	}
 	return result
+}
+
+func applyEnrichment(ctx context.Context, results []SecurityResult, opts CredentialProbeOptions) []SecurityResult {
+	if !opts.EnableEnrichment || len(results) == 0 {
+		return results
+	}
+
+	out := make([]SecurityResult, len(results))
+	copy(out, results)
+	for i, item := range out {
+		if !item.Success {
+			continue
+		}
+		out[i] = runEnrichment(ctx, item, opts)
+	}
+	return out
+}
+
+func enrichResult(ctx context.Context, result SecurityResult, opts CredentialProbeOptions) SecurityResult {
+	switch result.Service {
+	case "redis":
+		return redisprobe.Enrich(ctx, result, opts)
+	case "mongodb":
+		return mongodbprobe.Enrich(ctx, result, opts)
+	default:
+		return result
+	}
 }
 
 func defaultProbeKindForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) ProbeKind {
