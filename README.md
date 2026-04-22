@@ -39,13 +39,17 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 ├── pkg/secprobe/
 │   ├── types.go                  # 协议安全探测对外类型
 │   ├── run.go                    # 协议账号口令探测执行入口
-│   └── candidates.go             # 资产结果转安全探测候选
+│   ├── candidates.go             # 资产结果转安全探测候选
+│   ├── default_registry.go       # 内置协议 prober 注册入口
+│   ├── protocol_catalog.go       # 协议元数据目录
+│   └── enrichment_router.go      # 命中后补采路由入口
 ├── internal/
 │   ├── tcpservices/              # TCP 服务识别
 │   ├── updservices/              # UDP 服务识别
 │   ├── crawlweb/                 # 首页识别
 │   ├── connect/                  # 协议连接与匹配辅助
-│   ├── separate/                 # 各协议特定探测
+│   ├── secprobe/                 # secprobe 协议实现（按协议分目录）
+│   ├── separate/                 # 其他协议特定探测
 │   └── achieve/                  # 通用工具函数
 └── examples/library/main.go      # 依赖调用示例
 ```
@@ -192,7 +196,7 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 ### 5.4.1 secprobe v1.4 扩展模式说明
 
 - `secprobe` 在 `v1.4` 之后采用“代码驱动协议实现 + 配置驱动协议元数据”的扩展模式：协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中，协议名、别名、默认端口、字典名、能力声明等元数据集中收敛。
-- 新增协议不建议只改配置文件；仅补 catalog / 字典等配置并不能让协议自动可用，通常仍需要补充 `internal/secprobe/<protocol>/` 下的协议实现代码，并完成默认 registry / enrichment router 的显式接线。
+- 新增协议不建议只改配置文件；仅补 catalog / 字典等配置并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的协议实现代码，并完成默认 registry 注册；若协议支持 enrichment，还需要接到 `enrichment_router.go`。
 - 扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 
 ### 5.5 端口扫描后附加弱口令探测
