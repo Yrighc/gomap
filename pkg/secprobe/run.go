@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -212,10 +211,7 @@ func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Cr
 }
 
 func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
-	candidates := []string{
-		filepath.Join(dictDir, protocol+".txt"),
-		filepath.Join(dictDir, "secprobe-"+protocol+".txt"),
-	}
+	candidates := CredentialDictionaryCandidates(protocol, dictDir)
 
 	var lastErr error
 	for _, path := range candidates {
