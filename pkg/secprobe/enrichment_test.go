@@ -8,6 +8,70 @@ import (
 	"github.com/yrighc/gomap/internal/secprobe/core"
 )
 
+func TestEnrichResultRoutesRedisToRedisEnricher(t *testing.T) {
+	redisCalls := 0
+	mongodbCalls := 0
+	restore := stubEnrichmentRouters(
+		func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
+			redisCalls++
+			result.Enrichment = map[string]any{"source": "redis"}
+			return result
+		},
+		func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
+			mongodbCalls++
+			result.Enrichment = map[string]any{"source": "mongodb"}
+			return result
+		},
+	)
+	defer restore()
+
+	got := enrichResult(context.Background(), core.SecurityResult{
+		Service: "redis",
+	}, CredentialProbeOptions{})
+
+	if redisCalls != 1 {
+		t.Fatalf("expected redis enricher to be called once, got %d", redisCalls)
+	}
+	if mongodbCalls != 0 {
+		t.Fatalf("expected mongodb enricher to stay idle, got %d", mongodbCalls)
+	}
+	if !reflect.DeepEqual(got.Enrichment, map[string]any{"source": "redis"}) {
+		t.Fatalf("expected redis enrichment payload, got %+v", got)
+	}
+}
+
+func TestEnrichResultRoutesMongoDBToMongoDBEnricher(t *testing.T) {
+	redisCalls := 0
+	mongodbCalls := 0
+	restore := stubEnrichmentRouters(
+		func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
+			redisCalls++
+			result.Enrichment = map[string]any{"source": "redis"}
+			return result
+		},
+		func(_ context.Context, result core.SecurityResult, _ CredentialProbeOptions) core.SecurityResult {
+			mongodbCalls++
+			result.Enrichment = map[string]any{"source": "mongodb"}
+			return result
+		},
+	)
+	defer restore()
+
+	got := enrichResult(context.Background(), core.SecurityResult{
+		Service: "mongodb",
+	}, CredentialProbeOptions{})
+
+	if mongodbCalls != 1 {
+		t.Fatalf("expected mongodb enricher to be called once, got %d", mongodbCalls)
+	}
+	if redisCalls != 0 {
+		t.Fatalf("expected redis enricher to stay idle, got %d", redisCalls)
+	}
+	if !reflect.DeepEqual(got.Enrichment, map[string]any{"source": "mongodb"}) {
+		t.Fatalf("expected mongodb enrichment payload, got %+v", got)
+	}
+}
+
 func TestRunWithRegistryAddsRedisEnrichmentWhenEnabled(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{
@@ -199,4 +263,18 @@ func stubEnrichmentRunner(fn func(context.Context, core.SecurityResult, Credenti
 	old := runEnrichment
 	runEnrichment = fn
 	return func() { runEnrichment = old }
+}
+
+func stubEnrichmentRouters(
+	redisFn func(context.Context, core.SecurityResult, CredentialProbeOptions) core.SecurityResult,
+	mongodbFn func(context.Context, core.SecurityResult, CredentialProbeOptions) core.SecurityResult,
+) func() {
+	oldRedis := enrichRedisResult
+	oldMongoDB := enrichMongoDBResult
+	enrichRedisResult = redisFn
+	enrichMongoDBResult = mongodbFn
+	return func() {
+		enrichRedisResult = oldRedis
+		enrichMongoDBResult = oldMongoDB
+	}
 }
