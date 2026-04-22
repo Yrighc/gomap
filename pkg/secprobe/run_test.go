@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/yrighc/gomap/internal/secprobe/testutil"
 )
 
 func TestRunWithRegistryRoutesCandidateToUnauthorizedProber(t *testing.T) {
@@ -159,6 +161,63 @@ func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testi
 	}
 	if got.FindingType != FindingTypeUnauthorizedAccess {
 		t.Fatalf("expected unauthorized finding type after credential setup failure, got %+v", got)
+	}
+}
+
+func TestRunUsesDefaultRegistryForRedisUnauthorized(t *testing.T) {
+	container := testutil.StartRedisNoAuth(t)
+
+	result := Run(context.Background(), []SecurityCandidate{{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		DictDir:             filepath.Join(t.TempDir(), "missing"),
+		Timeout:            5 * time.Second,
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected redis unauthorized success via default registry, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected redis unauthorized probe kind via default registry, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected redis unauthorized finding type via default registry, got %+v", got)
+	}
+}
+
+func TestRunUsesDefaultRegistryForMongoDBUnauthorized(t *testing.T) {
+	container := testutil.StartMongoDBNoAuth(t)
+
+	result := Run(context.Background(), []SecurityCandidate{{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "mongodb",
+	}}, CredentialProbeOptions{
+		Timeout:            5 * time.Second,
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected mongodb unauthorized success via default registry, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected mongodb unauthorized probe kind via default registry, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected mongodb unauthorized finding type via default registry, got %+v", got)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
+	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
@@ -33,7 +34,9 @@ func DefaultRegistry() *Registry {
 	r.Register(mysqlprobe.New())
 	r.Register(postgresqlprobe.New())
 	r.Register(redisprobe.New())
+	r.Register(redisprobe.NewUnauthorized())
 	r.Register(telnetprobe.New())
+	r.Register(mongodbprobe.NewUnauthorized())
 	return r
 }
 

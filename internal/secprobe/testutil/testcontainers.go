@@ -135,6 +135,34 @@ func StartRedis(t *testing.T, cfg RedisConfig) ServiceContainer {
 	}, "6379/tcp")
 }
 
+func StartRedisNoAuth(t *testing.T) ServiceContainer {
+	t.Helper()
+
+	return startServiceContainer(t, testcontainers.ContainerRequest{
+		Image:        "redis:7.4.2-alpine",
+		ExposedPorts: []string{"6379/tcp"},
+		Cmd:          []string{"redis-server", "--port", "6379"},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("6379/tcp"),
+			wait.ForLog("Ready to accept connections"),
+		).WithStartupTimeout(60 * time.Second),
+	}, "6379/tcp")
+}
+
+func StartMongoDBNoAuth(t *testing.T) ServiceContainer {
+	t.Helper()
+
+	return startServiceContainer(t, testcontainers.ContainerRequest{
+		Image:        "mongo:7.0.16",
+		ExposedPorts: []string{"27017/tcp"},
+		Cmd:          []string{"mongod", "--bind_ip_all", "--port", "27017"},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("27017/tcp"),
+			wait.ForLog("Waiting for connections"),
+		).WithStartupTimeout(120 * time.Second),
+	}, "27017/tcp")
+}
+
 func startServiceContainer(t *testing.T, req testcontainers.ContainerRequest, port string) ServiceContainer {
 	t.Helper()
 
