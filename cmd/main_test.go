@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +13,21 @@ import (
 	"github.com/yrighc/gomap/pkg/assetprobe"
 	"github.com/yrighc/gomap/pkg/secprobe"
 )
+
+type stubPortScanner struct {
+	batch      *assetprobe.BatchScanResult
+	err        error
+	gotTargets []string
+	gotOpts    assetprobe.ScanCommonOptions
+}
+
+type portExitCode int
+
+func (s *stubPortScanner) ScanTargets(_ context.Context, targets []string, opts assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error) {
+	s.gotTargets = append([]string(nil), targets...)
+	s.gotOpts = opts
+	return s.batch, s.err
+}
 
 func TestCollectCredentialsParsesInlinePairs(t *testing.T) {
 	got, err := collectCredentials("admin : admin,root : root", "")
@@ -44,27 +61,89 @@ func TestCollectCredentialsParsesFile(t *testing.T) {
 }
 
 func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
-	payload := portWithWeakOutput{
-		Asset: &assetprobe.ScanResult{Target: "demo"},
-		Security: &secprobe.RunResult{
-			Meta: secprobe.SecurityMeta{Candidates: 1, Attempted: 1, Succeeded: 1},
-			Results: []secprobe.SecurityResult{{
-				Target:      "demo",
-				Service:     "ssh",
-				FindingType: secprobe.FindingTypeCredentialValid,
-				Success:     true,
-				Username:    "root",
-				Password:    "root",
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 5432, Open: true}},
+				},
 			}},
 		},
 	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+	security := &secprobe.RunResult{
+		Meta: secprobe.SecurityMeta{Candidates: 1, Attempted: 1, Succeeded: 1},
+		Results: []secprobe.SecurityResult{{
+			Target:      "demo",
+			Service:     "postgresql",
+			FindingType: secprobe.FindingTypeCredentialValid,
+			Success:     true,
+			Username:    "root",
+			Password:    "root",
+		}},
 	}
-	if !bytes.Contains(data, []byte(`"asset"`)) || !bytes.Contains(data, []byte(`"security"`)) {
-		t.Fatalf("unexpected payload: %s", string(data))
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+	oldWeakRunner := runPortWeakProbe
+	var gotWeakOpts secprobe.CredentialProbeOptions
+	runPortWeakProbe = func(_ context.Context, _ *assetprobe.ScanResult, opts secprobe.CredentialProbeOptions) *secprobe.RunResult {
+		gotWeakOpts = opts
+		return security
+	}
+	defer func() {
+		runPortWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{
+			"-target", "demo",
+			"-ports", "5432",
+			"-weak",
+			"-weak-protocols", "postgresql",
+			"-weak-concurrency", "7",
+			"-weak-stop-on-success=false",
+			"-weak-dict-dir", "  ./dicts  ",
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("unmarshal output: %v\n%s", err, stdout)
+	}
+	if _, ok := payload["asset"]; !ok {
+		t.Fatalf("expected asset envelope, got %s", stdout)
+	}
+	if _, ok := payload["security"]; !ok {
+		t.Fatalf("expected security envelope, got %s", stdout)
+	}
+	if len(scanner.gotTargets) != 1 || scanner.gotTargets[0] != "demo" {
+		t.Fatalf("expected target demo, got %v", scanner.gotTargets)
+	}
+	if scanner.gotOpts.Protocol != assetprobe.ProtocolTCP {
+		t.Fatalf("expected tcp scan protocol, got %s", scanner.gotOpts.Protocol)
+	}
+	if len(gotWeakOpts.Protocols) != 1 || gotWeakOpts.Protocols[0] != "postgresql" {
+		t.Fatalf("expected forwarded protocols, got %v", gotWeakOpts.Protocols)
+	}
+	if gotWeakOpts.Concurrency != 7 {
+		t.Fatalf("expected weak concurrency 7, got %d", gotWeakOpts.Concurrency)
+	}
+	if gotWeakOpts.Timeout != 2*time.Second {
+		t.Fatalf("expected timeout 2s, got %s", gotWeakOpts.Timeout)
+	}
+	if gotWeakOpts.StopOnSuccess {
+		t.Fatal("expected stop-on-success false")
+	}
+	if gotWeakOpts.DictDir != "./dicts" {
+		t.Fatalf("expected trimmed dict dir, got %q", gotWeakOpts.DictDir)
 	}
 }
 
@@ -89,14 +168,134 @@ func TestBuildPortWeakProbeOptions(t *testing.T) {
 }
 
 func TestMarshalPortOutputWithoutWeakKeepsAssetShape(t *testing.T) {
-	data, err := marshalPortOutput(&assetprobe.ScanResult{Target: "demo"}, nil, false)
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 80, Open: true}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+	oldWeakRunner := runPortWeakProbe
+	runPortWeakProbe = func(context.Context, *assetprobe.ScanResult, secprobe.CredentialProbeOptions) *secprobe.RunResult {
+		t.Fatal("runPortWeakProbe should not be called")
+		return nil
+	}
+	defer func() {
+		runPortWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+
+	if bytes.Contains([]byte(stdout), []byte(`"asset"`)) || bytes.Contains([]byte(stdout), []byte(`"security"`)) {
+		t.Fatalf("expected raw asset output, got %s", stdout)
+	}
+	if !bytes.Contains([]byte(stdout), []byte(`"Target": "demo"`)) {
+		t.Fatalf("expected asset target in output, got %s", stdout)
+	}
+}
+
+func TestResolvePortProtocolRejectsWeakOnUDP(t *testing.T) {
+	_, err := resolvePortProtocol("udp", true)
+	if err == nil {
+		t.Fatal("expected weak+udp to fail")
+	}
+}
+
+func TestRunPortRejectsWeakOnUDP(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "53", "-proto", "udp", "-weak"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !bytes.Contains([]byte(stderr), []byte("weak 仅支持 tcp 扫描")) {
+		t.Fatalf("expected udp rejection message, got %s", stderr)
+	}
+}
+
+func capturePortRun(t *testing.T, fn func()) (string, string, int) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	oldExit := exitPort
+
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("marshal asset output: %v", err)
+		t.Fatalf("create stdout pipe: %v", err)
 	}
-	if bytes.Contains(data, []byte(`"asset"`)) || bytes.Contains(data, []byte(`"security"`)) {
-		t.Fatalf("expected raw asset output, got %s", string(data))
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
 	}
-	if !bytes.Contains(data, []byte(`"Target":"demo"`)) {
-		t.Fatalf("expected asset target in output, got %s", string(data))
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	exitCode := 0
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		exitPort = oldExit
+	}()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				code, ok := r.(portExitCode)
+				if !ok {
+					panic(r)
+				}
+				exitCode = int(code)
+			}
+		}()
+		exitPort = func(code int) {
+			panic(portExitCode(code))
+		}
+		fn()
+	}()
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	stderr, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(stdout), string(stderr), exitCode
+}
+
+func stubPortScannerFactory(scanner portTargetScanner) func() {
+	oldScannerFactory := newPortTargetScanner
+
+	newPortTargetScanner = func(assetprobe.Options) (portTargetScanner, error) {
+		return scanner, nil
+	}
+
+	return func() {
+		newPortTargetScanner = oldScannerFactory
 	}
 }

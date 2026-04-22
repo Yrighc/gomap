@@ -160,14 +160,30 @@ go run ./cmd \
 ### 5.4 协议账号口令探测（weak）
 
 ```bash
-go run ./cmd weak -target example.com -ports 21,22,3306,5432,6379
+gomap weak -target example.com -ports 21,22,3306,5432,6379
 ```
+
+常用参数：
+- `-target` / `-ips`: 单目标或多目标输入
+- `-ports`: 探测端口范围，默认 `21,22,23,3306,5432,6379`
+- `-protocols`: 限定协议，逗号分隔，例如 `ssh,redis`
+- `-timeout`: 资产发现与 secprobe 共用超时秒数
+- `-weak-concurrency`: secprobe 并发数
+- `-dict-dir`: 自定义协议字典目录
+- `-up`: 内联凭证，格式 `admin : admin,root : root`
+- `-upf`: 凭证文件，一行一个 `username : password`
+- `-stop-on-success`: 单目标命中后停止继续尝试
+- `-v`: 同时输出控制台日志
 
 ### 5.5 端口扫描后附加弱口令探测
 
 ```bash
-go run ./cmd port -target example.com -ports 21,22,3306,5432,6379 -weak
+gomap port -target example.com -ports 21,22,3306,5432,6379 -weak
 ```
+
+说明：
+- `port -weak` 仅支持 `tcp`，不支持 `udp`
+- 输出保持最小包裹结构：`{"asset": ..., "security": ...}`
 
 参数说明：
 - `-proto`: `tcp` 或 `udp`
@@ -192,7 +208,7 @@ go run ./cmd port -target example.com -ports 21,22,3306,5432,6379 -weak
 
 兼容说明：
 - 旧用法 `go run ./cmd -target ...` 仍可用（自动按 `port` 模式执行）
-- 建议逐步迁移到子命令模式（`port/web/dir`）
+- 建议逐步迁移到子命令模式（`port/web/dir/weak`）
 
 ## 6. 依赖形式调用（推荐）
 

@@ -25,6 +25,22 @@ type portWithWeakOutput struct {
 	Security *secprobe.RunResult    `json:"security"`
 }
 
+type portTargetScanner interface {
+	ScanTargets(context.Context, []string, assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error)
+}
+
+var newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
+	return assetprobe.NewScanner(opts)
+}
+
+var runPortWeakProbe = func(ctx context.Context, res *assetprobe.ScanResult, opts secprobe.CredentialProbeOptions) *secprobe.RunResult {
+	candidates := secprobe.BuildCandidates(res, opts)
+	result := secprobe.Run(ctx, candidates, opts)
+	return &result
+}
+
+var exitPort = os.Exit
+
 func main() {
 	if len(os.Args) < 2 {
 		printRootUsage()
@@ -194,21 +210,21 @@ func runPort(args []string) {
 			return
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		exitPort(2)
 	}
 
 	targets := collectTargets(*target, *ips)
 	if len(targets) == 0 {
 		fmt.Fprintln(os.Stderr, "target 不能为空，例如: gomap port -target example.com 或 -ips 1.1.1.1,example.com")
-		os.Exit(1)
+		exitPort(1)
 	}
 	if *honeypotOpenThreshold <= 0 {
 		fmt.Fprintln(os.Stderr, "honeypot-open-threshold 必须大于 0")
-		os.Exit(1)
+		exitPort(1)
 	}
 	if *honeypotOpenRatio <= 0 || *honeypotOpenRatio > 1 {
 		fmt.Fprintln(os.Stderr, "honeypot-open-ratio 必须在 (0,1] 范围内，例如 0.85")
-		os.Exit(1)
+		exitPort(1)
 	}
 	finalPortConcurrency := *portConcurrency
 	if *portConcurrencyShort != 200 {
@@ -216,7 +232,7 @@ func runPort(args []string) {
 	}
 	if finalPortConcurrency <= 0 {
 		fmt.Fprintln(os.Stderr, "concurrency 必须大于 0")
-		os.Exit(1)
+		exitPort(1)
 	}
 	finalPortRateLimit := *portRateLimit
 	if *portRateLimitShort > 0 {
@@ -224,13 +240,20 @@ func runPort(args []string) {
 	}
 	if finalPortRateLimit < 0 {
 		fmt.Fprintln(os.Stderr, "ratelimit 不能小于 0")
-		os.Exit(1)
+		exitPort(1)
 	}
 	if *enableWeak && *weakConcurrency <= 0 {
 		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
-		os.Exit(1)
+		exitPort(1)
 	}
-	scanner, err := assetprobe.NewScanner(assetprobe.Options{
+
+	protocol, err := resolvePortProtocol(*proto, *enableWeak)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		exitPort(1)
+	}
+
+	scanner, err := newPortTargetScanner(assetprobe.Options{
 		PortConcurrency: finalPortConcurrency,
 		PortRateLimit:   finalPortRateLimit,
 		Timeout:         time.Duration(*timeout) * time.Second,
@@ -238,12 +261,7 @@ func runPort(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	protocol := assetprobe.ProtocolTCP
-	if strings.EqualFold(*proto, "udp") {
-		protocol = assetprobe.ProtocolUDP
+		exitPort(1)
 	}
 
 	var csvWriter *csv.Writer
@@ -295,9 +313,7 @@ func runPort(args []string) {
 		var security *secprobe.RunResult
 		if *enableWeak {
 			weakOpts := buildPortWeakProbeOptions(*weakProtocols, *weakConcurrency, time.Duration(*timeout)*time.Second, *weakStopOnSuccess, *weakDictDir)
-			candidates := secprobe.BuildCandidates(res, weakOpts)
-			weakResult := secprobe.Run(context.Background(), candidates, weakOpts)
-			security = &weakResult
+			security = runPortWeakProbe(context.Background(), res, weakOpts)
 		}
 
 		output, _ := marshalPortOutput(res, security, true)
@@ -736,12 +752,36 @@ func buildPortWeakProbeOptions(protocols string, concurrency int, timeout time.D
 	}
 }
 
+func resolvePortProtocol(proto string, enableWeak bool) (assetprobe.Protocol, error) {
+	protocol := assetprobe.ProtocolTCP
+	if strings.EqualFold(proto, "udp") {
+		protocol = assetprobe.ProtocolUDP
+	}
+	if enableWeak && protocol != assetprobe.ProtocolTCP {
+		return "", errors.New("weak 仅支持 tcp 扫描，请移除 -weak 或使用 -proto tcp")
+	}
+	return protocol, nil
+}
+
 func marshalPortOutput(asset *assetprobe.ScanResult, security *secprobe.RunResult, pretty bool) ([]byte, error) {
 	if security == nil {
-		return assetprobe.MarshalJSON(asset, pretty)
+		if asset == nil {
+			return marshalCLIJSON(nil, pretty)
+		}
+		return asset.ToJSON(pretty)
 	}
-	return assetprobe.MarshalJSON(portWithWeakOutput{
+	return marshalCLIJSON(portWithWeakOutput{
 		Asset:    asset,
 		Security: security,
 	}, pretty)
+}
+
+func marshalCLIJSON(v any, pretty bool) ([]byte, error) {
+	if v == nil {
+		return []byte("null"), nil
+	}
+	if pretty {
+		return json.MarshalIndent(v, "", "  ")
+	}
+	return json.Marshal(v)
 }
