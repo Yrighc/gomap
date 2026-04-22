@@ -163,6 +163,12 @@ go run ./cmd \
 gomap weak -target example.com -ports 21,22,3306,5432,6379
 ```
 
+启用未授权探测与补采示例：
+
+```bash
+gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichment
+```
+
 常用参数：
 - `-target` / `-ips`: 单目标或多目标输入
 - `-ports`: 探测端口范围，默认 `21,22,23,3306,5432,6379`
@@ -173,12 +179,24 @@ gomap weak -target example.com -ports 21,22,3306,5432,6379
 - `-up`: 内联凭证，格式 `admin : admin,root : root`
 - `-upf`: 凭证文件，一行一个 `username : password`
 - `-stop-on-success`: 单目标命中后停止继续尝试
+- `-enable-unauth`: 启用 `redis` / `mongodb` 未授权访问探测
+- `-enable-enrichment`: 对成功 finding 追加详情补采
 - `-v`: 同时输出控制台日志
+
+说明：
+- 默认仍只执行 credential 探测
+- `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
 
 ### 5.5 端口扫描后附加弱口令探测
 
 ```bash
 gomap port -target example.com -ports 21,22,3306,5432,6379 -weak
+```
+
+启用未授权探测与补采示例：
+
+```bash
+gomap port -target example.com -ports 6379,27017 -weak -weak-enable-unauth -weak-enable-enrichment
 ```
 
 说明：
@@ -202,6 +220,8 @@ gomap port -target example.com -ports 21,22,3306,5432,6379 -weak
 - `-weak-concurrency`: `port` 模式下 secprobe 并发数
 - `-weak-stop-on-success`: `port` 模式下单目标命中后停止继续尝试
 - `-weak-dict-dir`: `port` 模式下自定义协议字典目录
+- `-weak-enable-unauth`: `port -weak` 模式下启用未授权访问探测
+- `-weak-enable-enrichment`: `port -weak` 模式下对成功 finding 追加详情补采
 - `-dict`: `simple|normal|diff`
 - `-dict-file`: 自定义字典文件路径
 - `-dict-max`: 最大加载字典行数，`0` 表示不限制

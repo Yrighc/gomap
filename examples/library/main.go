@@ -142,8 +142,14 @@ func runWeakExample(scanner *assetprobe.Scanner) error {
 
 	security := secprobe.Run(
 		context.Background(),
-		secprobe.BuildCandidates(result, secprobe.CredentialProbeOptions{}),
-		secprobe.CredentialProbeOptions{},
+		secprobe.BuildCandidates(result, secprobe.CredentialProbeOptions{
+			EnableUnauthorized: true,
+			EnableEnrichment:   true,
+		}),
+		secprobe.CredentialProbeOptions{
+			EnableUnauthorized: true,
+			EnableEnrichment:   true,
+		},
 	)
 	out, _ := security.ToJSON(true)
 
