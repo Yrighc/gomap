@@ -105,6 +105,8 @@ func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
 			"-weak-concurrency", "7",
 			"-weak-stop-on-success=false",
 			"-weak-dict-dir", "  ./dicts  ",
+			"-weak-enable-unauth",
+			"-weak-enable-enrichment",
 		})
 	})
 	if exitCode != 0 {
@@ -145,10 +147,16 @@ func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
 	if gotWeakOpts.DictDir != "./dicts" {
 		t.Fatalf("expected trimmed dict dir, got %q", gotWeakOpts.DictDir)
 	}
+	if !gotWeakOpts.EnableUnauthorized {
+		t.Fatal("expected unauthorized probing enabled")
+	}
+	if !gotWeakOpts.EnableEnrichment {
+		t.Fatal("expected enrichment enabled")
+	}
 }
 
 func TestBuildPortWeakProbeOptions(t *testing.T) {
-	opts := buildPortWeakProbeOptions("ssh, redis", 7, 3*time.Second, false, "  ./dicts  ")
+	opts := buildPortWeakProbeOptions("ssh, redis", 7, 3*time.Second, false, "  ./dicts  ", false, false)
 
 	if got, want := opts.Protocols, []string{"ssh", "redis"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("expected protocols %v, got %v", want, got)
@@ -164,6 +172,17 @@ func TestBuildPortWeakProbeOptions(t *testing.T) {
 	}
 	if opts.DictDir != "./dicts" {
 		t.Fatalf("expected trimmed dict dir, got %q", opts.DictDir)
+	}
+}
+
+func TestBuildPortWeakProbeOptionsForwardsUnauthorizedAndEnrichment(t *testing.T) {
+	opts := buildPortWeakProbeOptions("mongodb", 5, 4*time.Second, true, " ./dicts ", true, true)
+
+	if !opts.EnableUnauthorized {
+		t.Fatal("expected unauthorized probing enabled")
+	}
+	if !opts.EnableEnrichment {
+		t.Fatal("expected enrichment enabled")
 	}
 }
 
@@ -228,6 +247,94 @@ func TestRunPortRejectsWeakOnUDP(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(stderr), []byte("weak 仅支持 tcp 扫描")) {
 		t.Fatalf("expected udp rejection message, got %s", stderr)
+	}
+}
+
+func TestRunWeakDefaultsToCredentialOnly(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 6379, Open: true, Service: "redis"}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	var gotOpts secprobe.CredentialProbeOptions
+	runWeakProbe = func(_ context.Context, _ []secprobe.SecurityCandidate, opts secprobe.CredentialProbeOptions) secprobe.RunResult {
+		gotOpts = opts
+		return secprobe.RunResult{
+			Meta: secprobe.SecurityMeta{},
+		}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "6379"})
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if stdout == "" {
+		t.Fatal("expected stdout output")
+	}
+	if gotOpts.EnableUnauthorized {
+		t.Fatal("expected unauthorized probing disabled by default")
+	}
+	if gotOpts.EnableEnrichment {
+		t.Fatal("expected enrichment disabled by default")
+	}
+}
+
+func TestRunWeakForwardsUnauthorizedAndEnrichment(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 27017, Open: true, Service: "mongodb"}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	var gotOpts secprobe.CredentialProbeOptions
+	runWeakProbe = func(_ context.Context, _ []secprobe.SecurityCandidate, opts secprobe.CredentialProbeOptions) secprobe.RunResult {
+		gotOpts = opts
+		return secprobe.RunResult{Meta: secprobe.SecurityMeta{}}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "27017", "-enable-unauth", "-enable-enrichment"})
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if stdout == "" {
+		t.Fatal("expected stdout output")
+	}
+	if !gotOpts.EnableUnauthorized {
+		t.Fatal("expected unauthorized probing enabled")
+	}
+	if !gotOpts.EnableEnrichment {
+		t.Fatal("expected enrichment enabled")
 	}
 }
 
@@ -297,5 +404,70 @@ func stubPortScannerFactory(scanner portTargetScanner) func() {
 
 	return func() {
 		newPortTargetScanner = oldScannerFactory
+	}
+}
+
+type stubWeakScanner struct {
+	batch      *assetprobe.BatchScanResult
+	err        error
+	gotTargets []string
+	gotOpts    assetprobe.ScanCommonOptions
+}
+
+func (s *stubWeakScanner) ScanTargets(_ context.Context, targets []string, opts assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error) {
+	s.gotTargets = append([]string(nil), targets...)
+	s.gotOpts = opts
+	return s.batch, s.err
+}
+
+func captureWeakRun(t *testing.T, fn func()) (string, string) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+	}()
+
+	fn()
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	stderr, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(stdout), string(stderr)
+}
+
+func stubWeakScannerFactory(scanner weakTargetScanner) func() {
+	oldScannerFactory := newWeakTargetScanner
+
+	newWeakTargetScanner = func(assetprobe.Options) (weakTargetScanner, error) {
+		return scanner, nil
+	}
+
+	return func() {
+		newWeakTargetScanner = oldScannerFactory
 	}
 }
