@@ -87,7 +87,11 @@ func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 func StartMySQL(t *testing.T, cfg MySQLConfig) ServiceContainer {
 	t.Helper()
 
-	return startServiceContainer(t, testcontainers.ContainerRequest{
+	return startServiceContainer(t, mysqlContainerRequest(cfg), "3306/tcp")
+}
+
+func mysqlContainerRequest(cfg MySQLConfig) testcontainers.ContainerRequest {
+	return testcontainers.ContainerRequest{
 		Image:        "mysql:8.4.5",
 		ExposedPorts: []string{"3306/tcp"},
 		Env: map[string]string{
@@ -98,15 +102,21 @@ func StartMySQL(t *testing.T, cfg MySQLConfig) ServiceContainer {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("3306/tcp"),
-			wait.ForLog("ready for connections"),
+			// The official MySQL image emits this line during an init-time
+			// temporary server start and again after the final server is ready.
+			wait.ForLog("ready for connections").WithOccurrence(2),
 		).WithStartupTimeout(120 * time.Second),
-	}, "3306/tcp")
+	}
 }
 
 func StartPostgreSQL(t *testing.T, cfg PostgreSQLConfig) ServiceContainer {
 	t.Helper()
 
-	return startServiceContainer(t, testcontainers.ContainerRequest{
+	return startServiceContainer(t, postgreSQLContainerRequest(cfg), "5432/tcp")
+}
+
+func postgreSQLContainerRequest(cfg PostgreSQLConfig) testcontainers.ContainerRequest {
+	return testcontainers.ContainerRequest{
 		Image:        "postgres:16.8-alpine",
 		ExposedPorts: []string{"5432/tcp"},
 		Env: map[string]string{
@@ -116,9 +126,11 @@ func StartPostgreSQL(t *testing.T, cfg PostgreSQLConfig) ServiceContainer {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("5432/tcp"),
-			wait.ForLog("database system is ready to accept connections"),
+			// The official PostgreSQL image logs readiness once for the init-time
+			// temporary server and again after the final server starts.
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
 		).WithStartupTimeout(120 * time.Second),
-	}, "5432/tcp")
+	}
 }
 
 func StartRedis(t *testing.T, cfg RedisConfig) ServiceContainer {
