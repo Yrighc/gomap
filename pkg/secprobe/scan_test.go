@@ -40,6 +40,24 @@ func TestScanRejectsEmptyTarget(t *testing.T) {
 	}
 }
 
+func TestScanAppliesDefaultTimeoutAndConcurrency(t *testing.T) {
+	restore := stubScanRunner(func(_ context.Context, _ []SecurityCandidate, opts CredentialProbeOptions) RunResult {
+		if opts.Timeout != 5*time.Second {
+			t.Fatalf("expected default timeout, got %+v", opts)
+		}
+		if opts.Concurrency != 10 {
+			t.Fatalf("expected default concurrency, got %+v", opts)
+		}
+		return RunResult{}
+	})
+	defer restore()
+
+	Scan(context.Background(), ScanRequest{
+		Target:   "demo.local",
+		Services: []ScanService{{Port: 22, Service: "ssh"}},
+	})
+}
+
 func TestScanMapsServicesIntoCandidatesAndBuiltinOptions(t *testing.T) {
 	restore := stubScanRunner(func(_ context.Context, candidates []SecurityCandidate, opts CredentialProbeOptions) RunResult {
 		if len(candidates) != 2 {
