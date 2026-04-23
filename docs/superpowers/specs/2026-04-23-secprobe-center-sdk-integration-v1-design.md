@@ -1,162 +1,117 @@
-# GoMap secprobe center SDK 集成方案 v1 设计
+# GoMap secprobe center / worker 集成方案 v1 设计
 
 日期：2026-04-23
 
 ## 1. 背景
 
-截至 `secprobe v1.4`，GoMap 已完成两件关键工作：
+截至 `GoMap v0.4.5-alpha`，`secprobe` 已具备继续作为引擎端 SDK 被上层系统复用的基础能力：
 
-- `v1.3` 已把单目标认证探测链路的状态表达、失败分类和高价值协议确认逻辑做稳
-- `v1.4` 已把 `secprobe` 的协议扩展模式、协议目录元数据、默认装配边界和扩展开发指南整理清楚
+- `pkg/secprobe` 已形成统一入口和稳定协议目录
+- `credential` 与 `unauthorized` 的内部执行模型已经拆开
+- 认证探测、未授权探测、命中后 enrichment 的内部边界已经基本清晰
+- `zvas` 已存在成熟的 `center -> worker -> GoMap SDK` 集成模式，资产探测已采用本地 SDK 调用
 
-这意味着当前 GoMap 在 `secprobe` 方向上，已经基本具备“继续作为引擎端被外部系统稳定复用”的前提。
+当前真实需求不是把 GoMap 改造成常驻平台服务，而是把 `secprobe` 以与现有 GoMap 能力一致的方式，纳入 `center -> zvas worker -> GoMap` 的统一执行链。
 
-同时，当前外部系统的真实集成场景也已经比较明确：
-
-- 扫描器平台 `center` 已经以 SDK 形式集成 GoMap 的资产探测能力
-- 对应 worker 侧已有固定集成模式，主要位于 `zvas/internal/worker`
-- worker 当前不持久化业务数据
-- worker 更适合消费 center 下发的标准任务，再执行本地引擎并回传结果
-
-在这个前提下，下一步更合适的工作，不是把 GoMap 改造成平台服务，也不是把 `secprobe` 直接暴露成一组松散底层函数，而是为 center 增加一条稳定的 `secprobe` SDK 集成入口，使其可以按照与资产探测类似的方式，被 worker 本地调用。
-
-本设计聚焦 `v1`：
-
-- center 显式下发已识别服务列表
-- worker 本地调用 GoMap `secprobe`
-- worker 不持久化，不回查资产结果
-- 先完成账号口令探测主链路
-- 为后续 `unauthorized` 类探测预留字段位，但不在 `v1` 强推完整能力
+本设计面向 `v1`，目标是把整条链路设计到“可直接开发”的状态。
 
 ## 2. 目标与非目标
 
 ### 2.1 目标
 
-- 为 GoMap `secprobe` 设计一条面向 center / worker 的稳定 SDK 集成入口
-- 保持 GoMap 继续作为引擎端 / 工具端，而不是平台端
-- 让 `zvas` worker 可以沿用当前：
-  - `listener -> process -> mapper`
-  的模块组织方式集成 `secprobe`
-- 明确 center 下发任务的 `payload` 契约
-- 明确 worker 对外回传的稳定结果契约
-- 将 `center` 与 `pkg/secprobe` 当前仍会继续演进的内部实现细节解耦
+- 为 `center -> zvas worker -> GoMap` 定义一条完整的 `secprobe` 集成链
+- 保持 GoMap 继续作为引擎端 SDK，而不是平台服务
+- 为 GoMap `pkg/secprobe` 增加稳定的请求式集成入口
+- 为 `zvas` 增加独立的 `secprobe` 路由、listener、process、mapper
+- 明确 center 播种规则、worker 执行流程、结果落库方式
+- 让结果同时保留：
+  - 任务摘要
+  - 原始 findings
+  - 统一漏洞事实 `UnitVulnerability`
 
 ### 2.2 非目标
 
-- 本次不把 GoMap 改造成常驻 HTTP / gRPC 服务
-- 本次不引入任务编排、分布式状态存储、平台治理等控制面能力
-- 本次不要求 worker 回查资产扫描结果或持久化中间结果
-- 本次不把 `Stage`、`FailureReason`、`Capabilities`、`Risk` 稳定为平台对接契约
-- 本次不同时解决多目标并发治理和批量喷洒策略
-- 本次不新增大量 CLI 控制项
-- 本次不要求 `v1` 立即覆盖完整未授权访问探测能力
+- 本次不把 GoMap 改造成 HTTP / gRPC 常驻服务
+- 本次不让 worker 回查资产结果或依赖本地持久化
+- 本次不开放 center 显式下发 `credentials[]`
+- 本次不在 `v1` 放开复杂字典策略、批量喷洒策略、多目标编排策略
+- 本次不把 `Stage`、`FailureReason`、`Capabilities`、`Risk` 直接稳定为平台契约
+- 本次不要求 `v1` 立即开放完整 `unauthorized` 能力
 
-## 3. 当前上下文与约束
+## 3. 已确认的 v1 设计决策
 
-### 3.1 GoMap 当前定位
+本次讨论已确认以下硬约束，后续实现与计划均以此为准：
 
-当前 GoMap 的合理定位已经比较清晰：
-
-- 作为引擎端能力组件
-- 对外提供资产探测、首页识别、目录识别、协议安全探测等 SDK 能力
-- 接受上层平台或 center 的任务编排
-- 返回结果，不承担平台侧的调度和治理职责
-
-### 3.2 `zvas` 当前集成模式
-
-参考 `zvas/internal/worker` 现有实现，GoMap 资产能力的集成已经形成较稳定模式：
-
-- `listener` 负责标准化任务单元
-- `process` 负责从 `ScanUnit.Payload` 构造本地请求
-- 本地调用 GoMap SDK
-- 再将结果映射为 `map[string]any`
-
-对应参考代码包括：
-
-- `zvas/internal/worker/engines/assets/process/gomap_adapter.go`
-- `zvas/internal/worker/engines/assets/process/gomap_port.go`
-- `zvas/internal/worker/engines/module/spec.go`
-
-同时，现有外部弱扫引擎的接入方式也说明了攻击域任务的一般组织方式：
-
-- `listener` 负责 topic / stage / task type 规范化
-- `process` 负责任务执行与结果摘要
-- `mapper` 负责把引擎结果转成平台结果
-
-对应参考代码包括：
-
-- `zvas/internal/worker/engines/attack/weakscan/listener/weak_scan_task.go`
-- `zvas/internal/worker/engines/attack/weakscan/process/weak_scan.go`
-- `zvas/internal/worker/engines/attack/weakscan/mapper/summary.go`
-
-### 3.3 `v1` 关键约束
-
-`v1` 已明确采用以下约束：
-
-- center 优先采用 `A` 模式：
-  - 显式下发已识别服务列表
-- worker 不持久化数据
-- worker 不负责回查资产扫描结果
-- 集成方式继续采用 SDK，本地调用 GoMap，而不是远端服务调用
+1. `v1` 只使用 GoMap 内置字典，不接收 center 下发 `credentials[]`
+2. `zvas` 为 `secprobe` 新增独立路由体系，不复用现有站点 `weak_scan`
+3. `center` 只从已有端口识别结果自动播种 `secprobe` 任务
+4. 任务粒度采用 `1 host + N services`
+5. 结果必须同时保留任务摘要、原始 findings、`UnitVulnerability`
+6. GoMap 侧不再使用 `facade` 命名，命名风格需贴合现有 `assetprobe` / `secprobe`
+7. `v1` 主能力只做 `credential`
+8. `unauthorized` 与 `enrichment` 可以在 GoMap 请求模型中保留字段位，但 `zvas v1` 不作为默认开放能力
 
 ## 4. 方案对比
 
-### 方案 A：center 直接调用 `pkg/secprobe` 现有入口
+### 方案 A：`zvas` 直接长期调用 `pkg/secprobe.Run(...)`
 
 做法：
 
-- center 或 worker 直接调用：
-  - `secprobe.Run`
-  - `secprobe.BuildCandidates`
-  - `CredentialProbeOptions`
+- worker 直接构造 `[]SecurityCandidate`
+- worker 直接构造 `CredentialProbeOptions`
+- worker 直接调用 `secprobe.Run(...)`
 
 优点：
 
 - 接入最快
-- 短期改动最少
+- GoMap 代码改动最少
 
 缺点：
 
-- center 会直接依赖当前 `pkg/secprobe` 的内部输入组织方式
-- 后续一旦 `BuildCandidates`、options、结果细节调整，外部会被迫跟着改
-- 不利于形成面向平台的稳定契约
+- `zvas` 直接依赖 GoMap 内部执行模型
+- `SecurityCandidate`、`CredentialProbeOptions`、`BuildCandidates` 等内部概念会泄漏到平台集成层
+- 后续 GoMap 若调整输入模型或选项结构，`zvas` 必须同步调整
+- 不利于稳定 `center payload` 契约
 
-### 方案 B：在 GoMap 中新增一层稳定集成 facade，再由 worker 调用
+### 方案 B：在 `pkg/secprobe` 内新增稳定请求式入口
 
 做法：
 
-- GoMap 内新增面向 center / worker 的集成入口
-- center 按稳定 request / result 契约与该入口交互
-- facade 内部再调用现有 `pkg/secprobe`
+- 保留现有低层入口 `Run(...)`
+- 在同一个 `pkg/secprobe` 包内新增 `Scan(ctx, req)` 一类稳定集成入口
+- `Scan` 内部负责：
+  - 输入校验
+  - `services[] -> SecurityCandidate`
+  - `ScanRequest -> CredentialProbeOptions`
+  - `RunResult -> ScanResult`
 
 优点：
 
-- 保持 GoMap 的引擎定位
-- 能隔离 `pkg/secprobe` 现有内部演进细节
-- 便于后续协议扩展时保持 center 无感
-- 更符合当前 `zvas` 的 process / mapper 封装风格
+- 命名与 `GoMap` 现有风格一致
+- 不新增概念上多余的子包
+- 可以隔离 `pkg/secprobe` 当前内部输入细节
+- 能让 `center payload` 与 `worker` 请求模型保持稳定
 
 缺点：
 
-- 需要新增一层 request/result 映射代码
-- 需要补一套新的 facade 测试
+- GoMap 需要补一层请求和结果映射
+- 需要新增对应测试
 
-### 方案 C：直接把 GoMap 演化成 secprobe 常驻服务
+### 方案 C：新增 `pkg/secprobe/integration` 子包
 
 做法：
 
-- 将 `secprobe` 暴露为本地 HTTP / gRPC 服务
-- worker 通过 RPC 调用
+- 把稳定集成入口放进 `pkg/secprobe/integration`
 
 优点：
 
-- 后续跨语言调用扩展性更强
+- 包层次看起来更显式
 
 缺点：
 
-- 过早引入服务生命周期、鉴权、错误码、启动依赖等复杂度
-- 容易把 GoMap 拉向平台底座方向
-- 与当前已存在的 SDK 集成路径不一致
+- 让同一能力出现两套公开入口
+- 与当前 GoMap 命名风格不一致
+- 调用方需要额外判断应该用哪个包
 
 ### 结论
 
@@ -164,290 +119,391 @@
 
 即：
 
-- GoMap 新增一层稳定的 `secprobe` 集成 facade
-- worker 继续采用本地 SDK 调用
-- center 面向稳定任务契约构造请求
-- worker 面向稳定结果契约回传结果
+- GoMap 在 `pkg/secprobe` 内新增稳定集成入口
+- 入口命名采用 `Scan(ctx, req)`，而不是 `facade`
+- `Run(...)` 继续保留为低层候选执行入口
 
-## 5. 总体设计
+## 5. 总体架构
 
-### 5.1 总体架构
+整体调用链定义如下：
 
-`v1` 的推荐调用链如下：
+1. `center` 基于结构化端口识别结果筛选 secprobe 支持协议
+2. `center` 以 `1 host + N services` 为单位生成 queued unit
+3. queued unit 的 `payload` 直接携带 `services_json`
+4. `worker listener` 负责路由规范化和基础校验
+5. `worker process` 将 `payload` 映射为 GoMap `secprobe.ScanRequest`
+6. `GoMap secprobe.Scan(...)` 内部转为低层执行模型并调用 `Run(...)`
+7. `worker mapper` 将结果收口为：
+   - 任务摘要
+   - 原始 findings
+   - `UnitVulnerability`
 
-1. center 基于已完成的资产识别结果，构造弱口令任务
-2. center 将任务下发到 worker
-3. worker listener 对任务做标准化
-4. worker process 从 `payload` 构造 GoMap `secprobe` facade 请求
-5. worker 本地调用 GoMap facade
-6. facade 内部转调现有 `pkg/secprobe`
-7. worker mapper 将结果映射为平台侧稳定返回结构
+职责边界定义如下：
 
-整体原则：
+- `center`
+  - 负责从平台已有结果播种任务
+  - 负责把平台上下文物化成可重放输入
+- `worker`
+  - 负责执行本地 SDK
+  - 负责结果收口和事实映射
+- `GoMap`
+  - 负责探测引擎能力
+  - 负责协议语义、内部选项、执行细节
 
-- center 负责准备输入
-- worker 负责执行与映射
-- GoMap 负责探测引擎本身
+## 6. zvas 路由与任务模型
 
-### 5.2 GoMap 侧新增层次
+### 6.1 独立路由体系
 
-建议在 GoMap 中新增一层面向集成的稳定入口，统一落在：
+不复用现有站点 `weak_scan` 路由。
 
-- `pkg/secprobe/integration`
+推荐新增：
 
-该层职责应明确为：
-
-- 定义稳定的 request / result 模型
-- 校验 `services[]`
-- 转换为内部 `SecurityCandidate` 和 `CredentialProbeOptions`
-- 调用现有 `secprobe.Run`
-- 将结果收敛为稳定输出
-
-该层不负责：
-
-- 协议实现
-- registry 扩展逻辑
-- 平台任务编排
-- 外部持久化
-
-### 5.3 `zvas` 侧模块落位
-
-建议在 `zvas/internal/worker/engines/attack` 下新增一套独立的本地 secprobe engine，而不是复用现有外部弱扫引擎 process。
-
-推荐目录结构：
-
-- `zvas/internal/worker/engines/attack/secprobe/process/modules.go`
-- `zvas/internal/worker/engines/attack/secprobe/process/gomap_secprobe.go`
-- `zvas/internal/worker/engines/attack/secprobe/process/request.go`
-- `zvas/internal/worker/engines/attack/secprobe/mapper/result.go`
-- `zvas/internal/worker/engines/attack/secprobe/listener/secprobe_task.go`
+- `StageSecprobe = "secprobe"`
+- `TaskTypeSecprobe = "secprobe"`
+- `TaskSubtypeHostWeakAuth = "host_weak_auth"`
+- `RouteCodeSecprobeHost = "secprobe.host"`
+- `TopicScanSecprobeHost = "scan.secprobe.host"`
 
 原因：
 
-- `secprobe` 是本地同步 SDK 调用
-- 不是远端 HTTP 异步扫描任务
-- 任务对象也不是以 URL 为核心，而是以：
-  - host / ip
-  - service list
-  - probe policy
-  为核心
+- 现有 `weak_scan` 明显是 URL / site 语义
+- 当前 `secprobe` 是 `host + services[]` 语义
+- 两者请求模型、结果模型、播种方式都不同
+- 后续 `unauthorized` 扩展也更适合在独立路由下演进
 
-### 5.4 topic / task type 边界
+### 6.2 任务粒度
 
-不建议复用现有外部 `weakscan` 的 topic / task type。
+`v1` 固定使用：
 
-建议为 `secprobe` 单独定义：
+- `1 host + N services`
 
-- 独立 `task_type`
-- 独立 `stage`
-- 独立 `topic`
+不采用：
+
+- `1 host + 1 service`
 
 原因：
 
-- 站点弱点扫描与认证探测不是同一类任务
-- 请求模型不同
-- 返回结果语义不同
-- 后续协议扩展和未授权扩展也需要保持独立演进
+- center 的播种来源本来就是 host 级结构化端口结果
+- GoMap 当前 `secprobe.Run(...)` 本就面向候选集合执行
+- 更利于表达 host 级摘要字段：
+  - `service_count`
+  - `attempted_count`
+  - `matched_count`
+  - `partial_result`
+- 能减少 queued unit 数量与调度碎片化
 
-## 6. 请求模型设计
+`1 host + 1 service` 可作为后续扩展策略，但不进入 `v1`
 
-### 6.1 总体原则
+## 7. center 播种设计
 
-`v1` 请求模型采用“两层输入”的思路：
+### 7.1 播种来源
 
-1. 主输入：
-   - 稳定的 `ScanRequest`
-2. 适配输入：
-   - 将 center 的任务 `payload` 转为 `ScanRequest`
+`secprobe` unit 仅从结构化端口识别结果派生，不从资产快照直接猜测生成。
 
-不建议让 center 或 worker 直接操作：
+### 7.2 播种规则
+
+对每个 host：
+
+1. 读取结构化端口结果
+2. 只保留：
+   - `open = true`
+   - `service` 可归一化为 secprobe 支持协议
+3. 将同一 host 的可支持服务聚合为一个 queued unit
+4. 将服务列表序列化为 `payload["services_json"]`
+5. 若该 host 无任何可支持服务，则不生成 `secprobe` unit
+
+### 7.3 queued unit 推荐结构
+
+- `RouteCode = "secprobe.host"`
+- `Stage = "secprobe"`
+- `Topic = "scan.secprobe.host"`
+- `TaskType = "secprobe"`
+- `TaskSubtype = "host_weak_auth"`
+- `TargetKey = <host>`
+
+`Payload` 至少包含：
+
+- `target`
+- `resolved_ip`
+- `services_json`
+- `task_type`
+- `task_subtype`
+- `source_asset_kind`
+- `source_asset_key`
+- `timeout_ms`
+- `stop_on_success`
+- `enable_enrichment`
+
+## 8. center -> worker 任务契约
+
+由于 `zvas/internal/platform/contracts/scan_unit.go` 中 `ScanUnit.Payload` 当前为 `map[string]string`，`services[]` 不采用多层结构字段，而采用 JSON 字符串承载。
+
+### 8.1 Payload 约定
+
+- `TargetKey`
+  - 主机标识，建议为 host
+- `payload["target"]`
+  - 与 `TargetKey` 对齐的 host
+- `payload["resolved_ip"]`
+  - 可选；若 center 已有解析结果可直接下发
+- `payload["services_json"]`
+  - `[]ScanServicePayload` 的 JSON 字符串
+- `payload["timeout_ms"]`
+  - 可选
+- `payload["stop_on_success"]`
+  - 可选，默认 `true`
+- `payload["enable_enrichment"]`
+  - 可选，默认 `false`
+- `payload["task_type"]`
+- `payload["task_subtype"]`
+- `payload["source_asset_kind"]`
+- `payload["source_asset_key"]`
+
+### 8.2 `services_json` 最小结构
+
+worker 侧建议定义仅用于 payload 解析的结构：
+
+```go
+type ScanServicePayload struct {
+    Host    string `json:"host"`
+    Port    int    `json:"port"`
+    Service string `json:"service"`
+    Version string `json:"version,omitempty"`
+    Banner  string `json:"banner,omitempty"`
+    TLS     bool   `json:"tls,omitempty"`
+    Source  string `json:"source,omitempty"`
+}
+```
+
+```json
+[
+  {
+    "host": "192.168.1.10",
+    "port": 22,
+    "service": "ssh",
+    "version": "OpenSSH 8.4",
+    "banner": "SSH-2.0-OpenSSH_8.4",
+    "tls": false,
+    "source": "port_scan"
+  }
+]
+```
+
+强契约字段仅为：
+
+- `host`
+- `port`
+- `service`
+
+其他字段为可选透传补充信息。
+
+## 9. GoMap 侧稳定集成入口设计
+
+### 9.1 入口位置与命名
+
+推荐新增：
+
+- 包位置：
+  - `pkg/secprobe`
+- 新文件：
+  - `pkg/secprobe/scan.go`
+  - `pkg/secprobe/scan_types.go`
+- 新入口：
+  - `func Scan(ctx context.Context, req ScanRequest) ScanResult`
+
+理由：
+
+- 与 `assetprobe` 公开入口风格一致
+- 比 `Execute`、`ProbeServices`、`RunRequest` 更符合现有命名
+- 不需要引入新的 `facade` 或 `integration` 术语
+
+### 9.2 `ScanRequest`
+
+```go
+type ScanRequest struct {
+    Target             string
+    ResolvedIP         string
+    Services           []ScanService
+    Timeout            time.Duration
+    Concurrency        int
+    StopOnSuccess      bool
+    EnableEnrichment   bool
+    EnableUnauthorized bool
+}
+
+type ScanService struct {
+    Port    int
+    Service string
+}
+```
+
+说明：
+
+- `Target`
+  - 对应 host
+- `ResolvedIP`
+  - 用于保持与内部连接逻辑一致
+- `Services`
+  - 直接贴合 `1 host + N services`
+- `Timeout` / `Concurrency` / `StopOnSuccess`
+  - 保留为最有价值的运行控制项
+- `EnableEnrichment`
+  - GoMap 继续保留字段位
+- `EnableUnauthorized`
+  - GoMap 请求模型中可保留字段位，但 `zvas v1` 默认固定传 `false`
+
+`v1` 不在 `ScanRequest` 中暴露：
+
+- `Credentials`
+- `DictDir`
+- 复杂协议 allowlist
+- 复杂字典策略
+
+### 9.3 `ScanResult`
+
+```go
+type ScanResult struct {
+    Target     string
+    ResolvedIP string
+    Meta       SecurityMeta
+    Results    []SecurityResult
+}
+```
+
+说明：
+
+- 尽量复用当前公开结果结构
+- `Meta` 与 `Results` 延续当前 `RunResult` 语义
+- 新增 `Target` / `ResolvedIP` 便于 host 级消费
+
+### 9.4 内部映射职责
+
+`secprobe.Scan(...)` 内部负责：
+
+1. 校验 `ScanRequest`
+2. 校验并归一化 `Services`
+3. 将 `Services` 转为 `[]SecurityCandidate`
+4. 将 `ScanRequest` 转为 `CredentialProbeOptions`
+5. 固定走 GoMap 内置字典
+6. 在 `v1` 默认固定 `EnableUnauthorized = false`
+7. 调用现有 `Run(...)`
+8. 将结果收敛为 `ScanResult`
+
+### 9.5 不对 zvas 暴露的内部概念
+
+不建议让 `zvas` 直接依赖：
 
 - `SecurityCandidate`
-- `BuildCandidates`
 - `CredentialProbeOptions`
+- `BuildCandidates(...)`
+- `RunWithRegistry(...)`
+- `Registry`
+- `DefaultRegistry()`
+- `CredentialsFor(...)`
+- `BuiltinCredentials(...)`
+- `Stage`
+- `FailureReason`
+- `Capabilities`
+- `Risk`
 
-### 6.2 `v1` 主输入建议
+这些概念属于 GoMap 内部执行模型或后续演进预留，不应成为 `center` / `worker` 的稳定契约。
 
-建议由 center 下发如下核心请求结构：
+## 10. zvas worker 模块设计
 
-```json
-{
-  "target": "192.168.1.10",
-  "services": [
-    {
-      "host": "192.168.1.10",
-      "port": 22,
-      "service": "ssh"
-    },
-    {
-      "host": "192.168.1.10",
-      "port": 6379,
-      "service": "redis"
-    }
-  ],
-  "probe_policy": {
-    "kinds": ["credential", "unauthorized"],
-    "enable_enrichment": false,
-    "stop_on_success": true
-  },
-  "dict_policy": {
-    "use_builtin": true
-  },
-  "timeout_ms": 3000
-}
-```
+建议在 `zvas/internal/worker/engines/attack/secprobe` 下新增独立引擎：
 
-### 6.3 `services[]` 设计
+- `listener/secprobe_task.go`
+- `listener/modules.go`
+- `process/secprobe.go`
+- `process/request.go`
+- `process/modules.go`
+- `mapper/result.go`
+- `mapper/finding.go`
 
-`services[]` 是 `v1` 的主输入。
+### 10.1 listener 职责
 
-每个 service 最小字段建议为：
+listener 只负责：
 
-- `host`
-- `port`
-- `service`
+- 校验 unit 基本身份字段
+- 规范化：
+  - `topic`
+  - `stage`
+  - `task_type`
+  - `task_subtype`
+- 确认：
+  - `TargetKey` 非空
+  - `payload["services_json"]` 存在
+- 补齐默认 payload 字段
 
-可选字段建议预留：
+listener 不负责：
 
-- `tls`
-- `source`
-- `metadata`
+- 服务列表构造
+- GoMap 调用
+- finding 映射
 
-字段含义：
+### 10.2 process 职责
 
-- `host`
-  - 执行认证探测的主机地址
-- `port`
-  - 目标服务端口
-- `service`
-  - center 已识别出的标准服务名
-- `tls`
-  - 用于表达 `redis/tls`、`postgresql/ssl` 一类变体，避免协议变体全部压在字符串别名中
-- `source`
-  - 表示该 service 来源于端口识别、画像推送或人工补充
-- `metadata`
-  - 仅做透传补充，不作为强契约
+process 只负责执行：
 
-### 6.4 `probe_policy` 设计
+- 解析 `services_json`
+- 构造 `secprobe.ScanRequest`
+- 调用 GoMap `secprobe.Scan(...)`
+- 产出任务级摘要结果
 
-`v1` 只建议保留少量高价值控制项：
+process 不负责：
 
-- `kinds`
-  - 允许值：
-    - `credential`
-    - `unauthorized`
-- `enable_enrichment`
-- `stop_on_success`
-- `protocol_allowlist`
-- `per_target_timeout_ms`
+- 协议语义解释
+- `UnitVulnerability` 映射
+- 结构化 port 结果回查
 
-其中：
+### 10.3 mapper 职责
 
-- `credential`
-  是 `v1` 主能力
-- `unauthorized`
-  在请求模型中先保留字段位；`v1` 实现阶段可选择忽略该值，或在显式请求时返回“当前版本未启用该能力”的稳定错误
-- `enable_enrichment`
-  建议 `v1` 默认关闭
+mapper 只负责结果收口：
 
-### 6.5 `dict_policy` 设计
+- 将 `ScanResult` 映射为平台任务结果 JSON
+- 保留任务摘要字段
+- 保留原始 findings
+- 将成功 finding 映射为 `[]UnitVulnerability`
 
-`v1` 字典策略建议只支持两类能力：
+## 11. 结果模型设计
 
-- `use_builtin`
-- 显式下发 `credentials[]`
+### 11.1 统一要求
 
-也可选支持：
+`secprobe` 结果必须同时保留三层：
 
-- `dict_dir`
+1. 任务摘要
+2. 原始 findings
+3. 统一漏洞事实 `UnitVulnerability`
 
-但不建议在 `v1` 过度扩展复杂字典策略。
+`UnitVulnerability` 不是唯一存档，只是平台标准化投影视图。
 
-原因：
+### 11.2 任务摘要字段
 
-- 用户理解成本高
-- 容易把 center 和 worker 都拖入大量参数治理
-- 与当前“先把主链路跑稳”的目标不一致
-
-### 6.6 为什么选择 center 显式下发 `services[]`
-
-`v1` 采用该模式的原因包括：
-
-- worker 不持久化数据
-- worker 不应回查资产探测结果
-- center 已具备资产识别能力和结果上下文
-- 显式输入更便于任务重放、排障和审计
-- 能减少 worker 内部的二次候选重建逻辑
-
-## 7. 结果模型设计
-
-### 7.1 总体原则
-
-worker 的结果分为两层：
-
-1. 任务摘要层
-2. finding 明细层
-
-任务摘要层用于平台快速判断：
-
-- 是否执行成功
-- 尝试了多少服务
-- 命中了多少条 finding
-
-finding 明细层用于：
-
-- 入库
-- 展示
-- 告警
-- 人工研判
-
-### 7.2 建议输出结构
-
-建议收敛为如下风格：
-
-```json
-{
-  "engine": "gomap-secprobe",
-  "target": "192.168.1.10",
-  "service_count": 2,
-  "attempted_count": 2,
-  "matched_count": 1,
-  "findings": [
-    {
-      "host": "192.168.1.10",
-      "port": 22,
-      "service": "ssh",
-      "probe_kind": "credential",
-      "finding_type": "credential_valid",
-      "username": "root",
-      "password": "root",
-      "evidence": "ssh auth succeeded",
-      "enrichment": {}
-    }
-  ]
-}
-```
-
-### 7.3 建议稳定暴露的摘要字段
-
-建议稳定暴露：
+worker 最终任务结果中建议稳定保留：
 
 - `engine`
 - `target`
+- `resolved_ip`
 - `service_count`
 - `attempted_count`
 - `matched_count`
-- `findings`
-- `error`
 - `partial_result`
+- `error`
+- `findings`
 
-这些字段可作为 worker 与平台之间的稳定结果摘要层。
+其中：
 
-### 7.4 建议稳定暴露的 finding 字段
+- `findings`
+  - 直接保留原始 findings
 
-建议 `findings[]` 中稳定保留：
+### 11.3 原始 findings
+
+原始 findings 尽量贴近 GoMap 公开结果语义。
+
+每条 finding 至少保留：
 
 - `host`
+- `ip`
 - `port`
 - `service`
 - `probe_kind`
@@ -456,202 +512,205 @@ finding 明细层用于：
 - `password`
 - `evidence`
 - `enrichment`
+- `error`
+- `raw`
 
-说明：
+`password` 可保留在原始 findings 中，用于闭环处置与审计。
 
-- `probe_kind`
-  用于表达：
-  - `credential`
-  - `unauthorized`
-- `finding_type`
-  用于表达更稳定的 finding 语义，例如：
-  - `credential_valid`
-  - `unauthorized_access`
-- `username` / `password`
-  在命中时直接保留，便于平台闭环处置
-- `enrichment`
-  只作为附加信息，不建议在 `v1` 作为强依赖字段
+## 12. `UnitVulnerability` 映射设计
 
-### 7.5 不建议直接外露的内部字段
+### 12.1 映射原则
 
-`v1` 不建议把以下字段直接稳定为平台契约：
+- 平台统一事实层负责标准化检索与告警
+- 不要求承载全部 GoMap 内部语义
+- 细节通过 `Raw` 和任务原始 findings 保留
 
-- `Stage`
-- `FailureReason`
-- `Capabilities`
-- `Risk`
+### 12.2 `v1` 规则映射
+
+由于 `v1` 主能力只做 `credential`，统一规则如下：
+
+- `finding_type = credential_valid`
+  - `RuleID = "gomap/secprobe/credential-valid"`
+  - `RuleName = "协议弱口令命中"`
+
+### 12.3 `Severity`
+
+`v1` 统一映射为：
+
+- `high`
 
 原因：
 
-- 它们当前仍偏向内部执行语义与后续演进预留
-- 若 center 直接依赖，会把 GoMap 内部状态机硬绑定为平台契约
-- 后续继续扩协议或收敛状态语义时，回滚成本会明显增加
+- 该 finding 已经过实际认证成功验证
+- 平台先统一为高危最稳
+- 后续如有协议级差异需求，可再扩展映射表
 
-更稳的做法是：
+### 12.4 `VulnerabilityKey`
 
-- GoMap 内部继续保留这些字段
-- worker 内部可用它们辅助日志、调试和本地分类
-- 对平台只输出收敛后的稳定摘要和 finding 结果
+建议由以下组合稳定生成：
 
-## 8. worker 侧执行流程设计
+- `host`
+- `port`
+- `service`
+- `finding_type`
+- `username`
 
-### 8.1 listener 职责
+便于同一账号重复命中时去重。
 
-listener 负责：
+### 12.5 `Evidence` / `Classification` / `Raw`
 
-- 校验任务基本身份信息
-- 规范化：
-  - `topic`
-  - `stage`
-  - `task_type`
-  - `task_subtype`
-- 保证 `payload` 至少具备：
-  - `target`
-  - `services[]`
+`Evidence` 最少保留：
 
-listener 不负责：
+- `service`
+- `probe_kind`
+- `finding_type`
+- `username`
+- `evidence`
 
-- 候选重建
-- secprobe 执行
-- 结果映射
+`Classification` 最少保留：
 
-### 8.2 process 职责
+- `engine = "gomap-secprobe"`
+- `category = "weak-auth"`
+- `service = <service>`
 
-process 负责：
+`Raw` 直接保留原始 finding。
 
-- 从 `ScanUnit.Payload` 解析请求
-- 调用 GoMap `secprobe` facade
-- 处理执行时错误
-- 生成任务级摘要结果
+说明：
 
-process 的组织方式更应对齐现有本地 SDK 型 process，例如：
+- `password` 不要求进入 `Evidence`
+- `password` 仍保留在任务原始 findings 和 `Raw` 中
 
-- `gomap-port`
+## 13. 错误、部分结果与重试语义
 
-而不是外部 HTTP 型 process。
+### 13.1 unit 成功
 
-### 8.3 mapper 职责
+只要 GoMap `Scan(...)` 正常返回稳定结果，不管是否命中，任务都视为执行成功。
 
-mapper 负责：
+包括：
 
-- 将 GoMap facade 返回的稳定结果
-  转成平台侧 `map[string]any`
-- 对 finding 进行必要字段收口
-- 保证平台侧结果结构在 `v1` 中稳定
+- 命中 `credential_valid`
+- 未命中
+- 有部分 service 失败但已返回稳定结果
 
-mapper 不应承担：
+### 13.2 unit 失败
 
-- 协议语义推导
-- 字典策略判断
-- secprobe 内部状态机解释
+只有整体执行无法得到稳定结果时，任务才视为失败。
 
-## 9. 错误处理与边界
+例如：
 
-### 9.1 输入错误
+- `services_json` 非法
+- 请求字段缺失且无法构造 `ScanRequest`
+- 调用 GoMap 直接报错且无稳定结果
+- 执行前上下文已取消
 
-对于以下情况，应尽早返回任务失败：
+### 13.3 未命中
 
-- `services[]` 为空
-- `host` 为空
-- `port` 非法
-- `service` 为空
-- `payload` 中 `kinds` 不合法
+未命中不是错误。
 
-### 9.2 执行错误
-
-执行中出现以下情况时，应由 facade 或 worker 做摘要化处理：
-
-- 整体调用失败
-- 单 service 探测失败
-- 字典装载失败
-- 上下文超时 / 取消
-
-处理原则：
-
-- 允许任务级错误与 finding 结果并存
-- 如有部分结果可返回，则标记 `partial_result=true`
-- 不要求逐条透传所有内部失败明细
-
-### 9.3 未命中结果
-
-未命中不应视为任务错误。
-
-建议语义：
+推荐结果语义：
 
 - `attempted_count > 0`
 - `matched_count = 0`
 - `findings = []`
-- `error` 为空
+- `error = ""`
 
-## 10. 测试设计
+### 13.4 部分结果
 
-### 10.1 GoMap 侧
+当部分 service 已产出结果，但整体过程中有 service 失败、超时或取消时：
 
-GoMap facade 建议覆盖：
+- `partial_result = true`
+- `error` 保留任务级摘要错误
+- `findings` 保留已得到的结果
 
-- 请求校验测试
-- `services[]` 到内部 candidate 的映射测试
-- `probe_policy` 到 `CredentialProbeOptions` 的映射测试
-- 结果收敛测试
-- 对 `Stage` / `FailureReason` 等内部字段不外泄的边界测试
+### 13.5 重试粒度
 
-### 10.2 `zvas` worker 侧
+`v1` 固定采用 unit 级重试：
 
-worker 建议覆盖：
+- 即 `1 host + N services` 一起重试
 
-- listener 规范化测试
-- payload 解析测试
-- process 调用 facade 的请求构造测试
-- mapper 摘要结果映射测试
-- 空结果 / 部分结果 / 执行失败测试
+不做：
 
-### 10.3 集成测试
+- service 级拆分重试
 
-建议至少补一类端到端集成测试：
+## 14. 测试设计
 
-- center 构造 `services[]`
-- worker 执行本地 secprobe facade
-- 返回稳定结果摘要
+### 14.1 GoMap
 
-重点验证：
+新增 `secprobe.Scan(...)` 相关测试，覆盖：
 
-- 不依赖 worker 持久化
-- 不依赖资产结果回查
-- 与现有 worker 模块风格保持一致
+- `ScanRequest -> candidate/options` 映射
+- 空 `services`
+- 非法 `port`
+- 非法或不支持的 `service`
+- `v1` 固定内置字典策略
+- `ScanResult` 结构稳定
+- 不外露内部执行字段
 
-## 11. `v1` 范围收口
+### 14.2 zvas worker
 
-`v1` 建议明确只做以下范围：
+覆盖：
 
-- center 显式下发 `services[]`
-- worker 本地同步调用 GoMap secprobe facade
-- 以 `credential` 探测为主
-- 为 `unauthorized` 预留字段位
-- 支持内置字典或显式凭证
-- 返回稳定摘要与 finding 结构
+- listener 路由规范化
+- `services_json` 解析
+- `ScanRequest` 构造
+- 摘要结果映射
+- 原始 findings 保留
+- `UnitVulnerability` 映射
+- 空结果 / 未命中 / 部分结果 / 整体失败
 
-`v1` 不做：
+### 14.3 center
 
-- worker 本地持久化
-- worker 回查资产扫描结果
-- 平台化任务治理
-- 多目标并发治理策略
-- 大量细碎控制参数
-- 把内部状态字段直接暴露为平台契约
+覆盖：
 
-## 12. 结论
+- 从结构化端口结果聚合 `1 host + N services`
+- 不支持协议不播种
+- 同 host 多端口正确聚合
+- `services_json` 序列化正确
+- 新 route / topic / stage / task_type / task_subtype 生效
 
-在 `secprobe v1.4` 已经完成扩展模式整改的前提下，当前最合适的下一步，不是继续把 GoMap 往平台方向推，而是为 center / worker 增加一条稳定的 SDK 集成路径。
+## 15. 最小交付拆分
 
-`v1` 推荐采用：
+建议按以下四步交付：
 
-- center 显式下发已识别服务列表
-- worker 沿用现有 `listener -> process -> mapper` 模式
-- GoMap 通过新增 facade 提供稳定的 `secprobe` 集成入口
+### 第一步：GoMap
 
-这样可以同时满足几件事：
+- 在 `pkg/secprobe` 内新增 `Scan(ctx, ScanRequest) ScanResult`
 
-- 延续当前 GoMap 作为引擎端的定位
-- 与 `zvas` 已有的 GoMap 资产集成模式保持一致
-- 降低 center 对 `pkg/secprobe` 内部细节的依赖
-- 为后续继续扩协议和补 `unauthorized` 能力保留稳定演进空间
+### 第二步：zvas worker
+
+- 新增 `secprobe` 路由常量
+- 新增 worker `listener/process/mapper`
+
+### 第三步：center
+
+- 从结构化端口结果播种 `secprobe` queued unit
+
+### 第四步：结果落库
+
+- 映射任务摘要
+- 保留原始 findings
+- 映射 `UnitVulnerability`
+
+这样每一步都能单独验证，避免一次性把 center、worker、GoMap 改成一个大耦合变更。
+
+## 16. 结论
+
+`v1` 的推荐方案如下：
+
+- GoMap 在 `pkg/secprobe` 内新增稳定入口：
+  - `Scan(ctx, ScanRequest) ScanResult`
+- `zvas` 新增独立 `secprobe` 路由体系，不复用现有 site `weak_scan`
+- `center` 只从结构化端口结果播种 `1 host + N services` 的 secprobe unit
+- `worker` 继续采用统一 `listener -> process -> mapper`
+- 结果同时保留：
+  - 任务摘要
+  - 原始 findings
+  - `UnitVulnerability`
+- `v1` 只使用 GoMap 内置字典，主能力只做 `credential`
+
+这条方案同时满足：
+
+- 保持 GoMap 作为引擎端 SDK 的定位
+- 保持 `zvas` 当前多引擎执行流程的一致性
+- 保持 `center payload` 可重放、可审计、可排障
+- 为后续 `unauthorized` 和更细粒度调度保留演进空间
