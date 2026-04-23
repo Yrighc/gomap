@@ -39,3 +39,61 @@ func TestScanRejectsEmptyTarget(t *testing.T) {
 		t.Fatalf("expected empty result set on validation failure, got %+v", got)
 	}
 }
+
+func TestScanMapsServicesIntoCandidatesAndBuiltinOptions(t *testing.T) {
+	restore := stubScanRunner(func(_ context.Context, candidates []SecurityCandidate, opts CredentialProbeOptions) RunResult {
+		if len(candidates) != 2 {
+			t.Fatalf("expected 2 candidates, got %d", len(candidates))
+		}
+		if candidates[0].Target != "demo.local" || candidates[0].ResolvedIP != "192.0.2.15" {
+			t.Fatalf("unexpected first candidate: %+v", candidates[0])
+		}
+		if candidates[0].Service != "ssh" || candidates[1].Service != "redis" {
+			t.Fatalf("expected normalized services, got %+v", candidates)
+		}
+		if candidates[0].Version != "OpenSSH_9.8" || candidates[1].Banner != "redis" {
+			t.Fatalf("expected version/banner to flow into candidates, got %+v", candidates)
+		}
+		if opts.DictDir != "" || len(opts.Credentials) != 0 {
+			t.Fatalf("expected builtin dictionary mode, got %+v", opts)
+		}
+		if !opts.StopOnSuccess || opts.EnableUnauthorized || opts.EnableEnrichment {
+			t.Fatalf("unexpected options: %+v", opts)
+		}
+		if opts.Timeout != 3*time.Second || opts.Concurrency != 4 {
+			t.Fatalf("unexpected timeout/concurrency: %+v", opts)
+		}
+		return RunResult{
+			Meta: SecurityMeta{Candidates: 2, Attempted: 2, Succeeded: 1, Failed: 1},
+			Results: []SecurityResult{{
+				Target:      "demo.local",
+				ResolvedIP:  "192.0.2.15",
+				Port:        22,
+				Service:     "ssh",
+				ProbeKind:   ProbeKindCredential,
+				FindingType: FindingTypeCredentialValid,
+				Success:     true,
+				Username:    "root",
+				Password:    "root",
+				Evidence:    "ssh auth succeeded",
+			}},
+		}
+	})
+	defer restore()
+
+	got := Scan(context.Background(), ScanRequest{
+		Target:        "demo.local",
+		ResolvedIP:    "192.0.2.15",
+		Timeout:       3 * time.Second,
+		Concurrency:   4,
+		StopOnSuccess: true,
+		Services: []ScanService{
+			{Port: 22, Service: "ssh?", Version: "OpenSSH_9.8"},
+			{Port: 6379, Service: "redis/ssl", Banner: "redis"},
+		},
+	})
+
+	if got.Error != "" || got.Meta.Candidates != 2 || len(got.Results) != 1 {
+		t.Fatalf("unexpected scan result: %+v", got)
+	}
+}
