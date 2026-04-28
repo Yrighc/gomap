@@ -28,12 +28,30 @@ type prober struct{}
 type transportMode string
 
 const (
-	transportModeRDP transportMode = "rdp"
-	transportModeTLS transportMode = "tls"
+	transportModeHybrid transportMode = "hybrid"
+	transportModeTLS    transportMode = "tls"
+	transportModeRDP    transportMode = "rdp"
 )
 
-var negotiateTransport = defaultNegotiateTransport
+type transportAttempt struct {
+	mode     transportMode
+	protocol uint32
+}
+
+type rdpSession interface {
+	OnClose(func())
+	OnReady(func())
+	OnError(func(error))
+	SetRequestedProtocol(uint32)
+	Connect() error
+	Close() error
+}
+
+var transportAttempts = defaultTransportAttempts
 var loginRDP = defaultLoginRDP
+var openRDPSession = defaultOpenRDPSession
+
+var errNegotiationClosed = errors.New("rdp negotiation closed by server")
 
 func (prober) Name() string { return "rdp" }
 
@@ -56,7 +74,7 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 	successFound := false
 	attempted := false
 
-	mode, err := negotiateTransport(ctx, candidate, opts)
+	attempts, err := transportAttempts(ctx, candidate, opts)
 	if err != nil {
 		result.Error = err.Error()
 		result.FailureReason = classifyRDPFailure(err)
@@ -77,29 +95,35 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			result.Stage = core.StageAttempted
 		}
 
-		err := loginRDP(ctx, candidate, cred, opts, mode)
-		if err == nil {
-			successResult.Success = true
-			successResult.Username = cred.Username
-			successResult.Password = cred.Password
-			successResult.Evidence = successEvidence(mode)
-			successResult.Error = ""
-			successResult.Stage = core.StageConfirmed
-			successResult.FailureReason = ""
-			successFound = true
-			if opts.StopOnSuccess {
-				return successResult
+		for _, attempt := range attempts {
+			err := loginRDP(ctx, candidate, cred, opts, attempt)
+			if err == nil {
+				successResult.Success = true
+				successResult.Username = cred.Username
+				successResult.Password = cred.Password
+				successResult.Evidence = successEvidence(attempt.mode)
+				successResult.Error = ""
+				successResult.Stage = core.StageConfirmed
+				successResult.FailureReason = ""
+				successFound = true
+				if opts.StopOnSuccess {
+					return successResult
+				}
+				break
 			}
-			continue
-		}
 
-		result.Error = err.Error()
-		result.FailureReason = classifyRDPFailure(err)
-		if isTerminalContextError(err) {
-			if successFound {
-				return successResult
+			result.Error = err.Error()
+			result.FailureReason = classifyRDPFailure(err)
+			if isTerminalContextError(err) {
+				if successFound {
+					return successResult
+				}
+				return result
 			}
-			return result
+			if shouldTryNextTransport(result.FailureReason) {
+				continue
+			}
+			break
 		}
 	}
 
@@ -109,50 +133,25 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 	return result
 }
 
-func defaultNegotiateTransport(_ context.Context, candidate core.SecurityCandidate, _ core.CredentialProbeOptions) (transportMode, error) {
-	hints := strings.ToLower(strings.TrimSpace(candidate.Banner + " " + candidate.Version))
-	switch {
-	case strings.Contains(hints, "tls"), strings.Contains(hints, "ssl"), strings.Contains(hints, "credssp"), strings.Contains(hints, "hybrid"):
-		return transportModeTLS, nil
-	default:
-		return transportModeRDP, nil
-	}
+func defaultTransportAttempts(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) ([]transportAttempt, error) {
+	return []transportAttempt{
+		{mode: transportModeHybrid, protocol: x224.PROTOCOL_HYBRID},
+		{mode: transportModeTLS, protocol: x224.PROTOCOL_SSL},
+		{mode: transportModeRDP, protocol: x224.PROTOCOL_RDP},
+	}, nil
 }
 
-func defaultLoginRDP(ctx context.Context, candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions, mode transportMode) error {
-	domain, username := splitRDPUsername(cred.Username)
+func defaultLoginRDP(ctx context.Context, candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions, attempt transportAttempt) error {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port)))
+	session, err := openRDPSession(ctx, candidate, cred, opts)
 	if err != nil {
 		return err
 	}
-
-	if deadline, ok := deadlineFromContext(ctx, timeout); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-
-	socket := grdpcore.NewSocketLayer(conn)
-	clientTPKT := tpkt.New(socket, nla.NewNTLMv2(domain, username, cred.Password))
-	x224Client := x224.New(clientTPKT)
-	mcsClient := t125.NewMCSClient(x224Client, gcc.US, gcc.KT_IBM_101_102_KEYS, 0)
-	secClient := sec.NewClient(mcsClient)
-	pduClient := pdu.NewClient(secClient)
-	channels := plugin.NewChannels(secClient)
-	defer clientTPKT.Close()
-
-	mcsClient.SetClientDesktop(800, 600)
-	secClient.SetUser(username)
-	secClient.SetPwd(cred.Password)
-	secClient.SetDomain(domain)
-	clientTPKT.SetFastPathListener(secClient)
-	secClient.SetFastPathListener(pduClient)
-	secClient.SetChannelSender(mcsClient)
-	channels.SetChannelSender(secClient)
+	defer session.Close()
 
 	readyCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
@@ -164,20 +163,19 @@ func defaultLoginRDP(ctx context.Context, candidate core.SecurityCandidate, cred
 		}
 	}
 
-	x224Client.On("error", pushErr)
-	pduClient.On("error", pushErr)
-	pduClient.On("close", func() {
-		pushErr(errors.New("rdp connection closed before authentication confirmation"))
+	session.OnError(pushErr)
+	session.OnClose(func() {
+		pushErr(errNegotiationClosed)
 	})
-	pduClient.On("ready", func() {
+	session.OnReady(func() {
 		select {
 		case readyCh <- struct{}{}:
 		default:
 		}
 	})
 
-	x224Client.SetRequestedProtocol(requestedProtocol(mode))
-	if err := x224Client.Connect(); err != nil {
+	session.SetRequestedProtocol(attempt.protocol)
+	if err := session.Connect(); err != nil {
 		return fmt.Errorf("x224 connect: %w", err)
 	}
 
@@ -194,14 +192,51 @@ func defaultLoginRDP(ctx context.Context, candidate core.SecurityCandidate, cred
 	}
 }
 
-func requestedProtocol(mode transportMode) uint32 {
-	if mode == transportModeTLS {
-		return x224.PROTOCOL_SSL
+func defaultOpenRDPSession(ctx context.Context, candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions) (rdpSession, error) {
+	domain, username := splitRDPUsername(cred.Username)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
 	}
-	return x224.PROTOCOL_RDP
+
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port)))
+	if err != nil {
+		return nil, err
+	}
+
+	if deadline, ok := deadlineFromContext(ctx, timeout); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	socket := grdpcore.NewSocketLayer(conn)
+	clientTPKT := tpkt.New(socket, nla.NewNTLMv2(domain, username, cred.Password))
+	x224Client := x224.New(clientTPKT)
+	mcsClient := t125.NewMCSClient(x224Client, gcc.US, gcc.KT_IBM_101_102_KEYS, 0)
+	secClient := sec.NewClient(mcsClient)
+	pduClient := pdu.NewClient(secClient)
+	channels := plugin.NewChannels(secClient)
+
+	mcsClient.SetClientDesktop(800, 600)
+	secClient.SetUser(username)
+	secClient.SetPwd(cred.Password)
+	secClient.SetDomain(domain)
+	clientTPKT.SetFastPathListener(secClient)
+	secClient.SetFastPathListener(pduClient)
+	secClient.SetChannelSender(mcsClient)
+	channels.SetChannelSender(secClient)
+
+	return &grdpLoginSession{
+		tpkt: clientTPKT,
+		x224: x224Client,
+		pdu:  pduClient,
+	}, nil
 }
 
 func successEvidence(mode transportMode) string {
+	if mode == transportModeHybrid {
+		return "RDP authentication succeeded (NLA/CredSSP security)"
+	}
 	if mode == transportModeTLS {
 		return "RDP authentication succeeded (TLS security)"
 	}
@@ -228,6 +263,15 @@ func deadlineFromContext(ctx context.Context, timeout time.Duration) (time.Time,
 	return time.Time{}, false
 }
 
+func shouldTryNextTransport(reason core.FailureReason) bool {
+	switch reason {
+	case core.FailureReasonConnection, core.FailureReasonInsufficientConfirmation:
+		return true
+	default:
+		return false
+	}
+}
+
 func classifyRDPFailure(err error) core.FailureReason {
 	if err == nil {
 		return ""
@@ -252,6 +296,7 @@ func classifyRDPFailure(err error) core.FailureReason {
 		strings.Contains(text, "reset by peer"),
 		strings.Contains(text, "broken pipe"),
 		strings.Contains(text, "no route"),
+		strings.Contains(text, "negotiation closed"),
 		strings.Contains(text, "closed before authentication"):
 		return core.FailureReasonConnection
 	default:
@@ -276,4 +321,41 @@ func ctxFailureReason(err error) core.FailureReason {
 
 func isTerminalContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+type grdpLoginSession struct {
+	tpkt *tpkt.TPKT
+	x224 *x224.X224
+	pdu  *pdu.Client
+}
+
+func (s *grdpLoginSession) OnClose(fn func()) {
+	s.x224.On("close", fn)
+	s.pdu.On("close", func() {
+		fn()
+	})
+}
+
+func (s *grdpLoginSession) OnReady(fn func()) {
+	s.pdu.On("ready", fn)
+}
+
+func (s *grdpLoginSession) OnError(fn func(error)) {
+	s.x224.On("error", fn)
+	s.pdu.On("error", fn)
+}
+
+func (s *grdpLoginSession) SetRequestedProtocol(protocol uint32) {
+	s.x224.SetRequestedProtocol(protocol)
+}
+
+func (s *grdpLoginSession) Connect() error {
+	return s.x224.Connect()
+}
+
+func (s *grdpLoginSession) Close() error {
+	if s.tpkt == nil {
+		return nil
+	}
+	return s.tpkt.Close()
 }

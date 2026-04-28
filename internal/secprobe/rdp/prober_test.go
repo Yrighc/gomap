@@ -3,26 +3,28 @@ package rdp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sergei-bronnikov/grdp/protocol/x224"
 	"github.com/yrighc/gomap/internal/secprobe/core"
 )
 
 func TestRDPProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
-	originalNegotiate := negotiateTransport
+	originalAttempts := transportAttempts
 	originalLogin := loginRDP
 	t.Cleanup(func() {
-		negotiateTransport = originalNegotiate
+		transportAttempts = originalAttempts
 		loginRDP = originalLogin
 	})
 
-	var modes []transportMode
-	negotiateTransport = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) (transportMode, error) {
-		return transportModeTLS, nil
+	var modes []transportAttempt
+	transportAttempts = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) ([]transportAttempt, error) {
+		return []transportAttempt{{mode: transportModeTLS, protocol: x224.PROTOCOL_SSL}}, nil
 	}
-	loginRDP = func(_ context.Context, _ core.SecurityCandidate, cred core.Credential, _ core.CredentialProbeOptions, mode transportMode) error {
-		modes = append(modes, mode)
+	loginRDP = func(_ context.Context, _ core.SecurityCandidate, cred core.Credential, _ core.CredentialProbeOptions, attempt transportAttempt) error {
+		modes = append(modes, attempt)
 		if cred.Password == "correct" {
 			return nil
 		}
@@ -57,25 +59,25 @@ func TestRDPProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 	if len(modes) != 2 {
 		t.Fatalf("expected two login attempts, got %d", len(modes))
 	}
-	for _, mode := range modes {
-		if mode != transportModeTLS {
+	for _, attempt := range modes {
+		if attempt.mode != transportModeTLS {
 			t.Fatalf("expected TLS transport for all attempts, got %v", modes)
 		}
 	}
 }
 
 func TestRDPProberClassifiesAuthenticationFailure(t *testing.T) {
-	originalNegotiate := negotiateTransport
+	originalAttempts := transportAttempts
 	originalLogin := loginRDP
 	t.Cleanup(func() {
-		negotiateTransport = originalNegotiate
+		transportAttempts = originalAttempts
 		loginRDP = originalLogin
 	})
 
-	negotiateTransport = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) (transportMode, error) {
-		return transportModeRDP, nil
+	transportAttempts = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) ([]transportAttempt, error) {
+		return []transportAttempt{{mode: transportModeRDP, protocol: x224.PROTOCOL_RDP}}, nil
 	}
-	loginRDP = func(context.Context, core.SecurityCandidate, core.Credential, core.CredentialProbeOptions, transportMode) error {
+	loginRDP = func(context.Context, core.SecurityCandidate, core.Credential, core.CredentialProbeOptions, transportAttempt) error {
 		return errors.New("authentication failed")
 	}
 
@@ -98,5 +100,147 @@ func TestRDPProberClassifiesAuthenticationFailure(t *testing.T) {
 	}
 	if result.FailureReason != core.FailureReasonAuthentication {
 		t.Fatalf("expected authentication failure reason, got %+v", result)
+	}
+}
+
+func TestDefaultTransportAttemptsPreferHybridThenSSLThenRDP(t *testing.T) {
+	attempts, err := defaultTransportAttempts(context.Background(), core.SecurityCandidate{
+		Service: "rdp",
+	}, core.CredentialProbeOptions{})
+	if err != nil {
+		t.Fatalf("expected no error building attempts, got %v", err)
+	}
+
+	if len(attempts) != 3 {
+		t.Fatalf("expected three default transport attempts, got %d", len(attempts))
+	}
+	if attempts[0].mode != transportModeHybrid || attempts[0].protocol != x224.PROTOCOL_HYBRID {
+		t.Fatalf("expected HYBRID first, got %+v", attempts)
+	}
+	if attempts[1].mode != transportModeTLS || attempts[1].protocol != x224.PROTOCOL_SSL {
+		t.Fatalf("expected SSL second, got %+v", attempts)
+	}
+	if attempts[2].mode != transportModeRDP || attempts[2].protocol != x224.PROTOCOL_RDP {
+		t.Fatalf("expected RDP third, got %+v", attempts)
+	}
+}
+
+func TestRDPProberFallsBackAcrossTransportAttempts(t *testing.T) {
+	originalAttempts := transportAttempts
+	originalLogin := loginRDP
+	t.Cleanup(func() {
+		transportAttempts = originalAttempts
+		loginRDP = originalLogin
+	})
+
+	transportAttempts = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) ([]transportAttempt, error) {
+		return []transportAttempt{
+			{mode: transportModeHybrid, protocol: x224.PROTOCOL_HYBRID},
+			{mode: transportModeTLS, protocol: x224.PROTOCOL_SSL},
+			{mode: transportModeRDP, protocol: x224.PROTOCOL_RDP},
+		}, nil
+	}
+
+	var modes []transportMode
+	loginRDP = func(_ context.Context, _ core.SecurityCandidate, cred core.Credential, _ core.CredentialProbeOptions, attempt transportAttempt) error {
+		modes = append(modes, attempt.mode)
+		if attempt.mode == transportModeHybrid {
+			return errNegotiationClosed
+		}
+		if attempt.mode == transportModeTLS && cred.Password == "correct" {
+			return nil
+		}
+		return errors.New("authentication failed")
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       3389,
+		Service:    "rdp",
+	}, core.CredentialProbeOptions{
+		Timeout:       5 * time.Second,
+		StopOnSuccess: true,
+	}, []core.Credential{
+		{Username: "alice", Password: "correct"},
+	})
+
+	if !result.Success {
+		t.Fatalf("expected rdp success after fallback sequence, got %+v", result)
+	}
+	if len(modes) != 2 || modes[0] != transportModeHybrid || modes[1] != transportModeTLS {
+		t.Fatalf("expected hybrid then tls fallback, got %v", modes)
+	}
+}
+
+func TestDefaultLoginRDPReturnsPromptlyWhenNegotiationCloses(t *testing.T) {
+	originalOpen := openRDPSession
+	t.Cleanup(func() {
+		openRDPSession = originalOpen
+	})
+
+	openRDPSession = func(context.Context, core.SecurityCandidate, core.Credential, core.CredentialProbeOptions) (rdpSession, error) {
+		return &fakeRDPSession{
+			connect: func(s *fakeRDPSession) error {
+				s.emitClose()
+				return nil
+			},
+		}, nil
+	}
+
+	start := time.Now()
+	err := defaultLoginRDP(context.Background(), core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       3389,
+		Service:    "rdp",
+	}, core.Credential{
+		Username: "alice",
+		Password: "secret",
+	}, core.CredentialProbeOptions{
+		Timeout: 500 * time.Millisecond,
+	}, transportAttempt{mode: transportModeHybrid, protocol: x224.PROTOCOL_HYBRID})
+
+	if err == nil {
+		t.Fatal("expected negotiation close error")
+	}
+	if time.Since(start) >= 200*time.Millisecond {
+		t.Fatalf("expected prompt return before timeout, got %v", time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "negotiation closed") {
+		t.Fatalf("expected negotiation close error, got %v", err)
+	}
+	if got := classifyRDPFailure(err); got != core.FailureReasonConnection {
+		t.Fatalf("expected connection failure classification, got %q", got)
+	}
+}
+
+type fakeRDPSession struct {
+	onClose func()
+	onReady func()
+	onError func(error)
+	connect func(*fakeRDPSession) error
+}
+
+func (s *fakeRDPSession) OnClose(fn func()) { s.onClose = fn }
+
+func (s *fakeRDPSession) OnReady(fn func()) { s.onReady = fn }
+
+func (s *fakeRDPSession) OnError(fn func(error)) { s.onError = fn }
+
+func (s *fakeRDPSession) SetRequestedProtocol(uint32) {}
+
+func (s *fakeRDPSession) Connect() error {
+	if s.connect != nil {
+		return s.connect(s)
+	}
+	return nil
+}
+
+func (s *fakeRDPSession) Close() error { return nil }
+
+func (s *fakeRDPSession) emitClose() {
+	if s.onClose != nil {
+		s.onClose()
 	}
 }
