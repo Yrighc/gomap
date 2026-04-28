@@ -82,13 +82,13 @@ func parseCredentialLines(raw string) ([]Credential, error) {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		username, password, ok := strings.Cut(line, ":")
-		if !ok {
+		parts := strings.SplitN(line, " : ", 2)
+		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid credential line %d: %q", idx+1, line)
 		}
 		out = append(out, Credential{
-			Username: strings.TrimSpace(username),
-			Password: strings.TrimSpace(password),
+			Username: strings.TrimSpace(parts[0]),
+			Password: strings.TrimSpace(parts[1]),
 		})
 	}
 	if len(out) == 0 {
