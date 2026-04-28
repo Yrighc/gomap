@@ -185,7 +185,7 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 常用参数：
 - `-target` / `-ips`: 单目标或多目标输入
 - `-ports`: 探测端口范围，默认 `21,22,23,3306,5432,6379`
-- `-protocols`: 限定协议，逗号分隔，例如 `ssh,redis,mssql,rdp,vnc,smb`
+- `-protocols`: 限定协议，逗号分隔，例如 `ssh,redis,mssql,rdp,vnc,smb,smtp,amqp`
 - `-timeout`: 资产发现与 secprobe 共用超时秒数
 - `-weak-concurrency`: secprobe 并发数
 - `-dict-dir`: 自定义协议字典目录
@@ -198,7 +198,7 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 
 说明：
 - 默认仍只执行 credential 探测
-- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, mysql, postgresql, redis, mssql, rdp, vnc, smb`
+- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, smtp, mysql, postgresql, redis, mssql, amqp, rdp, vnc, smb`
 - `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
 - `v1.3` 已增强内部执行状态与失败分类，但 CLI / JSON 仍保持兼容，不额外暴露 `Stage`、`FailureReason`、`Capabilities` 等内部字段
 - `v1.3` 继续保持默认保守策略，不新增额外显示控制参数
