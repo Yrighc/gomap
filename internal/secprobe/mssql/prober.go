@@ -86,46 +86,55 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			result.Stage = core.StageAttempted
 		}
 
-		db, err := openMSSQL(ctx, buildDSN(candidate, cred, opts))
-		if err != nil {
+		for _, dsn := range buildDSNAttempts(candidate, cred, opts) {
+			db, err := openMSSQL(ctx, dsn)
+			if err != nil {
+				result.Error = err.Error()
+				result.FailureReason = classifyMSSQLFailure(err)
+				if isTerminalContextError(err) {
+					if successFound {
+						return successResult
+					}
+					return result
+				}
+				if shouldContinueDSNAttempts(result.FailureReason) {
+					continue
+				}
+				break
+			}
+
+			pingCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+			err = db.PingContext(pingCtx)
+			cancel()
+			if err == nil {
+				successResult.Success = true
+				successResult.Username = cred.Username
+				successResult.Password = cred.Password
+				successResult.Evidence = mssqlEvidence(ctx, db, opts)
+				successResult.Error = ""
+				successResult.Stage = core.StageConfirmed
+				successResult.FailureReason = ""
+				successFound = true
+				_ = db.Close()
+				if opts.StopOnSuccess {
+					return successResult
+				}
+				break
+			}
+
 			result.Error = err.Error()
 			result.FailureReason = classifyMSSQLFailure(err)
+			_ = db.Close()
 			if isTerminalContextError(err) {
 				if successFound {
 					return successResult
 				}
 				return result
 			}
-			continue
-		}
-
-		pingCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
-		err = db.PingContext(pingCtx)
-		cancel()
-		if err == nil {
-			successResult.Success = true
-			successResult.Username = cred.Username
-			successResult.Password = cred.Password
-			successResult.Evidence = mssqlEvidence(ctx, db, opts)
-			successResult.Error = ""
-			successResult.Stage = core.StageConfirmed
-			successResult.FailureReason = ""
-			successFound = true
-			_ = db.Close()
-			if opts.StopOnSuccess {
-				return successResult
+			if shouldContinueDSNAttempts(result.FailureReason) {
+				continue
 			}
-			continue
-		}
-
-		result.Error = err.Error()
-		result.FailureReason = classifyMSSQLFailure(err)
-		_ = db.Close()
-		if isTerminalContextError(err) {
-			if successFound {
-				return successResult
-			}
-			return result
+			break
 		}
 	}
 
@@ -135,12 +144,21 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 	return result
 }
 
-func buildDSN(candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions) string {
+func buildDSNAttempts(candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions) []string {
+	return []string{
+		buildDSN(candidate, cred, opts, "true"),
+		buildDSN(candidate, cred, opts, "disable"),
+	}
+}
+
+func buildDSN(candidate core.SecurityCandidate, cred core.Credential, opts core.CredentialProbeOptions, encryptMode string) string {
 	query := url.Values{
-		"database":               []string{"master"},
-		"encrypt":                []string{"disable"},
-		"TrustServerCertificate": []string{"true"},
-		"app name":               []string{"gomap-secprobe"},
+		"database": []string{"master"},
+		"encrypt":  []string{encryptMode},
+		"app name": []string{"gomap-secprobe"},
+	}
+	if encryptMode != "disable" {
+		query.Set("TrustServerCertificate", "true")
 	}
 
 	timeoutSeconds := int(math.Ceil(opts.Timeout.Seconds()))
@@ -155,6 +173,15 @@ func buildDSN(candidate core.SecurityCandidate, cred core.Credential, opts core.
 		Host:     fmt.Sprintf("%s:%d", candidate.ResolvedIP, candidate.Port),
 		RawQuery: query.Encode(),
 	}).String()
+}
+
+func shouldContinueDSNAttempts(reason core.FailureReason) bool {
+	switch reason {
+	case core.FailureReasonConnection, core.FailureReasonInsufficientConfirmation:
+		return true
+	default:
+		return false
+	}
 }
 
 func mssqlEvidence(ctx context.Context, db mssqlDB, opts core.CredentialProbeOptions) string {
