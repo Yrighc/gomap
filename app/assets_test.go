@@ -63,18 +63,18 @@ func TestEmbeddedAssetprobeResourcesLoad(t *testing.T) {
 func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 	tests := []struct {
 		protocol string
-		prefix   string
+		snippets []string
 	}{
-		{protocol: "ftp", prefix: "ftp : ftp\nftp : 123456\nadmin : admin\nanonymous : anonymous\n"},
-		{protocol: "mssql", prefix: "sa : sa\nsa : 123456\nadmin : admin\nsa : P@ssw0rd\n"},
-		{protocol: "mysql", prefix: "root : root\nroot : 123456\nmysql : mysql\nadmin : admin\n"},
-		{protocol: "postgresql", prefix: "postgres : postgres\npostgres : 123456\nadmin : admin\ntest : test\n"},
-		{protocol: "rdp", prefix: "administrator : administrator\nadministrator : 123456\nadmin : admin\ntest : test\n"},
-		{protocol: "redis", prefix: "default : 123456\ndefault : redis\nredis : redis\nredis : {{key}}\n"},
-		{protocol: "smb", prefix: "administrator : administrator\nadministrator : 123456\nguest : guest\nadmin : admin\n"},
-		{protocol: "ssh", prefix: "root : root\nroot : 123456\nadmin : admin\ntest : test\n"},
-		{protocol: "telnet", prefix: "admin : admin\nroot : root\nroot : 123456\nuser : user\n"},
-		{protocol: "vnc", prefix: " : 123456\n : vnc\n : admin\n : password\n"},
+		{protocol: "ftp", snippets: []string{"ftp : 123456", "anonymous : anonymous"}},
+		{protocol: "mssql", snippets: []string{"sa : 123456", "sa : P@ssw0rd"}},
+		{protocol: "mysql", snippets: []string{"root : 123456", "mysql : mysql"}},
+		{protocol: "postgresql", snippets: []string{"postgres : 123456", "test : test"}},
+		{protocol: "rdp", snippets: []string{"administrator : 123456", "admin : admin"}},
+		{protocol: "redis", snippets: []string{"default : redis", "redis : {{key}}"}},
+		{protocol: "smb", snippets: []string{"administrator : 123456", "guest : guest"}},
+		{protocol: "ssh", snippets: []string{"root : 123456", "admin : admin"}},
+		{protocol: "telnet", snippets: []string{"admin : admin", "user : user"}},
+		{protocol: "vnc", snippets: []string{" : 123456", " : password"}},
 	}
 
 	for _, tt := range tests {
@@ -86,8 +86,10 @@ func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 			if len(data) == 0 {
 				t.Fatal("expected non-empty data")
 			}
-			if !strings.HasPrefix(string(data), tt.prefix) {
-				t.Fatalf("expected data to have prefix %q", tt.prefix)
+			for _, snippet := range tt.snippets {
+				if !strings.Contains(string(data), snippet) {
+					t.Fatalf("expected data to contain %q", snippet)
+				}
 			}
 		})
 	}

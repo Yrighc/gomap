@@ -26,6 +26,28 @@ func TestBuildCandidatesFiltersSupportedOpenPorts(t *testing.T) {
 	}
 }
 
+func TestBuildCandidatesSkipsCatalogOnlyProtocolsWithoutDefaultProber(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 22, Open: true, Service: "ssh"},
+			{Port: 1433, Open: true, Service: "mssql"},
+			{Port: 3389, Open: true, Service: "rdp"},
+			{Port: 445, Open: true, Service: "cifs"},
+			{Port: 5900, Open: true, Service: "vnc"},
+		},
+	}
+
+	candidates := BuildCandidates(res, CredentialProbeOptions{})
+	if len(candidates) != 1 {
+		t.Fatalf("expected only registered default candidates, got %#v", candidates)
+	}
+	if candidates[0].Service != "ssh" {
+		t.Fatalf("expected ssh candidate to remain, got %#v", candidates)
+	}
+}
+
 func TestNormalizeServiceNameUsesKnownPortFallback(t *testing.T) {
 	got := NormalizeServiceName("", 5432)
 	if got != "postgresql" {
@@ -119,6 +141,27 @@ func TestBuildCandidatesUsesRegistryLookup(t *testing.T) {
 	}
 	if got := prober.Name(); got != "ssh" {
 		t.Fatalf("expected public prober name ssh, got %q", got)
+	}
+}
+
+func TestBuildCandidatesWithRegistryIncludesCatalogProtocolWhenProberRegistered(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 445, Open: true, Service: "cifs"},
+		},
+	}
+
+	r := NewRegistry()
+	r.Register(stubProber{name: "smb"})
+
+	candidates := buildCandidatesWithRegistry(res, CredentialProbeOptions{}, r)
+	if len(candidates) != 1 {
+		t.Fatalf("expected smb candidate once registry supports it, got %#v", candidates)
+	}
+	if candidates[0].Service != "smb" {
+		t.Fatalf("expected canonical smb candidate, got %#v", candidates[0])
 	}
 }
 

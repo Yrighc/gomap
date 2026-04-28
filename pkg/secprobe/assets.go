@@ -8,11 +8,20 @@ import (
 )
 
 func BuiltinCredentials(protocol string) ([]Credential, error) {
-	data, err := appassets.SecprobeDict(strings.ToLower(strings.TrimSpace(protocol)))
-	if err != nil {
-		return nil, err
+	dictNames := builtinCredentialDictNames(protocol)
+	var lastErr error
+	for _, name := range dictNames {
+		data, err := appassets.SecprobeDict(name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return parseCredentialLines(string(data))
 	}
-	return parseCredentialLines(string(data))
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("unsupported secprobe dict protocol: %s", strings.ToLower(strings.TrimSpace(protocol)))
 }
 
 func CredentialsFor(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
@@ -36,12 +45,41 @@ func dedupeCredentials(in []Credential) []Credential {
 	return out
 }
 
+func builtinCredentialDictNames(protocol string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(protocol))
+	if normalized == "" {
+		return nil
+	}
+
+	if spec, ok := LookupProtocolSpec(normalized, 0); ok && len(spec.DictNames) > 0 {
+		names := make([]string, 0, len(spec.DictNames)+1)
+		seen := make(map[string]struct{}, len(spec.DictNames)+1)
+		for _, name := range spec.DictNames {
+			if _, ok := seen[name]; ok || strings.TrimSpace(name) == "" {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+		if _, ok := seen[spec.Name]; !ok && strings.TrimSpace(spec.Name) != "" {
+			seen[spec.Name] = struct{}{}
+			names = append(names, spec.Name)
+		}
+		if _, ok := seen[normalized]; !ok {
+			names = append(names, normalized)
+		}
+		return names
+	}
+
+	return []string{normalized}
+}
+
 func parseCredentialLines(raw string) ([]Credential, error) {
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
 	out := make([]Credential, 0, len(lines))
 	for idx, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		parts := strings.SplitN(line, " : ", 2)

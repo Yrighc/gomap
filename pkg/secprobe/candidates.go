@@ -15,6 +15,10 @@ func NormalizeServiceName(service string, port int) string {
 }
 
 func BuildCandidates(res *assetprobe.ScanResult, opts CredentialProbeOptions) []SecurityCandidate {
+	return buildCandidatesWithRegistry(res, opts, DefaultRegistry())
+}
+
+func buildCandidatesWithRegistry(res *assetprobe.ScanResult, opts CredentialProbeOptions, registry *Registry) []SecurityCandidate {
 	if res == nil {
 		return nil
 	}
@@ -41,14 +45,18 @@ func BuildCandidates(res *assetprobe.ScanResult, opts CredentialProbeOptions) []
 				continue
 			}
 		}
-		out = append(out, SecurityCandidate{
+		candidate := SecurityCandidate{
 			Target:     res.Target,
 			ResolvedIP: res.ResolvedIP,
 			Port:       p.Port,
 			Service:    service,
 			Version:    p.Version,
 			Banner:     p.Banner,
-		})
+		}
+		if !registrySupportsCandidate(registry, candidate) {
+			continue
+		}
+		out = append(out, candidate)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -59,4 +67,23 @@ func BuildCandidates(res *assetprobe.ScanResult, opts CredentialProbeOptions) []
 	})
 
 	return out
+}
+
+func registrySupportsCandidate(registry *Registry, candidate SecurityCandidate) bool {
+	if registry == nil {
+		return false
+	}
+
+	spec, ok := LookupProtocolSpec(candidate.Service, candidate.Port)
+	if !ok || len(spec.ProbeKinds) == 0 {
+		return false
+	}
+
+	for _, kind := range spec.ProbeKinds {
+		if _, ok := registry.Lookup(candidate, kind); ok {
+			return true
+		}
+	}
+
+	return false
 }

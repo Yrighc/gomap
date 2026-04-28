@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
-	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet"}
+	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc"}
 	for _, protocol := range tests {
 		creds, err := BuiltinCredentials(protocol)
 		if err != nil {
@@ -17,6 +17,19 @@ func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
 		if len(creds) == 0 {
 			t.Fatalf("expected builtin credentials for %s", protocol)
 		}
+	}
+}
+
+func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
+	creds, err := BuiltinCredentials("cifs")
+	if err != nil {
+		t.Fatalf("load cifs builtin credentials: %v", err)
+	}
+	if len(creds) == 0 {
+		t.Fatal("expected builtin credentials for cifs alias")
+	}
+	if creds[0].Username != "administrator" || creds[0].Password != "administrator" {
+		t.Fatalf("expected smb credentials via cifs alias, got %+v", creds[0])
 	}
 }
 
@@ -125,5 +138,18 @@ func TestParseCredentialLinesRejectsEmptyResult(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no valid credentials found") {
 		t.Fatalf("expected empty result error, got %v", err)
+	}
+}
+
+func TestParseCredentialLinesAllowsEmptyUsername(t *testing.T) {
+	creds, err := parseCredentialLines(" : 123456\n")
+	if err != nil {
+		t.Fatalf("expected empty username credential to parse: %v", err)
+	}
+	if len(creds) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(creds))
+	}
+	if creds[0].Username != "" || creds[0].Password != "123456" {
+		t.Fatalf("unexpected parsed credential: %+v", creds[0])
 	}
 }
