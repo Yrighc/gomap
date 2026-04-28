@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hirochachacha/go-smb2"
 	"github.com/yrighc/gomap/internal/secprobe/core"
 )
 
 type fakeSession struct {
-	mountFn       func(string) error
-	logoff        bool
-	authenticated bool
+	mountFn func(string) error
+	logoff  bool
 }
 
 func (s *fakeSession) Mount(share string) error {
@@ -27,10 +27,6 @@ func (s *fakeSession) Logoff() error {
 	return nil
 }
 
-func (s *fakeSession) Authenticated() bool {
-	return s.authenticated
-}
-
 func TestSMBProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 	originalDial := dialSMBSession
 	t.Cleanup(func() {
@@ -43,7 +39,7 @@ func TestSMBProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 		if cred.Password != "correct" {
 			return nil, errors.New("authentication failed")
 		}
-		return &fakeSession{authenticated: true}, nil
+		return &fakeSession{}, nil
 	}
 
 	result := New().Probe(context.Background(), core.SecurityCandidate{
@@ -119,7 +115,6 @@ func TestDefaultDialSMBSessionUsesIPCSuccessConfirmation(t *testing.T) {
 	var gotCred core.Credential
 	var mountedShare string
 	session := &fakeSession{
-		authenticated: true,
 		mountFn: func(share string) error {
 			mountedShare = share
 			return nil
@@ -157,6 +152,55 @@ func TestDefaultDialSMBSessionUsesIPCSuccessConfirmation(t *testing.T) {
 	}
 }
 
+func TestSMBDialerRequiresMessageSigning(t *testing.T) {
+	dialer := newSMBDialer(core.Credential{
+		Username: `DOMAIN\alice`,
+		Password: "secret",
+	})
+
+	if !dialer.Negotiator.RequireMessageSigning {
+		t.Fatal("expected SMB dialer to require message signing")
+	}
+	initiator, ok := dialer.Initiator.(*smb2.NTLMInitiator)
+	if !ok {
+		t.Fatalf("expected NTLM initiator, got %T", dialer.Initiator)
+	}
+	if initiator.Domain != "DOMAIN" || initiator.User != "alice" || initiator.Password != "secret" {
+		t.Fatalf("expected split credential fields to be preserved, got domain=%q user=%q password=%q", initiator.Domain, initiator.User, initiator.Password)
+	}
+}
+
+func TestDefaultDialSMBSessionPassesOriginalContextToOpenSMBConn(t *testing.T) {
+	originalOpen := openSMBConn
+	t.Cleanup(func() {
+		openSMBConn = originalOpen
+	})
+
+	parentCtx := context.WithValue(context.Background(), struct{}{}, "marker")
+	var capturedCtx context.Context
+	openSMBConn = func(ctx context.Context, network, address string, timeout time.Duration, cred core.Credential) (smbSession, error) {
+		capturedCtx = ctx
+		return &fakeSession{}, nil
+	}
+
+	gotSession, err := defaultDialSMBSession(parentCtx, "127.0.0.1:445", core.Credential{
+		Username: "alice",
+		Password: "secret",
+	}, 3*time.Second)
+	if err != nil {
+		t.Fatalf("expected default dial to succeed, got %v", err)
+	}
+	if gotSession == nil {
+		t.Fatal("expected returned session")
+	}
+	if capturedCtx != parentCtx {
+		t.Fatal("expected openSMBConn to receive the original caller context")
+	}
+	if capturedCtx.Err() != nil {
+		t.Fatalf("expected original context to remain active after success, got %v", capturedCtx.Err())
+	}
+}
+
 func TestSMBProberDoesNotConfirmGuestOrNullSession(t *testing.T) {
 	originalDial := dialSMBSession
 	t.Cleanup(func() {
@@ -189,42 +233,23 @@ func TestSMBProberDoesNotConfirmGuestOrNullSession(t *testing.T) {
 	}
 }
 
-func TestDefaultDialSMBSessionRejectsGuestOrNullSessionEvenIfIPCMountSucceeds(t *testing.T) {
+func TestSMBGuestOrNullSessionErrorsAreRecognized(t *testing.T) {
 	for _, tc := range []struct {
 		name string
+		err  error
 	}{
-		{name: "guest"},
-		{name: "null"},
+		{name: "guest", err: errors.New("guest account doesn't support signing")},
+		{name: "anonymous", err: errors.New("anonymous account doesn't support signing")},
+		{name: "wrapped", err: errors.New("session setup failed: guest account doesn't support signing")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			originalOpen := openSMBConn
-			t.Cleanup(func() {
-				openSMBConn = originalOpen
-			})
-
-			session := &fakeSession{
-				authenticated: false,
-				mountFn: func(string) error {
-					return nil
-				},
-			}
-
-			openSMBConn = func(context.Context, string, string, time.Duration, core.Credential) (smbSession, error) {
-				return session, nil
-			}
-
-			gotSession, err := defaultDialSMBSession(context.Background(), "127.0.0.1:445", core.Credential{
-				Username: "guest",
-			}, 3*time.Second)
-			if !errors.Is(err, errSMBGuestOrNullSession) {
-				t.Fatalf("expected guest/null session rejection, got session=%v err=%v", gotSession, err)
-			}
-			if gotSession != nil {
-				t.Fatalf("expected nil session on guest/null rejection, got %v", gotSession)
-			}
-			if !session.logoff {
-				t.Fatal("expected guest/null session rejection to log off session")
+			if !isSMBGuestOrNullSessionError(tc.err) {
+				t.Fatalf("expected error %q to be recognized as guest/null session", tc.err)
 			}
 		})
+	}
+
+	if isSMBGuestOrNullSessionError(errors.New("authentication failed")) {
+		t.Fatal("expected non guest/null authentication errors to remain unclassified")
 	}
 }

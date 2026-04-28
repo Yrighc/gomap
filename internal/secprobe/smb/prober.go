@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"net"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/hirochachacha/go-smb2"
 	"github.com/yrighc/gomap/internal/secprobe/core"
@@ -21,26 +19,19 @@ type prober struct{}
 type smbSession interface {
 	Mount(string) error
 	Logoff() error
-	Authenticated() bool
 }
 
 type managedSMBSession struct {
 	conn    net.Conn
 	session *smb2.Session
+	ctx     context.Context
 }
-
-// go-smb2 v1.1.0 keeps guest/null session state in internal sessionFlags.
-// We mirror the relevant bits here so we can reject sessions that mounted IPC$
-// without authenticating the supplied credential.
-const (
-	smb2SessionFlagIsGuest uint16 = 1 << iota
-	smb2SessionFlagIsNull
-)
 
 var errSMBGuestOrNullSession = errors.New("smb guest/null session does not confirm credential validity")
 
 func (s *managedSMBSession) Mount(share string) error {
-	fs, err := s.session.Mount(share)
+	session := s.sessionWithContext()
+	fs, err := session.Mount(share)
 	if err != nil {
 		return err
 	}
@@ -50,7 +41,7 @@ func (s *managedSMBSession) Mount(share string) error {
 func (s *managedSMBSession) Logoff() error {
 	var logoffErr error
 	if s.session != nil {
-		logoffErr = s.session.Logoff()
+		logoffErr = s.sessionWithContext().Logoff()
 	}
 	if s.conn != nil {
 		if closeErr := s.conn.Close(); logoffErr == nil {
@@ -60,43 +51,46 @@ func (s *managedSMBSession) Logoff() error {
 	return logoffErr
 }
 
-func (s *managedSMBSession) Authenticated() bool {
-	flags, ok := smbSessionFlags(s.session)
-	if !ok {
-		return false
+func (s *managedSMBSession) sessionWithContext() *smb2.Session {
+	if s.ctx == nil {
+		return s.session
 	}
-	return flags&(smb2SessionFlagIsGuest|smb2SessionFlagIsNull) == 0
+	return s.session.WithContext(s.ctx)
 }
 
 var dialSMBSession = defaultDialSMBSession
 
 var openSMBConn = func(ctx context.Context, network, address string, timeout time.Duration, cred core.Credential) (smbSession, error) {
+	authCtx := ctx
+	var cancel context.CancelFunc
+	if _, ok := ctx.Deadline(); !ok && timeout > 0 {
+		authCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := dialer.DialContext(ctx, network, address)
+	conn, err := dialer.DialContext(authCtx, network, address)
 	if err != nil {
 		return nil, err
 	}
 
-	if deadline, ok := deadlineFromContext(ctx, timeout); ok {
+	if deadline, ok := deadlineFromContext(authCtx, timeout); ok {
 		_ = conn.SetDeadline(deadline)
 	}
 
-	domain, username := splitSMBUsername(cred.Username)
-	session, err := (&smb2.Dialer{
-		Initiator: &smb2.NTLMInitiator{
-			User:     username,
-			Password: cred.Password,
-			Domain:   domain,
-		},
-	}).DialContext(ctx, conn)
+	session, err := newSMBDialer(cred).DialContext(authCtx, conn)
 	if err != nil {
 		_ = conn.Close()
+		if isSMBGuestOrNullSessionError(err) {
+			return nil, errSMBGuestOrNullSession
+		}
 		return nil, err
 	}
 
 	return &managedSMBSession{
 		conn:    conn,
-		session: session.WithContext(ctx),
+		session: session,
+		ctx:     ctx,
 	}, nil
 }
 
@@ -175,14 +169,7 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 }
 
 func defaultDialSMBSession(ctx context.Context, address string, cred core.Credential, timeout time.Duration) (smbSession, error) {
-	dialCtx := ctx
-	var cancel context.CancelFunc
-	if _, ok := ctx.Deadline(); !ok && timeout > 0 {
-		dialCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	session, err := openSMBConn(dialCtx, "tcp", address, timeout, cred)
+	session, err := openSMBConn(ctx, "tcp", address, timeout, cred)
 	if err != nil {
 		return nil, err
 	}
@@ -191,38 +178,30 @@ func defaultDialSMBSession(ctx context.Context, address string, cred core.Creden
 		_ = session.Logoff()
 		return nil, err
 	}
-	if !session.Authenticated() {
-		_ = session.Logoff()
-		return nil, errSMBGuestOrNullSession
-	}
 	return session, nil
 }
 
-func smbSessionFlags(session *smb2.Session) (uint16, bool) {
-	if session == nil {
-		return 0, false
+func newSMBDialer(cred core.Credential) *smb2.Dialer {
+	domain, username := splitSMBUsername(cred.Username)
+	return &smb2.Dialer{
+		Negotiator: smb2.Negotiator{
+			RequireMessageSigning: true,
+		},
+		Initiator: &smb2.NTLMInitiator{
+			User:     username,
+			Password: cred.Password,
+			Domain:   domain,
+		},
 	}
+}
 
-	sessionValue := reflect.ValueOf(session)
-	if sessionValue.Kind() != reflect.Pointer || sessionValue.IsNil() {
-		return 0, false
+func isSMBGuestOrNullSessionError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	sessionStruct := sessionValue.Elem()
-	innerSession := sessionStruct.FieldByName("s")
-	if !innerSession.IsValid() || innerSession.IsNil() {
-		return 0, false
-	}
-
-	innerSession = reflect.NewAt(innerSession.Type(), unsafe.Pointer(innerSession.UnsafeAddr())).Elem()
-	innerValue := innerSession.Elem()
-	sessionFlags := innerValue.FieldByName("sessionFlags")
-	if !sessionFlags.IsValid() || sessionFlags.Kind() != reflect.Uint16 {
-		return 0, false
-	}
-
-	sessionFlags = reflect.NewAt(sessionFlags.Type(), unsafe.Pointer(sessionFlags.UnsafeAddr())).Elem()
-	return uint16(sessionFlags.Uint()), true
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "guest account doesn't support signing") ||
+		strings.Contains(text, "anonymous account doesn't support signing")
 }
 
 func effectiveTimeout(timeout time.Duration) time.Duration {
