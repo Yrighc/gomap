@@ -40,11 +40,11 @@ func TestBuildCandidatesSkipsCatalogOnlyProtocolsWithoutDefaultProber(t *testing
 	}
 
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 3 {
+	if len(candidates) != 4 {
 		t.Fatalf("expected only registered default candidates, got %#v", candidates)
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "mssql" || candidates[2].Service != "rdp" {
-		t.Fatalf("expected ssh, mssql, and rdp candidates to remain, got %#v", candidates)
+	if candidates[0].Service != "ssh" || candidates[1].Service != "mssql" || candidates[2].Service != "rdp" || candidates[3].Service != "vnc" {
+		t.Fatalf("expected ssh, mssql, rdp, and vnc candidates to remain, got %#v", candidates)
 	}
 }
 
