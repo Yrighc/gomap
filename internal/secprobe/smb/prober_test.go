@@ -10,8 +10,9 @@ import (
 )
 
 type fakeSession struct {
-	mountFn func(string) error
-	logoff  bool
+	mountFn       func(string) error
+	logoff        bool
+	authenticated bool
 }
 
 func (s *fakeSession) Mount(share string) error {
@@ -26,6 +27,10 @@ func (s *fakeSession) Logoff() error {
 	return nil
 }
 
+func (s *fakeSession) Authenticated() bool {
+	return s.authenticated
+}
+
 func TestSMBProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 	originalDial := dialSMBSession
 	t.Cleanup(func() {
@@ -38,7 +43,7 @@ func TestSMBProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 		if cred.Password != "correct" {
 			return nil, errors.New("authentication failed")
 		}
-		return &fakeSession{}, nil
+		return &fakeSession{authenticated: true}, nil
 	}
 
 	result := New().Probe(context.Background(), core.SecurityCandidate{
@@ -114,6 +119,7 @@ func TestDefaultDialSMBSessionUsesIPCSuccessConfirmation(t *testing.T) {
 	var gotCred core.Credential
 	var mountedShare string
 	session := &fakeSession{
+		authenticated: true,
 		mountFn: func(share string) error {
 			mountedShare = share
 			return nil
@@ -148,5 +154,77 @@ func TestDefaultDialSMBSessionUsesIPCSuccessConfirmation(t *testing.T) {
 	}
 	if mountedShare != "IPC$" {
 		t.Fatalf("expected IPC$ mount for confirmation, got %q", mountedShare)
+	}
+}
+
+func TestSMBProberDoesNotConfirmGuestOrNullSession(t *testing.T) {
+	originalDial := dialSMBSession
+	t.Cleanup(func() {
+		dialSMBSession = originalDial
+	})
+
+	dialSMBSession = func(context.Context, string, core.Credential, time.Duration) (smbSession, error) {
+		return nil, errSMBGuestOrNullSession
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       445,
+		Service:    "smb",
+	}, core.CredentialProbeOptions{
+		Timeout: 5 * time.Second,
+	}, []core.Credential{
+		{Username: "guest", Password: ""},
+	})
+
+	if result.Success {
+		t.Fatalf("expected guest/null session to be rejected, got %+v", result)
+	}
+	if result.Stage == core.StageConfirmed {
+		t.Fatalf("expected guest/null session to avoid confirmed stage, got %+v", result)
+	}
+	if result.FailureReason != core.FailureReasonInsufficientConfirmation {
+		t.Fatalf("expected insufficient-confirmation failure, got %+v", result)
+	}
+}
+
+func TestDefaultDialSMBSessionRejectsGuestOrNullSessionEvenIfIPCMountSucceeds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+	}{
+		{name: "guest"},
+		{name: "null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			originalOpen := openSMBConn
+			t.Cleanup(func() {
+				openSMBConn = originalOpen
+			})
+
+			session := &fakeSession{
+				authenticated: false,
+				mountFn: func(string) error {
+					return nil
+				},
+			}
+
+			openSMBConn = func(context.Context, string, string, time.Duration, core.Credential) (smbSession, error) {
+				return session, nil
+			}
+
+			gotSession, err := defaultDialSMBSession(context.Background(), "127.0.0.1:445", core.Credential{
+				Username: "guest",
+			}, 3*time.Second)
+			if !errors.Is(err, errSMBGuestOrNullSession) {
+				t.Fatalf("expected guest/null session rejection, got session=%v err=%v", gotSession, err)
+			}
+			if gotSession != nil {
+				t.Fatalf("expected nil session on guest/null rejection, got %v", gotSession)
+			}
+			if !session.logoff {
+				t.Fatal("expected guest/null session rejection to log off session")
+			}
+		})
 	}
 }

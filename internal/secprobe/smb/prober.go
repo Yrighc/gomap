@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/hirochachacha/go-smb2"
 	"github.com/yrighc/gomap/internal/secprobe/core"
@@ -19,12 +21,23 @@ type prober struct{}
 type smbSession interface {
 	Mount(string) error
 	Logoff() error
+	Authenticated() bool
 }
 
 type managedSMBSession struct {
 	conn    net.Conn
 	session *smb2.Session
 }
+
+// go-smb2 v1.1.0 keeps guest/null session state in internal sessionFlags.
+// We mirror the relevant bits here so we can reject sessions that mounted IPC$
+// without authenticating the supplied credential.
+const (
+	smb2SessionFlagIsGuest uint16 = 1 << iota
+	smb2SessionFlagIsNull
+)
+
+var errSMBGuestOrNullSession = errors.New("smb guest/null session does not confirm credential validity")
 
 func (s *managedSMBSession) Mount(share string) error {
 	fs, err := s.session.Mount(share)
@@ -45,6 +58,14 @@ func (s *managedSMBSession) Logoff() error {
 		}
 	}
 	return logoffErr
+}
+
+func (s *managedSMBSession) Authenticated() bool {
+	flags, ok := smbSessionFlags(s.session)
+	if !ok {
+		return false
+	}
+	return flags&(smb2SessionFlagIsGuest|smb2SessionFlagIsNull) == 0
 }
 
 var dialSMBSession = defaultDialSMBSession
@@ -170,7 +191,38 @@ func defaultDialSMBSession(ctx context.Context, address string, cred core.Creden
 		_ = session.Logoff()
 		return nil, err
 	}
+	if !session.Authenticated() {
+		_ = session.Logoff()
+		return nil, errSMBGuestOrNullSession
+	}
 	return session, nil
+}
+
+func smbSessionFlags(session *smb2.Session) (uint16, bool) {
+	if session == nil {
+		return 0, false
+	}
+
+	sessionValue := reflect.ValueOf(session)
+	if sessionValue.Kind() != reflect.Pointer || sessionValue.IsNil() {
+		return 0, false
+	}
+
+	sessionStruct := sessionValue.Elem()
+	innerSession := sessionStruct.FieldByName("s")
+	if !innerSession.IsValid() || innerSession.IsNil() {
+		return 0, false
+	}
+
+	innerSession = reflect.NewAt(innerSession.Type(), unsafe.Pointer(innerSession.UnsafeAddr())).Elem()
+	innerValue := innerSession.Elem()
+	sessionFlags := innerValue.FieldByName("sessionFlags")
+	if !sessionFlags.IsValid() || sessionFlags.Kind() != reflect.Uint16 {
+		return 0, false
+	}
+
+	sessionFlags = reflect.NewAt(sessionFlags.Type(), unsafe.Pointer(sessionFlags.UnsafeAddr())).Elem()
+	return uint16(sessionFlags.Uint()), true
 }
 
 func effectiveTimeout(timeout time.Duration) time.Duration {
