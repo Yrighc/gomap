@@ -5,25 +5,25 @@ import (
 	"fmt"
 )
 
-//go:embed gomap-service-probes gomap-services dict-simple.txt dict-normal.txt dict-diff.txt secprobe-ftp.txt secprobe-mysql.txt secprobe-postgresql.txt secprobe-redis.txt secprobe-ssh.txt secprobe-telnet.txt
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/ftp.txt secprobe/dicts/mysql.txt secprobe/dicts/postgresql.txt secprobe/dicts/redis.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
-	return files.ReadFile("gomap-service-probes")
+	return files.ReadFile("assetprobe/probes/gomap-service-probes")
 }
 
 func Services() ([]byte, error) {
-	return files.ReadFile("gomap-services")
+	return files.ReadFile("assetprobe/services/gomap-services")
 }
 
 func Dict(level string) ([]byte, error) {
 	switch level {
 	case "simple":
-		return files.ReadFile("dict-simple.txt")
+		return files.ReadFile("assetprobe/dicts/simple.txt")
 	case "normal":
-		return files.ReadFile("dict-normal.txt")
+		return files.ReadFile("assetprobe/dicts/normal.txt")
 	case "diff":
-		return files.ReadFile("dict-diff.txt")
+		return files.ReadFile("assetprobe/dicts/diff.txt")
 	default:
 		return nil, fmt.Errorf("unsupported dict level: %s", level)
 	}
@@ -32,17 +32,17 @@ func Dict(level string) ([]byte, error) {
 func SecprobeDict(protocol string) ([]byte, error) {
 	switch protocol {
 	case "ftp":
-		return files.ReadFile("secprobe-ftp.txt")
+		return files.ReadFile("secprobe/dicts/ftp.txt")
 	case "mysql":
-		return files.ReadFile("secprobe-mysql.txt")
+		return files.ReadFile("secprobe/dicts/mysql.txt")
 	case "postgresql":
-		return files.ReadFile("secprobe-postgresql.txt")
+		return files.ReadFile("secprobe/dicts/postgresql.txt")
 	case "redis":
-		return files.ReadFile("secprobe-redis.txt")
+		return files.ReadFile("secprobe/dicts/redis.txt")
 	case "ssh":
-		return files.ReadFile("secprobe-ssh.txt")
+		return files.ReadFile("secprobe/dicts/ssh.txt")
 	case "telnet":
-		return files.ReadFile("secprobe-telnet.txt")
+		return files.ReadFile("secprobe/dicts/telnet.txt")
 	default:
 		return nil, fmt.Errorf("unsupported secprobe dict protocol: %s", protocol)
 	}

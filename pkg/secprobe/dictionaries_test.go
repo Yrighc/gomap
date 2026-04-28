@@ -10,9 +10,7 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNames(t *testing.T) {
 	got := CredentialDictionaryCandidates("postgresql", "/tmp/dicts")
 	want := []string{
 		filepath.Join("/tmp/dicts", "postgresql.txt"),
-		filepath.Join("/tmp/dicts", "secprobe-postgresql.txt"),
 		filepath.Join("/tmp/dicts", "postgres.txt"),
-		filepath.Join("/tmp/dicts", "secprobe-postgres.txt"),
 	}
 
 	if len(got) != len(want) {
@@ -36,9 +34,7 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForAlias(t *testing.T
 			protocol: "postgres",
 			want: []string{
 				filepath.Join("/tmp/dicts", "postgresql.txt"),
-				filepath.Join("/tmp/dicts", "secprobe-postgresql.txt"),
 				filepath.Join("/tmp/dicts", "postgres.txt"),
-				filepath.Join("/tmp/dicts", "secprobe-postgres.txt"),
 			},
 		},
 		{
@@ -46,7 +42,6 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForAlias(t *testing.T
 			protocol: "redis/tls",
 			want: []string{
 				filepath.Join("/tmp/dicts", "redis.txt"),
-				filepath.Join("/tmp/dicts", "secprobe-redis.txt"),
 			},
 		},
 	}
@@ -64,7 +59,6 @@ func TestCredentialDictionaryCandidatesFallsBackForUnknownProtocol(t *testing.T)
 	got := CredentialDictionaryCandidates("CustomSvc", "/tmp/dicts")
 	want := []string{
 		filepath.Join("/tmp/dicts", "CustomSvc.txt"),
-		filepath.Join("/tmp/dicts", "secprobe-CustomSvc.txt"),
 	}
 
 	if len(got) != len(want) {
