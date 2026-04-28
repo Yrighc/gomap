@@ -2,15 +2,6 @@ package secprobe
 
 import "testing"
 
-func supportsKind(spec ProtocolSpec, kind ProbeKind) bool {
-	for _, declared := range spec.ProbeKinds {
-		if declared == kind {
-			return true
-		}
-	}
-	return false
-}
-
 func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 	r := NewRegistry()
 	RegisterDefaultProbers(r)
@@ -87,23 +78,38 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 	r := DefaultRegistry()
 
-	for _, spec := range builtinProtocolSpecs {
-		spec := spec
-		t.Run(spec.Name, func(t *testing.T) {
-			candidate := SecurityCandidate{Service: spec.Name, Port: spec.Ports[0]}
-			prober, ok := r.Lookup(candidate, ProbeKindCredential)
-			if supportsKind(spec, ProbeKindCredential) {
-				if !ok {
-					t.Fatalf("expected default registry to contain credential prober for %+v", candidate)
-				}
-				if got := prober.Name(); got != spec.Name {
-					t.Fatalf("expected default registry to resolve %q, got %q", spec.Name, got)
-				}
+	tests := []struct {
+		name      string
+		candidate SecurityCandidate
+		kind      ProbeKind
+		wantOK    bool
+		wantName  string
+	}{
+		{name: "ftp credential", candidate: SecurityCandidate{Service: "ftp", Port: 21}, kind: ProbeKindCredential, wantOK: true, wantName: "ftp"},
+		{name: "ssh credential", candidate: SecurityCandidate{Service: "ssh", Port: 22}, kind: ProbeKindCredential, wantOK: true, wantName: "ssh"},
+		{name: "telnet credential", candidate: SecurityCandidate{Service: "telnet", Port: 23}, kind: ProbeKindCredential, wantOK: true, wantName: "telnet"},
+		{name: "mysql credential", candidate: SecurityCandidate{Service: "mysql", Port: 3306}, kind: ProbeKindCredential, wantOK: true, wantName: "mysql"},
+		{name: "postgresql credential", candidate: SecurityCandidate{Service: "postgresql", Port: 5432}, kind: ProbeKindCredential, wantOK: true, wantName: "postgresql"},
+		{name: "redis credential", candidate: SecurityCandidate{Service: "redis", Port: 6379}, kind: ProbeKindCredential, wantOK: true, wantName: "redis"},
+		{name: "mssql credential", candidate: SecurityCandidate{Service: "mssql", Port: 1433}, kind: ProbeKindCredential, wantOK: true, wantName: "mssql"},
+		{name: "rdp credential", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, kind: ProbeKindCredential, wantOK: true, wantName: "rdp"},
+		{name: "vnc credential", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, kind: ProbeKindCredential, wantOK: true, wantName: "vnc"},
+		{name: "smb credential", candidate: SecurityCandidate{Service: "smb", Port: 445}, kind: ProbeKindCredential, wantOK: true, wantName: "smb"},
+		{name: "mongodb credential miss", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: false},
+		{name: "mongodb unauthorized hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "mongodb-unauthorized"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prober, ok := r.Lookup(tt.candidate, tt.kind)
+			if ok != tt.wantOK {
+				t.Fatalf("expected lookup result %t for %+v/%s, got %t", tt.wantOK, tt.candidate, tt.kind, ok)
+			}
+			if !tt.wantOK {
 				return
 			}
-
-			if ok {
-				t.Fatalf("expected default registry to reject credential lookup for %+v, got %q", candidate, prober.Name())
+			if got := prober.Name(); got != tt.wantName {
+				t.Fatalf("expected default registry to resolve %q, got %q", tt.wantName, got)
 			}
 		})
 	}

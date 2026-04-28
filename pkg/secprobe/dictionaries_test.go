@@ -55,6 +55,34 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForAlias(t *testing.T
 	}
 }
 
+func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForBatchAAliases(t *testing.T) {
+	tests := []struct {
+		protocol string
+		want     []string
+	}{
+		{
+			protocol: "smtps",
+			want: []string{
+				filepath.Join("/tmp/dicts", "smtp.txt"),
+			},
+		},
+		{
+			protocol: "amqps",
+			want: []string{
+				filepath.Join("/tmp/dicts", "amqp.txt"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.protocol, func(t *testing.T) {
+			if got := CredentialDictionaryCandidates(tt.protocol, "/tmp/dicts"); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("CredentialDictionaryCandidates(%q) = %v, want %v", tt.protocol, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCredentialDictionaryCandidatesFallsBackForUnknownProtocol(t *testing.T) {
 	got := CredentialDictionaryCandidates("CustomSvc", "/tmp/dicts")
 	want := []string{
