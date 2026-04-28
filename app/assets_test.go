@@ -77,6 +77,8 @@ func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 		{protocol: "ssh", snippets: []string{"root : 123456", "admin : admin"}},
 		{protocol: "telnet", snippets: []string{"admin : admin", "user : user"}},
 		{protocol: "vnc", snippets: []string{" : 123456", " : password"}},
+		{protocol: "oracle", snippets: []string{"sys : oracle", "system : manager"}},
+		{protocol: "snmp", snippets: []string{" : public", " : private"}},
 	}
 
 	for _, tt := range tests {

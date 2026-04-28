@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
-	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc", "smtp", "amqp"}
+	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc", "smtp", "amqp", "oracle", "snmp"}
 	for _, protocol := range tests {
 		creds, err := BuiltinCredentials(protocol)
 		if err != nil {
@@ -29,6 +29,7 @@ func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
 		{protocol: "cifs", wantUser: "administrator", wantPass: "administrator"},
 		{protocol: "smtps", wantUser: "admin", wantPass: "admin"},
 		{protocol: "amqps", wantUser: "guest", wantPass: "guest"},
+		{protocol: "oracle-tns", wantUser: "sys", wantPass: "oracle"},
 	}
 
 	for _, tt := range tests {
@@ -44,6 +45,19 @@ func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
 				t.Fatalf("expected %s credentials via alias, got %+v", tt.protocol, creds[0])
 			}
 		})
+	}
+}
+
+func TestBuiltinCredentialsLoadSNMPCommunityMapping(t *testing.T) {
+	creds, err := BuiltinCredentials("snmp")
+	if err != nil {
+		t.Fatalf("load snmp builtin credentials: %v", err)
+	}
+	if len(creds) == 0 {
+		t.Fatal("expected builtin credentials for snmp")
+	}
+	if creds[0].Username != "" || creds[0].Password != "public" {
+		t.Fatalf("expected first snmp community mapping to be empty username/public password, got %+v", creds[0])
 	}
 }
 

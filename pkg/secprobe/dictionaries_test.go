@@ -83,6 +83,17 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForBatchAAliases(t *t
 	}
 }
 
+func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForBatchBAlias(t *testing.T) {
+	got := CredentialDictionaryCandidates("oracle-tns", "/tmp/dicts")
+	want := []string{
+		filepath.Join("/tmp/dicts", "oracle.txt"),
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CredentialDictionaryCandidates(%q) = %v, want %v", "oracle-tns", got, want)
+	}
+}
+
 func TestCredentialDictionaryCandidatesFallsBackForUnknownProtocol(t *testing.T) {
 	got := CredentialDictionaryCandidates("CustomSvc", "/tmp/dicts")
 	want := []string{

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
@@ -39,6 +39,8 @@ func SecprobeDict(protocol string) ([]byte, error) {
 		return files.ReadFile("secprobe/dicts/mssql.txt")
 	case "mysql":
 		return files.ReadFile("secprobe/dicts/mysql.txt")
+	case "oracle":
+		return files.ReadFile("secprobe/dicts/oracle.txt")
 	case "postgresql":
 		return files.ReadFile("secprobe/dicts/postgresql.txt")
 	case "rdp":
@@ -49,6 +51,8 @@ func SecprobeDict(protocol string) ([]byte, error) {
 		return files.ReadFile("secprobe/dicts/smb.txt")
 	case "smtp":
 		return files.ReadFile("secprobe/dicts/smtp.txt")
+	case "snmp":
+		return files.ReadFile("secprobe/dicts/snmp.txt")
 	case "ssh":
 		return files.ReadFile("secprobe/dicts/ssh.txt")
 	case "telnet":

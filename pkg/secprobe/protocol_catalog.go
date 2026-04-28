@@ -50,6 +50,13 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
+		Name:       "oracle",
+		Aliases:    []string{"oracle-tns"},
+		Ports:      []int{1521},
+		DictNames:  []string{"oracle"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
 		Name:       "rdp",
 		Ports:      []int{3389},
 		DictNames:  []string{"rdp"},
@@ -82,6 +89,12 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		Aliases:    []string{"cifs"},
 		Ports:      []int{445, 139},
 		DictNames:  []string{"smb"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "snmp",
+		Ports:      []int{161},
+		DictNames:  []string{"snmp"},
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
