@@ -24,12 +24,18 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 ```text
 .
 ├── app/
-│   ├── gomap-service-probes      # 服务识别探针规则
-│   ├── gomap-services            # 端口服务映射
-│   ├── dict-simple.txt           # 目录爆破字典（simple）
-│   ├── dict-normal.txt           # 目录爆破字典（normal）
-│   ├── dict-diff.txt             # 目录爆破字典（diff）
-│   └── secprobe-*.txt            # 内置协议口令字典
+│   ├── assetprobe/
+│   │   ├── probes/
+│   │   │   └── gomap-service-probes  # 服务识别探针规则
+│   │   ├── services/
+│   │   │   └── gomap-services        # 端口服务映射
+│   │   └── dicts/
+│   │       ├── simple.txt            # 目录爆破字典（simple）
+│   │       ├── normal.txt            # 目录爆破字典（normal）
+│   │       └── diff.txt              # 目录爆破字典（diff）
+│   └── secprobe/
+│       └── dicts/
+│           └── *.txt                 # 内置协议口令字典
 ├── cmd/
 │   └── main.go                   # 主 CLI（port/web/dir/weak 子命令）
 ├── pkg/assetprobe/
@@ -68,8 +74,8 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 ### 3.2 服务识别策略
 
-- 结合 `app/gomap-service-probes` 规则进行协议探测与匹配
-- 结合 `app/gomap-services` 做端口服务兜底映射
+- 结合 `app/assetprobe/probes/gomap-service-probes` 规则进行协议探测与匹配
+- 结合 `app/assetprobe/services/gomap-services` 做端口服务兜底映射
 - 支持常见 TLS/明文服务识别
 
 ### 3.3 首页识别与目录爆破
@@ -101,9 +107,12 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
                     |
                     v
          +---------------------------+
-         | app/gomap-service-probes |
-         | app/gomap-services       |
-         | app/dict-*.txt         |
+         | app/assetprobe/probes/   |
+         |   gomap-service-probes   |
+         | app/assetprobe/services/ |
+         |   gomap-services         |
+         | app/assetprobe/dicts/*.txt |
+         | app/secprobe/dicts/*.txt   |
          +---------------------------+
 ```
 

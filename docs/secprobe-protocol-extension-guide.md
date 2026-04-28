@@ -85,8 +85,8 @@
 约束：
 
 - 优先复用 `DictNames`，不要在协议实现里手拼字典路径。
-- 当前候选文件名规则是 `<name>.txt` 和 `secprobe-<name>.txt`。
-- 默认内置字典加载仍通过 `pkg/secprobe/assets.go` 和 `app` 内嵌资源处理。
+- 当前候选文件名规则仅为 `<name>.txt`。
+- 默认内置字典加载仍通过 `pkg/secprobe/assets.go` 和 `app/secprobe/dicts/<protocol>.txt` 内嵌资源处理。
 - 对 `Run()` / 默认 CLI 路径来说，仅补 `DictNames` 还不够；若协议支持内置 credential 字典，还需要同步补齐 `app/assets.go` 中的 embed 资源和 `SecprobeDict` 分支，否则默认内置字典不可用。
 
 ## 哪些内容允许配置化
@@ -162,7 +162,7 @@
    - 证据填写
    - 结果阶段与失败原因填写
 11. 如果协议支持默认内置 credential 字典，复查 `DictNames` 之外的内置字典接线是否补齐：
-   - `app` 内嵌资源已包含对应 `secprobe-*.txt`
+   - `app/secprobe/dicts/` 内嵌资源已包含对应 `<protocol>.txt`
    - `app/assets.go` 的 `SecprobeDict` 已增加协议分支
    - 默认 `Run()` / CLI 路径可实际加载该协议内置字典
 12. 复查字典加载链路是否走协议目录，而不是协议实现私有路径。
