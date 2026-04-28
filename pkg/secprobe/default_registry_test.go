@@ -37,6 +37,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			want:      "rdp",
 		},
 		{
+			name:      "vnc credential",
+			candidate: SecurityCandidate{Service: "vnc", Port: 5900},
+			kind:      ProbeKindCredential,
+			want:      "vnc",
+		},
+		{
 			name:      "redis unauthorized",
 			candidate: SecurityCandidate{Service: "redis", Port: 6379},
 			kind:      ProbeKindUnauthorized,

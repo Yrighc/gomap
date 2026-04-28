@@ -11,6 +11,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/lib/pq v1.12.3
 	github.com/microsoft/go-mssqldb v1.9.7
+	github.com/mitchellh/go-vnc v0.0.0-20150629162542-723ed9867aed
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/refraction-networking/utls v1.7.0

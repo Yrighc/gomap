@@ -10,6 +10,7 @@ import (
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
+	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
 )
 
 func RegisterDefaultProbers(r *Registry) {
@@ -26,6 +27,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(redisprobe.New())
 	r.registerCoreProber(redisprobe.NewUnauthorized())
 	r.registerCoreProber(telnetprobe.New())
+	r.registerCoreProber(vncprobe.New())
 	r.registerCoreProber(mongodbprobe.NewUnauthorized())
 }
 
