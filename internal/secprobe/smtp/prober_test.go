@@ -216,17 +216,40 @@ func TestDefaultDialSMTPClientPassesCallerContextToImplicitTLSDialer(t *testing.
 	markerCtx := context.WithValue(ctx, markerKey{}, "smtp-ctx")
 	sentinel := errors.New("stop after ctx capture")
 	var capturedCtx context.Context
-	dialImplicitTLSContext = func(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+	var capturedTimeout time.Duration
+	dialImplicitTLSContext = func(ctx context.Context, network, addr string, timeout time.Duration, config *tls.Config) (net.Conn, error) {
 		capturedCtx = ctx
+		capturedTimeout = timeout
 		return nil, sentinel
 	}
 
-	_, err := defaultDialSMTPClient(markerCtx, "127.0.0.1:465", smtpDialPlan{implicitTLS: true}, time.Second)
+	timeout := time.Second
+	start := time.Now()
+	_, err := defaultDialSMTPClient(markerCtx, "127.0.0.1:465", smtpDialPlan{implicitTLS: true}, timeout)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel error, got %v", err)
 	}
-	if capturedCtx != markerCtx {
-		t.Fatalf("expected implicit TLS dialer to receive caller context")
+	if capturedCtx == nil {
+		t.Fatal("expected implicit TLS dialer to receive caller context")
+	}
+	if capturedCtx == markerCtx {
+		t.Fatalf("expected implicit TLS dialer to receive a derived timeout context")
+	}
+	if got := capturedCtx.Value(markerKey{}); got != "smtp-ctx" {
+		t.Fatalf("expected derived context to preserve caller values, got %v", got)
+	}
+	deadline, ok := capturedCtx.Deadline()
+	if !ok {
+		t.Fatal("expected implicit TLS dialer context to include timeout deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > timeout {
+		t.Fatalf("expected timeout deadline within %v, got remaining=%v", timeout, remaining)
+	}
+	if deadline.Before(start) {
+		t.Fatalf("expected deadline after call start, got %v before %v", deadline, start)
+	}
+	if capturedTimeout != timeout {
+		t.Fatalf("expected implicit TLS dialer to receive timeout %v, got %v", timeout, capturedTimeout)
 	}
 }
 

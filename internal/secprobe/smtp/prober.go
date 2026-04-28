@@ -130,7 +130,14 @@ func defaultDialSMTPClient(ctx context.Context, addr string, plan smtpDialPlan, 
 
 	dialer := &net.Dialer{Timeout: timeout}
 	if plan.implicitTLS {
-		conn, err := dialImplicitTLSContext(ctx, "tcp", addr, &tls.Config{
+		tlsCtx := ctx
+		cancel := func() {}
+		if timeout > 0 {
+			tlsCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		defer cancel()
+
+		conn, err := dialImplicitTLSContext(tlsCtx, "tcp", addr, timeout, &tls.Config{
 			ServerName:         host,
 			InsecureSkipVerify: true,
 		})
@@ -177,9 +184,9 @@ func defaultDialSMTPClient(ctx context.Context, addr string, plan smtpDialPlan, 
 	return client, nil
 }
 
-func defaultDialImplicitTLSContext(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+func defaultDialImplicitTLSContext(ctx context.Context, network, addr string, timeout time.Duration, config *tls.Config) (net.Conn, error) {
 	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{},
+		NetDialer: &net.Dialer{Timeout: timeout},
 		Config:    config,
 	}
 	return dialer.DialContext(ctx, network, addr)
