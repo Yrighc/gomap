@@ -21,22 +21,18 @@ func CredentialDictionaryCandidates(protocol, dictDir string) []string {
 }
 
 func credentialDictionaryCandidatesForNames(names []string, dictDir string) []string {
-	out := make([]string, 0, len(names)*2)
-	seen := make(map[string]struct{}, len(names)*2)
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		if strings.TrimSpace(name) == "" {
 			continue
 		}
-		for _, path := range []string{
-			filepath.Join(dictDir, name+".txt"),
-			filepath.Join(dictDir, "secprobe-"+name+".txt"),
-		} {
-			if _, ok := seen[path]; ok {
-				continue
-			}
-			seen[path] = struct{}{}
-			out = append(out, path)
+		path := filepath.Join(dictDir, name+".txt")
+		if _, ok := seen[path]; ok {
+			continue
 		}
+		seen[path] = struct{}{}
+		out = append(out, path)
 	}
 
 	return out
