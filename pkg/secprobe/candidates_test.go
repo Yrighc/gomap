@@ -26,7 +26,7 @@ func TestBuildCandidatesFiltersSupportedOpenPorts(t *testing.T) {
 	}
 }
 
-func TestBuildCandidatesSkipsCatalogOnlyProtocolsWithoutDefaultProber(t *testing.T) {
+func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) {
 	res := &assetprobe.ScanResult{
 		Target:     "demo",
 		ResolvedIP: "127.0.0.1",
@@ -40,11 +40,11 @@ func TestBuildCandidatesSkipsCatalogOnlyProtocolsWithoutDefaultProber(t *testing
 	}
 
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 4 {
-		t.Fatalf("expected only registered default candidates, got %#v", candidates)
+	if len(candidates) != 5 {
+		t.Fatalf("expected registered default candidates, got %#v", candidates)
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "mssql" || candidates[2].Service != "rdp" || candidates[3].Service != "vnc" {
-		t.Fatalf("expected ssh, mssql, rdp, and vnc candidates to remain, got %#v", candidates)
+	if candidates[0].Service != "ssh" || candidates[1].Service != "smb" || candidates[2].Service != "mssql" || candidates[3].Service != "rdp" || candidates[4].Service != "vnc" {
+		t.Fatalf("expected ssh, smb, mssql, rdp, and vnc candidates to remain, got %#v", candidates)
 	}
 }
 

@@ -8,6 +8,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5
 	github.com/docker/go-connections v0.5.0
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/lib/pq v1.12.3
 	github.com/microsoft/go-mssqldb v1.9.7
@@ -44,6 +45,7 @@ require (
 	github.com/docker/docker v28.2.2+incompatible // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
