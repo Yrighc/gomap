@@ -31,6 +31,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			want:      "mssql",
 		},
 		{
+			name:      "rdp credential",
+			candidate: SecurityCandidate{Service: "rdp", Port: 3389},
+			kind:      ProbeKindCredential,
+			want:      "rdp",
+		},
+		{
 			name:      "redis unauthorized",
 			candidate: SecurityCandidate{Service: "redis", Port: 6379},
 			kind:      ProbeKindUnauthorized,
@@ -65,6 +71,9 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 	}
 	if _, ok := r.Lookup(SecurityCandidate{Service: "mssql", Port: 1433}, ProbeKindCredential); !ok {
 		t.Fatal("expected default registry to contain mssql credential prober")
+	}
+	if _, ok := r.Lookup(SecurityCandidate{Service: "rdp", Port: 3389}, ProbeKindCredential); !ok {
+		t.Fatal("expected default registry to contain rdp credential prober")
 	}
 	if _, ok := r.Lookup(SecurityCandidate{Service: "redis", Port: 6379}, ProbeKindUnauthorized); !ok {
 		t.Fatal("expected default registry to contain redis unauthorized prober")

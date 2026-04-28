@@ -14,6 +14,7 @@ require (
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/refraction-networking/utls v1.7.0
+	github.com/sergei-bronnikov/grdp v0.3.0
 	github.com/testcontainers/testcontainers-go v0.34.1
 	go.mongodb.org/mongo-driver v1.17.4
 	go.uber.org/zap v1.27.0
@@ -55,6 +56,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/lunixbochs/struc v0.0.0-20200707160740-784aaebc1d40 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.1.0 // indirect

@@ -6,6 +6,7 @@ import (
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
+	rdpprobe "github.com/yrighc/gomap/internal/secprobe/rdp"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
@@ -21,6 +22,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(mssqlprobe.New())
 	r.registerCoreProber(mysqlprobe.New())
 	r.registerCoreProber(postgresqlprobe.New())
+	r.registerCoreProber(rdpprobe.New())
 	r.registerCoreProber(redisprobe.New())
 	r.registerCoreProber(redisprobe.NewUnauthorized())
 	r.registerCoreProber(telnetprobe.New())
