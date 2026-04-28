@@ -159,6 +159,16 @@ func TestParseCredentialLinesRejectsMalformedLine(t *testing.T) {
 	}
 }
 
+func TestParseCredentialLinesRejectsLooseColonSeparator(t *testing.T) {
+	_, err := parseCredentialLines("root:root\n")
+	if err == nil {
+		t.Fatal("expected loose colon separator to be rejected")
+	}
+	if !strings.Contains(err.Error(), "invalid credential line") {
+		t.Fatalf("expected invalid line error, got %v", err)
+	}
+}
+
 func TestParseCredentialLinesRejectsEmptyResult(t *testing.T) {
 	_, err := parseCredentialLines("# comment only\n\n")
 	if err == nil {
