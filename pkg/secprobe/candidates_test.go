@@ -36,16 +36,17 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 			{Port: 1433, Open: true, Service: "mssql"},
 			{Port: 3389, Open: true, Service: "rdp"},
 			{Port: 445, Open: true, Service: "cifs"},
+			{Port: 5672, Open: true, Service: "amqp"},
 			{Port: 5900, Open: true, Service: "vnc"},
 		},
 	}
 
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 6 {
+	if len(candidates) != 7 {
 		t.Fatalf("expected registered default candidates, got %#v", candidates)
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "smb" || candidates[2].Service != "smtp" || candidates[3].Service != "mssql" || candidates[4].Service != "rdp" || candidates[5].Service != "vnc" {
-		t.Fatalf("expected ssh, smb, smtp, mssql, rdp, and vnc candidates to remain, got %#v", candidates)
+	if candidates[0].Service != "ssh" || candidates[1].Service != "smb" || candidates[2].Service != "smtp" || candidates[3].Service != "mssql" || candidates[4].Service != "rdp" || candidates[5].Service != "amqp" || candidates[6].Service != "vnc" {
+		t.Fatalf("expected ssh, smb, smtp, mssql, rdp, amqp, and vnc candidates to remain, got %#v", candidates)
 	}
 }
 

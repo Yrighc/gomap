@@ -1,6 +1,7 @@
 package secprobe
 
 import (
+	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
@@ -30,6 +31,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(redisprobe.NewUnauthorized())
 	r.registerCoreProber(smbprobe.New())
 	r.registerCoreProber(smtpprobe.New())
+	r.registerCoreProber(amqpprobe.New())
 	r.registerCoreProber(telnetprobe.New())
 	r.registerCoreProber(vncprobe.New())
 	r.registerCoreProber(mongodbprobe.NewUnauthorized())
