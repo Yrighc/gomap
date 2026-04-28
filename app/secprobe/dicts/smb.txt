@@ -1,0 +1,4 @@
+administrator : administrator
+administrator : 123456
+guest : guest
+admin : admin

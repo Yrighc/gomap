@@ -1,0 +1,4 @@
+administrator : administrator
+administrator : 123456
+admin : admin
+test : test

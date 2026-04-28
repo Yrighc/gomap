@@ -70,6 +70,69 @@ func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
 	}
 }
 
+func TestLookupProtocolSpecIncludesPhaseOneCredentialProtocols(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		port    int
+		want    ProtocolSpec
+	}{
+		{
+			name:    "mssql by name",
+			service: "mssql",
+			want: ProtocolSpec{
+				Name:       "mssql",
+				Ports:      []int{1433},
+				DictNames:  []string{"mssql"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			name: "rdp by port",
+			port: 3389,
+			want: ProtocolSpec{
+				Name:       "rdp",
+				Ports:      []int{3389},
+				DictNames:  []string{"rdp"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			name:    "vnc by name",
+			service: "vnc",
+			want: ProtocolSpec{
+				Name:       "vnc",
+				Ports:      []int{5900},
+				DictNames:  []string{"vnc"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			name:    "smb alias",
+			service: "cifs",
+			want: ProtocolSpec{
+				Name:       "smb",
+				Aliases:    []string{"cifs"},
+				Ports:      []int{445, 139},
+				DictNames:  []string{"smb"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, ok := LookupProtocolSpec(tt.service, tt.port)
+			if !ok {
+				t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
+			}
+			if !reflect.DeepEqual(spec, tt.want) {
+				t.Fatalf("expected %#v, got %#v", tt.want, spec)
+			}
+		})
+	}
+}
+
 func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	if !ProtocolSupportsKind("redis", ProbeKindCredential) {
 		t.Fatal("expected redis to support credential probing")

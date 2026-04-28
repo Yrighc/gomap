@@ -1,0 +1,4 @@
+ : 123456
+ : vnc
+ : admin
+ : password

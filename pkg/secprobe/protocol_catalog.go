@@ -19,6 +19,12 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
+		Name:       "mssql",
+		Ports:      []int{1433},
+		DictNames:  []string{"mssql"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
 		Name:       "ssh",
 		Ports:      []int{22},
 		DictNames:  []string{"ssh"},
@@ -37,6 +43,12 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
+		Name:       "rdp",
+		Ports:      []int{3389},
+		DictNames:  []string{"rdp"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
 		Name:       "postgresql",
 		Aliases:    []string{"postgres", "pgsql"},
 		Ports:      []int{5432},
@@ -52,12 +64,25 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		SupportsEnrichment: true,
 	},
 	{
+		Name:       "smb",
+		Aliases:    []string{"cifs"},
+		Ports:      []int{445, 139},
+		DictNames:  []string{"smb"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
 		Name:               "mongodb",
 		Aliases:            []string{"mongo"},
 		Ports:              []int{27017},
 		DictNames:          []string{"mongodb", "mongo"},
 		ProbeKinds:         []ProbeKind{ProbeKindUnauthorized},
 		SupportsEnrichment: true,
+	},
+	{
+		Name:       "vnc",
+		Ports:      []int{5900},
+		DictNames:  []string{"vnc"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 }
 

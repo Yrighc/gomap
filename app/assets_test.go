@@ -66,11 +66,15 @@ func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 		prefix   string
 	}{
 		{protocol: "ftp", prefix: "ftp : ftp\nftp : 123456\nadmin : admin\nanonymous : anonymous\n"},
+		{protocol: "mssql", prefix: "sa : sa\nsa : 123456\nadmin : admin\nsa : P@ssw0rd\n"},
 		{protocol: "mysql", prefix: "root : root\nroot : 123456\nmysql : mysql\nadmin : admin\n"},
 		{protocol: "postgresql", prefix: "postgres : postgres\npostgres : 123456\nadmin : admin\ntest : test\n"},
+		{protocol: "rdp", prefix: "administrator : administrator\nadministrator : 123456\nadmin : admin\ntest : test\n"},
 		{protocol: "redis", prefix: "default : 123456\ndefault : redis\nredis : redis\nredis : {{key}}\n"},
+		{protocol: "smb", prefix: "administrator : administrator\nadministrator : 123456\nguest : guest\nadmin : admin\n"},
 		{protocol: "ssh", prefix: "root : root\nroot : 123456\nadmin : admin\ntest : test\n"},
 		{protocol: "telnet", prefix: "admin : admin\nroot : root\nroot : 123456\nuser : user\n"},
+		{protocol: "vnc", prefix: " : 123456\n : vnc\n : admin\n : password\n"},
 	}
 
 	for _, tt := range tests {
