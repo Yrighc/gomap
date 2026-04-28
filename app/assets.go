@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/ftp.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
@@ -31,6 +31,8 @@ func Dict(level string) ([]byte, error) {
 
 func SecprobeDict(protocol string) ([]byte, error) {
 	switch protocol {
+	case "amqp":
+		return files.ReadFile("secprobe/dicts/amqp.txt")
 	case "ftp":
 		return files.ReadFile("secprobe/dicts/ftp.txt")
 	case "mssql":
@@ -45,6 +47,8 @@ func SecprobeDict(protocol string) ([]byte, error) {
 		return files.ReadFile("secprobe/dicts/redis.txt")
 	case "smb":
 		return files.ReadFile("secprobe/dicts/smb.txt")
+	case "smtp":
+		return files.ReadFile("secprobe/dicts/smtp.txt")
 	case "ssh":
 		return files.ReadFile("secprobe/dicts/ssh.txt")
 	case "telnet":

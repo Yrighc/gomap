@@ -65,6 +65,8 @@ func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 		protocol string
 		snippets []string
 	}{
+		{protocol: "smtp", snippets: []string{"admin : 123456", "postmaster : postmaster"}},
+		{protocol: "amqp", snippets: []string{"guest : guest", "rabbitmq : rabbitmq"}},
 		{protocol: "ftp", snippets: []string{"ftp : 123456", "anonymous : anonymous"}},
 		{protocol: "mssql", snippets: []string{"sa : 123456", "sa : P@ssw0rd"}},
 		{protocol: "mysql", snippets: []string{"root : 123456", "mysql : mysql"}},

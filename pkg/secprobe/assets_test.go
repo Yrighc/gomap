@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
-	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc"}
+	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc", "smtp", "amqp"}
 	for _, protocol := range tests {
 		creds, err := BuiltinCredentials(protocol)
 		if err != nil {
@@ -21,15 +21,29 @@ func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
 }
 
 func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
-	creds, err := BuiltinCredentials("cifs")
-	if err != nil {
-		t.Fatalf("load cifs builtin credentials: %v", err)
+	tests := []struct {
+		protocol string
+		wantUser string
+		wantPass string
+	}{
+		{protocol: "cifs", wantUser: "administrator", wantPass: "administrator"},
+		{protocol: "smtps", wantUser: "admin", wantPass: "admin"},
+		{protocol: "amqps", wantUser: "guest", wantPass: "guest"},
 	}
-	if len(creds) == 0 {
-		t.Fatal("expected builtin credentials for cifs alias")
-	}
-	if creds[0].Username != "administrator" || creds[0].Password != "administrator" {
-		t.Fatalf("expected smb credentials via cifs alias, got %+v", creds[0])
+
+	for _, tt := range tests {
+		t.Run(tt.protocol, func(t *testing.T) {
+			creds, err := BuiltinCredentials(tt.protocol)
+			if err != nil {
+				t.Fatalf("load %s builtin credentials: %v", tt.protocol, err)
+			}
+			if len(creds) == 0 {
+				t.Fatalf("expected builtin credentials for %s alias", tt.protocol)
+			}
+			if creds[0].Username != tt.wantUser || creds[0].Password != tt.wantPass {
+				t.Fatalf("expected %s credentials via alias, got %+v", tt.protocol, creds[0])
+			}
+		})
 	}
 }
 

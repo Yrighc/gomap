@@ -1,0 +1,4 @@
+guest : guest
+admin : admin
+rabbitmq : rabbitmq
+test : test

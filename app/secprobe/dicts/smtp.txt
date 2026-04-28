@@ -1,0 +1,4 @@
+admin : admin
+admin : 123456
+postmaster : postmaster
+test : test

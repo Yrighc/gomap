@@ -37,6 +37,13 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
+		Name:       "smtp",
+		Aliases:    []string{"smtps"},
+		Ports:      []int{25, 465, 587},
+		DictNames:  []string{"smtp"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
 		Name:       "mysql",
 		Ports:      []int{3306},
 		DictNames:  []string{"mysql"},
@@ -53,6 +60,13 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		Aliases:    []string{"postgres", "pgsql"},
 		Ports:      []int{5432},
 		DictNames:  []string{"postgresql", "postgres"},
+		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "amqp",
+		Aliases:    []string{"amqps"},
+		Ports:      []int{5672, 5671},
+		DictNames:  []string{"amqp"},
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
