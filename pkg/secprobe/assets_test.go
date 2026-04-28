@@ -29,7 +29,7 @@ func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
 		{protocol: "cifs", wantUser: "administrator", wantPass: "administrator"},
 		{protocol: "smtps", wantUser: "admin", wantPass: "admin"},
 		{protocol: "amqps", wantUser: "guest", wantPass: "guest"},
-		{protocol: "oracle-tns", wantUser: "sys", wantPass: "oracle"},
+		{protocol: "oracle-tns", wantUser: "system", wantPass: "oracle"},
 	}
 
 	for _, tt := range tests {

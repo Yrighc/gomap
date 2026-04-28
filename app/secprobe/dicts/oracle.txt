@@ -1,4 +1,4 @@
+system : oracle
 sys : oracle
-system : manager
 scott : tiger
-oracle : oracle
+test : test
