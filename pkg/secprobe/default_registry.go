@@ -3,6 +3,7 @@ package secprobe
 import (
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
+	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
@@ -17,6 +18,7 @@ func RegisterDefaultProbers(r *Registry) {
 
 	r.registerCoreProber(sshprobe.New())
 	r.registerCoreProber(ftpprobe.New())
+	r.registerCoreProber(mssqlprobe.New())
 	r.registerCoreProber(mysqlprobe.New())
 	r.registerCoreProber(postgresqlprobe.New())
 	r.registerCoreProber(redisprobe.New())
