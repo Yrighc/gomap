@@ -1,0 +1,293 @@
+package smtp
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"net"
+	stdsmtp "net/smtp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/yrighc/gomap/internal/secprobe/core"
+)
+
+type smtpClient interface {
+	Extension(string) (bool, string)
+	StartTLS(*tls.Config) error
+	Auth(stdsmtp.Auth) error
+	Quit() error
+	Close() error
+}
+
+type smtpDialPlan struct {
+	implicitTLS   bool
+	allowStartTLS bool
+}
+
+var dialSMTPClient = defaultDialSMTPClient
+
+func New() core.Prober { return prober{} }
+
+type prober struct{}
+
+func (prober) Name() string { return "smtp" }
+
+func (prober) Kind() core.ProbeKind { return core.ProbeKindCredential }
+
+func (prober) Match(candidate core.SecurityCandidate) bool {
+	return candidate.Service == "smtp"
+}
+
+func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {
+	result := core.SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindCredential,
+		FindingType: core.FindingTypeCredentialValid,
+	}
+	successResult := result
+	successFound := false
+	attempted := false
+
+	addr := net.JoinHostPort(candidate.ResolvedIP, strconv.Itoa(candidate.Port))
+	plan := buildDialPlan(candidate)
+	for _, cred := range creds {
+		if err := ctx.Err(); err != nil {
+			if successFound {
+				return successResult
+			}
+			result.Error = err.Error()
+			result.FailureReason = classifySMTPFailure(err)
+			return result
+		}
+		if !attempted {
+			attempted = true
+			result.Stage = core.StageAttempted
+		}
+
+		client, err := dialSMTPClient(ctx, addr, plan, opts.Timeout)
+		if err != nil {
+			result.Error = err.Error()
+			result.FailureReason = classifySMTPFailure(err)
+			if isTerminalSMTPFailure(result.FailureReason) {
+				if successFound {
+					return successResult
+				}
+				return result
+			}
+			continue
+		}
+
+		mechanisms := advertisedSMTPAuthMechanisms(client)
+		authAttempted := false
+		for _, mechanism := range []string{"PLAIN", "LOGIN"} {
+			if _, ok := mechanisms[mechanism]; !ok {
+				continue
+			}
+			authAttempted = true
+
+			var authErr error
+			switch mechanism {
+			case "PLAIN":
+				authErr = client.Auth(stdsmtp.PlainAuth("", cred.Username, cred.Password, authHost(candidate)))
+			case "LOGIN":
+				authErr = client.Auth(&loginAuth{username: cred.Username, password: cred.Password})
+			}
+			if authErr == nil {
+				closeSMTPClient(client)
+				successResult.Success = true
+				successResult.Username = cred.Username
+				successResult.Password = cred.Password
+				successResult.Evidence = "SMTP authentication succeeded"
+				successResult.Error = ""
+				successResult.Stage = core.StageConfirmed
+				successResult.FailureReason = ""
+				successFound = true
+				if opts.StopOnSuccess {
+					return successResult
+				}
+				break
+			}
+
+			result.Error = authErr.Error()
+			result.FailureReason = classifySMTPFailure(authErr)
+			if isTerminalSMTPFailure(result.FailureReason) {
+				closeSMTPClient(client)
+				if successFound {
+					return successResult
+				}
+				return result
+			}
+		}
+
+		if !successFound || successResult.Username != cred.Username || successResult.Password != cred.Password {
+			if !authAttempted {
+				result.Error = "smtp server does not advertise AUTH PLAIN or AUTH LOGIN"
+				result.FailureReason = core.FailureReasonInsufficientConfirmation
+			}
+			closeSMTPClient(client)
+		}
+	}
+
+	if successFound {
+		return successResult
+	}
+	return result
+}
+
+func buildDialPlan(candidate core.SecurityCandidate) smtpDialPlan {
+	if candidate.Port == 465 {
+		return smtpDialPlan{implicitTLS: true}
+	}
+	return smtpDialPlan{allowStartTLS: true}
+}
+
+func defaultDialSMTPClient(ctx context.Context, addr string, plan smtpDialPlan, timeout time.Duration) (smtpClient, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	dialer := &net.Dialer{Timeout: timeout}
+	if plan.implicitTLS {
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+
+		client, err := stdsmtp.NewClient(conn, host)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return client, nil
+	}
+
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if deadlineConn, ok := conn.(interface{ SetDeadline(time.Time) error }); ok {
+		_ = deadlineConn.SetDeadline(time.Now().Add(timeout))
+	}
+
+	client, err := stdsmtp.NewClient(conn, host)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if !plan.allowStartTLS {
+		return client, nil
+	}
+
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err := client.StartTLS(&tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: true,
+		}); err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+	}
+
+	return client, nil
+}
+
+func advertisedSMTPAuthMechanisms(client smtpClient) map[string]struct{} {
+	mechanisms := map[string]struct{}{}
+	ok, params := client.Extension("AUTH")
+	if !ok {
+		return mechanisms
+	}
+	for _, token := range strings.Fields(strings.ToUpper(params)) {
+		mechanisms[token] = struct{}{}
+	}
+	return mechanisms
+}
+
+func authHost(candidate core.SecurityCandidate) string {
+	if candidate.Target != "" {
+		return candidate.Target
+	}
+	return candidate.ResolvedIP
+}
+
+func closeSMTPClient(client smtpClient) {
+	if client == nil {
+		return
+	}
+	_ = client.Quit()
+	_ = client.Close()
+}
+
+func classifySMTPFailure(err error) core.FailureReason {
+	if err == nil {
+		return ""
+	}
+	if reason := ctxFailureReason(err); reason != "" {
+		return reason
+	}
+
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "auth"), strings.Contains(text, "authentication"), strings.Contains(text, "535"), strings.Contains(text, "534"), strings.Contains(text, "credentials"), strings.Contains(text, "username"), strings.Contains(text, "password"):
+		return core.FailureReasonAuthentication
+	case strings.Contains(text, "dial"), strings.Contains(text, "connect"), strings.Contains(text, "connection"), strings.Contains(text, "refused"), strings.Contains(text, "reset by peer"), strings.Contains(text, "no route"), strings.Contains(text, "handshake"):
+		return core.FailureReasonConnection
+	default:
+		return core.FailureReasonInsufficientConfirmation
+	}
+}
+
+func ctxFailureReason(err error) core.FailureReason {
+	text := strings.ToLower(err.Error())
+	switch {
+	case errors.Is(err, context.Canceled), strings.Contains(text, "context canceled"):
+		return core.FailureReasonCanceled
+	case errors.Is(err, context.DeadlineExceeded), strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"), strings.Contains(text, "timed out"):
+		return core.FailureReasonTimeout
+	default:
+		return ""
+	}
+}
+
+func isTerminalSMTPFailure(reason core.FailureReason) bool {
+	return reason == core.FailureReasonCanceled || reason == core.FailureReasonTimeout || reason == core.FailureReasonConnection
+}
+
+type loginAuth struct {
+	username string
+	password string
+	step     int
+}
+
+func (a *loginAuth) Start(_ *stdsmtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+
+	challenge := strings.ToLower(string(fromServer))
+	switch {
+	case strings.Contains(challenge, "username"):
+		return []byte(a.username), nil
+	case strings.Contains(challenge, "password"):
+		return []byte(a.password), nil
+	case a.step == 0:
+		a.step++
+		return []byte(a.username), nil
+	default:
+		return []byte(a.password), nil
+	}
+}
