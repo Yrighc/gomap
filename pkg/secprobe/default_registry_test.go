@@ -75,6 +75,79 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryContainsPhase1CredentialProtocols(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []struct {
+		name      string
+		candidate SecurityCandidate
+		want      string
+	}{
+		{
+			name:      "ftp credential",
+			candidate: SecurityCandidate{Service: "ftp", Port: 21},
+			want:      "ftp",
+		},
+		{
+			name:      "ssh credential",
+			candidate: SecurityCandidate{Service: "ssh", Port: 22},
+			want:      "ssh",
+		},
+		{
+			name:      "telnet credential",
+			candidate: SecurityCandidate{Service: "telnet", Port: 23},
+			want:      "telnet",
+		},
+		{
+			name:      "mysql credential",
+			candidate: SecurityCandidate{Service: "mysql", Port: 3306},
+			want:      "mysql",
+		},
+		{
+			name:      "postgresql credential",
+			candidate: SecurityCandidate{Service: "postgresql", Port: 5432},
+			want:      "postgresql",
+		},
+		{
+			name:      "redis credential",
+			candidate: SecurityCandidate{Service: "redis", Port: 6379},
+			want:      "redis",
+		},
+		{
+			name:      "mssql credential",
+			candidate: SecurityCandidate{Service: "mssql", Port: 1433},
+			want:      "mssql",
+		},
+		{
+			name:      "rdp credential",
+			candidate: SecurityCandidate{Service: "rdp", Port: 3389},
+			want:      "rdp",
+		},
+		{
+			name:      "vnc credential",
+			candidate: SecurityCandidate{Service: "vnc", Port: 5900},
+			want:      "vnc",
+		},
+		{
+			name:      "smb credential",
+			candidate: SecurityCandidate{Service: "smb", Port: 445},
+			want:      "smb",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prober, ok := r.Lookup(tt.candidate, ProbeKindCredential)
+			if !ok {
+				t.Fatalf("expected default registry to contain %s for %+v", tt.want, tt.candidate)
+			}
+			if got := prober.Name(); got != tt.want {
+				t.Fatalf("expected default registry to resolve %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 	r := DefaultRegistry()
 
