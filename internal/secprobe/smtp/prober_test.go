@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"net"
 	stdsmtp "net/smtp"
 	"slices"
 	"testing"
@@ -13,6 +14,7 @@ import (
 )
 
 type fakeSMTPClient struct {
+	name           string
 	authExtensions map[string]string
 	startTLSErr    error
 	authFn         func(stdsmtp.Auth) error
@@ -101,18 +103,26 @@ func TestSMTPProberFallsBackFromPlainToLogin(t *testing.T) {
 	})
 
 	var attempts []string
+	var dialedClients []*fakeSMTPClient
 	dialSMTPClient = func(context.Context, string, smtpDialPlan, time.Duration) (smtpClient, error) {
-		return &fakeSMTPClient{
+		client := &fakeSMTPClient{
+			name:           "client",
 			authExtensions: map[string]string{"AUTH": "PLAIN LOGIN"},
-			authFn: func(auth stdsmtp.Auth) error {
-				mechanism := authMechanism(t, auth)
-				attempts = append(attempts, mechanism)
-				if mechanism == "PLAIN" {
-					return errors.New("504 mechanism plain disabled")
-				}
-				return nil
-			},
-		}, nil
+		}
+		client.authFn = func(auth stdsmtp.Auth) error {
+			mechanism := authMechanism(t, auth)
+			attempts = append(attempts, mechanism+"@"+client.name)
+			if mechanism == "PLAIN" {
+				return errors.New("535 auth failed and connection closed")
+			}
+			if client.closeCalls == 0 && client.quitCalls == 0 && len(dialedClients) == 1 {
+				t.Fatalf("expected LOGIN fallback to use a fresh connection, got reused client state: %+v", client)
+			}
+			return nil
+		}
+		dialedClients = append(dialedClients, client)
+		client.name = "client-" + string(rune('0'+len(dialedClients)))
+		return client, nil
 	}
 
 	result := New().Probe(context.Background(), core.SecurityCandidate{
@@ -130,8 +140,14 @@ func TestSMTPProberFallsBackFromPlainToLogin(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected smtp success after LOGIN fallback, got %+v", result)
 	}
-	if !slices.Equal(attempts, []string{"PLAIN", "LOGIN"}) {
-		t.Fatalf("expected PLAIN then LOGIN fallback, got %v", attempts)
+	if len(dialedClients) != 2 {
+		t.Fatalf("expected fallback to redial with a fresh client, got %d clients", len(dialedClients))
+	}
+	if !slices.Equal(attempts, []string{"PLAIN@client-1", "LOGIN@client-2"}) {
+		t.Fatalf("expected PLAIN on first client then LOGIN on second client, got %v", attempts)
+	}
+	if dialedClients[0].closeCalls == 0 && dialedClients[0].quitCalls == 0 {
+		t.Fatalf("expected failed AUTH client to be closed, got %+v", dialedClients[0])
 	}
 }
 
@@ -184,6 +200,95 @@ func TestSMTPDialPlanUsesImplicitTLSForPort465(t *testing.T) {
 	}
 	if plan.allowStartTLS {
 		t.Fatalf("expected implicit TLS plan to skip STARTTLS upgrade, got %+v", plan)
+	}
+}
+
+func TestDefaultDialSMTPClientPassesCallerContextToImplicitTLSDialer(t *testing.T) {
+	originalDial := dialImplicitTLSContext
+	t.Cleanup(func() {
+		dialImplicitTLSContext = originalDial
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type markerKey struct{}
+	markerCtx := context.WithValue(ctx, markerKey{}, "smtp-ctx")
+	sentinel := errors.New("stop after ctx capture")
+	var capturedCtx context.Context
+	dialImplicitTLSContext = func(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+		capturedCtx = ctx
+		return nil, sentinel
+	}
+
+	_, err := defaultDialSMTPClient(markerCtx, "127.0.0.1:465", smtpDialPlan{implicitTLS: true}, time.Second)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error, got %v", err)
+	}
+	if capturedCtx != markerCtx {
+		t.Fatalf("expected implicit TLS dialer to receive caller context")
+	}
+}
+
+func TestLoginAuthUsesSequentialStateForEmptyChallenges(t *testing.T) {
+	auth := &loginAuth{username: "mailer", password: "secret"}
+
+	proto, initial, err := auth.Start(&stdsmtp.ServerInfo{Name: "127.0.0.1", TLS: true, Auth: []string{"LOGIN"}})
+	if err != nil {
+		t.Fatalf("start login auth: %v", err)
+	}
+	if proto != "LOGIN" {
+		t.Fatalf("expected LOGIN protocol, got %q", proto)
+	}
+	if initial != nil {
+		t.Fatalf("expected nil initial response, got %q", string(initial))
+	}
+
+	first, err := auth.Next(nil, true)
+	if err != nil {
+		t.Fatalf("first challenge: %v", err)
+	}
+	second, err := auth.Next(nil, true)
+	if err != nil {
+		t.Fatalf("second challenge: %v", err)
+	}
+	third, err := auth.Next(nil, false)
+	if err != nil {
+		t.Fatalf("final challenge: %v", err)
+	}
+
+	if string(first) != "mailer" {
+		t.Fatalf("expected first response to send username, got %q", string(first))
+	}
+	if string(second) != "secret" {
+		t.Fatalf("expected second response to send password, got %q", string(second))
+	}
+	if third != nil {
+		t.Fatalf("expected nil terminal response, got %q", string(third))
+	}
+}
+
+func TestLoginAuthDoesNotRepeatUsernameOnNonStandardChallenge(t *testing.T) {
+	auth := &loginAuth{username: "mailer", password: "secret"}
+
+	if _, _, err := auth.Start(&stdsmtp.ServerInfo{Name: "127.0.0.1", TLS: true, Auth: []string{"LOGIN"}}); err != nil {
+		t.Fatalf("start login auth: %v", err)
+	}
+
+	first, err := auth.Next([]byte("334 VXNlcm5hbWU6"), true)
+	if err != nil {
+		t.Fatalf("first challenge: %v", err)
+	}
+	second, err := auth.Next([]byte("334"), true)
+	if err != nil {
+		t.Fatalf("second challenge: %v", err)
+	}
+
+	if string(first) != "mailer" {
+		t.Fatalf("expected first response to send username, got %q", string(first))
+	}
+	if string(second) != "secret" {
+		t.Fatalf("expected second response to send password on non-standard challenge, got %q", string(second))
 	}
 }
 

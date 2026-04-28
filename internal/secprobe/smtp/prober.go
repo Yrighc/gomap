@@ -27,6 +27,7 @@ type smtpDialPlan struct {
 }
 
 var dialSMTPClient = defaultDialSMTPClient
+var dialImplicitTLSContext = defaultDialImplicitTLSContext
 
 func New() core.Prober { return prober{} }
 
@@ -69,36 +70,13 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			result.Stage = core.StageAttempted
 		}
 
-		client, err := dialSMTPClient(ctx, addr, plan, opts.Timeout)
-		if err != nil {
-			result.Error = err.Error()
-			result.FailureReason = classifySMTPFailure(err)
-			if isTerminalSMTPFailure(result.FailureReason) {
-				if successFound {
-					return successResult
-				}
-				return result
-			}
-			continue
-		}
-
-		mechanisms := advertisedSMTPAuthMechanisms(client)
-		authAttempted := false
 		for _, mechanism := range []string{"PLAIN", "LOGIN"} {
-			if _, ok := mechanisms[mechanism]; !ok {
+			attemptResult, attemptedMechanism, err := attemptSMTPAuth(ctx, candidate, addr, plan, opts.Timeout, cred, mechanism)
+			if !attemptedMechanism {
 				continue
 			}
-			authAttempted = true
 
-			var authErr error
-			switch mechanism {
-			case "PLAIN":
-				authErr = client.Auth(stdsmtp.PlainAuth("", cred.Username, cred.Password, authHost(candidate)))
-			case "LOGIN":
-				authErr = client.Auth(&loginAuth{username: cred.Username, password: cred.Password})
-			}
-			if authErr == nil {
-				closeSMTPClient(client)
+			if err == nil {
 				successResult.Success = true
 				successResult.Username = cred.Username
 				successResult.Password = cred.Password
@@ -113,10 +91,9 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 				break
 			}
 
-			result.Error = authErr.Error()
-			result.FailureReason = classifySMTPFailure(authErr)
+			result.Error = attemptResult.Error
+			result.FailureReason = attemptResult.FailureReason
 			if isTerminalSMTPFailure(result.FailureReason) {
-				closeSMTPClient(client)
 				if successFound {
 					return successResult
 				}
@@ -125,11 +102,10 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 		}
 
 		if !successFound || successResult.Username != cred.Username || successResult.Password != cred.Password {
-			if !authAttempted {
+			if result.Error == "" {
 				result.Error = "smtp server does not advertise AUTH PLAIN or AUTH LOGIN"
 				result.FailureReason = core.FailureReasonInsufficientConfirmation
 			}
-			closeSMTPClient(client)
 		}
 	}
 
@@ -154,7 +130,7 @@ func defaultDialSMTPClient(ctx context.Context, addr string, plan smtpDialPlan, 
 
 	dialer := &net.Dialer{Timeout: timeout}
 	if plan.implicitTLS {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		conn, err := dialImplicitTLSContext(ctx, "tcp", addr, &tls.Config{
 			ServerName:         host,
 			InsecureSkipVerify: true,
 		})
@@ -199,6 +175,54 @@ func defaultDialSMTPClient(ctx context.Context, addr string, plan smtpDialPlan, 
 	}
 
 	return client, nil
+}
+
+func defaultDialImplicitTLSContext(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{},
+		Config:    config,
+	}
+	return dialer.DialContext(ctx, network, addr)
+}
+
+func attemptSMTPAuth(ctx context.Context, candidate core.SecurityCandidate, addr string, plan smtpDialPlan, timeout time.Duration, cred core.Credential, mechanism string) (core.SecurityResult, bool, error) {
+	result := core.SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindCredential,
+		FindingType: core.FindingTypeCredentialValid,
+	}
+
+	client, err := dialSMTPClient(ctx, addr, plan, timeout)
+	if err != nil {
+		result.Error = err.Error()
+		result.FailureReason = classifySMTPFailure(err)
+		return result, true, err
+	}
+	defer closeSMTPClient(client)
+
+	mechanisms := advertisedSMTPAuthMechanisms(client)
+	if _, ok := mechanisms[mechanism]; !ok {
+		return result, false, nil
+	}
+
+	switch mechanism {
+	case "PLAIN":
+		err = client.Auth(stdsmtp.PlainAuth("", cred.Username, cred.Password, authHost(candidate)))
+	case "LOGIN":
+		err = client.Auth(&loginAuth{username: cred.Username, password: cred.Password, state: loginStateUsername})
+	default:
+		return result, false, nil
+	}
+	if err != nil {
+		result.Error = err.Error()
+		result.FailureReason = classifySMTPFailure(err)
+		return result, true, err
+	}
+
+	return result, true, nil
 }
 
 func advertisedSMTPAuthMechanisms(client smtpClient) map[string]struct{} {
@@ -266,28 +290,40 @@ func isTerminalSMTPFailure(reason core.FailureReason) bool {
 type loginAuth struct {
 	username string
 	password string
-	step     int
+	state    loginAuthState
 }
 
+type loginAuthState int
+
+const (
+	loginStateUsername loginAuthState = iota
+	loginStatePassword
+	loginStateDone
+)
+
 func (a *loginAuth) Start(_ *stdsmtp.ServerInfo) (string, []byte, error) {
+	a.state = loginStateUsername
 	return "LOGIN", nil, nil
 }
 
 func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 	if !more {
+		a.state = loginStateDone
 		return nil, nil
 	}
 
-	challenge := strings.ToLower(string(fromServer))
-	switch {
-	case strings.Contains(challenge, "username"):
+	challenge := strings.ToLower(strings.TrimSpace(string(fromServer)))
+	switch a.state {
+	case loginStateUsername:
+		a.state = loginStatePassword
 		return []byte(a.username), nil
-	case strings.Contains(challenge, "password"):
+	case loginStatePassword:
+		a.state = loginStateDone
 		return []byte(a.password), nil
-	case a.step == 0:
-		a.step++
-		return []byte(a.username), nil
 	default:
-		return []byte(a.password), nil
+		if strings.Contains(challenge, "password") {
+			return []byte(a.password), nil
+		}
+		return nil, nil
 	}
 }
