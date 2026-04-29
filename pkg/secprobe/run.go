@@ -139,17 +139,17 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 		kind   ProbeKind
 		prober core.Prober
 	}, 0, 2)
-	if hasCredential {
-		active = append(active, struct {
-			kind   ProbeKind
-			prober core.Prober
-		}{kind: ProbeKindCredential, prober: credentialProber})
-	}
 	if opts.EnableUnauthorized && hasUnauthorized {
 		active = append(active, struct {
 			kind   ProbeKind
 			prober core.Prober
 		}{kind: ProbeKindUnauthorized, prober: unauthorizedProber})
+	}
+	if hasCredential {
+		active = append(active, struct {
+			kind   ProbeKind
+			prober core.Prober
+		}{kind: ProbeKindCredential, prober: credentialProber})
 	}
 
 	if len(active) == 0 {
@@ -319,11 +319,10 @@ func defaultFindingTypeForKind(kind ProbeKind) string {
 }
 
 func probeKindsForCandidate(opts CredentialProbeOptions) []ProbeKind {
-	kinds := []ProbeKind{ProbeKindCredential}
 	if opts.EnableUnauthorized {
-		kinds = append(kinds, ProbeKindUnauthorized)
+		return []ProbeKind{ProbeKindUnauthorized, ProbeKindCredential}
 	}
-	return kinds
+	return []ProbeKind{ProbeKindCredential}
 }
 
 func markMatched(result core.SecurityResult) core.SecurityResult {

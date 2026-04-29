@@ -173,6 +173,120 @@ func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testi
 	}
 }
 
+func TestRunWithRegistryPrefersUnauthorizedBeforeCredentialWhenBothSucceed(t *testing.T) {
+	registry := NewRegistry()
+
+	credential := &stubKindedProber{
+		name:    "redis-credential",
+		kind:    ProbeKindCredential,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindCredential,
+			FindingType: FindingTypeCredentialValid,
+			Success:     true,
+			Username:    "default",
+			Password:    "default",
+		},
+	}
+	unauthorized := &stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Success:     true,
+			Evidence:    "INFO returned redis_version",
+		},
+	}
+	registry.Register(credential)
+	registry.Register(unauthorized)
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+		Credentials:        []Credential{{Username: "ignored", Password: "ignored"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected unauthorized result to win when both probes could succeed, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected unauthorized finding type, got %+v", got)
+	}
+	if credential.callCount != 0 {
+		t.Fatalf("expected credential prober to stay idle after unauthorized success, got %d calls", credential.callCount)
+	}
+	if unauthorized.callCount != 1 {
+		t.Fatalf("expected unauthorized prober to run first exactly once, got %d calls", unauthorized.callCount)
+	}
+}
+
+func TestRunWithRegistryFallsBackToCredentialAfterUnauthorizedFailure(t *testing.T) {
+	registry := NewRegistry()
+
+	unauthorized := &stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Error:       "authentication required",
+		},
+	}
+	credential := &stubKindedProber{
+		name:    "redis-credential",
+		kind:    ProbeKindCredential,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindCredential,
+			FindingType: FindingTypeCredentialValid,
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+		},
+	}
+	registry.Register(credential)
+	registry.Register(unauthorized)
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected credential fallback success after unauthorized failure, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindCredential {
+		t.Fatalf("expected credential result after unauthorized failure, got %+v", got)
+	}
+	if unauthorized.callCount != 1 || credential.callCount != 1 {
+		t.Fatalf("expected unauthorized then credential exactly once, got unauthorized=%d credential=%d", unauthorized.callCount, credential.callCount)
+	}
+}
+
 func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{
@@ -544,10 +658,11 @@ func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
 }
 
 type stubKindedProber struct {
-	name    string
-	kind    ProbeKind
-	service string
-	result  SecurityResult
+	name      string
+	kind      ProbeKind
+	service   string
+	result    SecurityResult
+	callCount int
 }
 
 func (s *stubKindedProber) Name() string { return s.name }
@@ -559,6 +674,7 @@ func (s *stubKindedProber) Match(candidate SecurityCandidate) bool {
 }
 
 func (s *stubKindedProber) Probe(context.Context, SecurityCandidate, CredentialProbeOptions, []Credential) SecurityResult {
+	s.callCount++
 	return s.result
 }
 
