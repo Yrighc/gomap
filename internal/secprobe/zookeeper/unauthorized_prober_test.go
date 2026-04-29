@@ -29,6 +29,15 @@ func (f *fakeZKClient) Close() {
 	f.closed = true
 }
 
+type fakeNetError struct {
+	message string
+	timeout bool
+}
+
+func (e fakeNetError) Error() string   { return e.message }
+func (e fakeNetError) Timeout() bool   { return e.timeout }
+func (e fakeNetError) Temporary() bool { return false }
+
 func TestZookeeperUnauthorizedProberFindsReadableRoot(t *testing.T) {
 	original := openZookeeper
 	t.Cleanup(func() { openZookeeper = original })
@@ -138,6 +147,48 @@ func TestZookeeperUnauthorizedProberClassifiesDeadlineExceededBeforeProbe(t *tes
 
 	if result.FailureReason != core.FailureReasonTimeout {
 		t.Fatalf("expected timeout failure reason, got %+v", result)
+	}
+}
+
+func TestZookeeperUnauthorizedProberClassifiesReadTimeoutFailure(t *testing.T) {
+	original := openZookeeper
+	t.Cleanup(func() { openZookeeper = original })
+
+	client := &fakeZKClient{childrenErr: fakeNetError{message: "i/o timeout", timeout: true}}
+	openZookeeper = func(context.Context, core.SecurityCandidate, time.Duration) (zkClient, error) {
+		return client, nil
+	}
+
+	result := NewUnauthorized().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       2181,
+		Service:    "zookeeper",
+	}, core.CredentialProbeOptions{Timeout: time.Second}, nil)
+
+	if result.FailureReason != core.FailureReasonTimeout {
+		t.Fatalf("expected timeout failure reason, got %+v", result)
+	}
+}
+
+func TestZookeeperUnauthorizedProberClassifiesUnknownFailureAsInsufficientConfirmation(t *testing.T) {
+	original := openZookeeper
+	t.Cleanup(func() { openZookeeper = original })
+
+	client := &fakeZKClient{childrenErr: errors.New("unexpected zookeeper response")}
+	openZookeeper = func(context.Context, core.SecurityCandidate, time.Duration) (zkClient, error) {
+		return client, nil
+	}
+
+	result := NewUnauthorized().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       2181,
+		Service:    "zookeeper",
+	}, core.CredentialProbeOptions{Timeout: time.Second}, nil)
+
+	if result.FailureReason != core.FailureReasonInsufficientConfirmation {
+		t.Fatalf("expected insufficient confirmation failure reason, got %+v", result)
 	}
 }
 

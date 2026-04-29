@@ -108,11 +108,23 @@ func classifyZookeeperUnauthorizedFailure(err error) core.FailureReason {
 		return core.FailureReasonCanceled
 	case errors.Is(err, zk.ErrNoAuth), errors.Is(err, zk.ErrAuthFailed):
 		return core.FailureReasonAuthentication
+	case isZookeeperTimeoutError(err):
+		return core.FailureReasonTimeout
 	case isZookeeperConnectionError(err):
 		return core.FailureReasonConnection
 	default:
-		return core.FailureReason("unknown")
+		return core.FailureReasonInsufficientConfirmation
 	}
+}
+
+func isZookeeperTimeoutError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "timeout") || strings.Contains(text, "timed out")
 }
 
 func isZookeeperConnectionError(err error) bool {
@@ -121,7 +133,7 @@ func isZookeeperConnectionError(err error) bool {
 	}
 
 	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if errors.As(err, &netErr) && !netErr.Timeout() {
 		return true
 	}
 
