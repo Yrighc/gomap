@@ -48,6 +48,21 @@ func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
 	}
 }
 
+func TestBuiltinCredentialsLoadMongoDBByProtocolAndAlias(t *testing.T) {
+	tests := []string{"mongodb", "mongo"}
+	for _, protocol := range tests {
+		t.Run(protocol, func(t *testing.T) {
+			creds, err := BuiltinCredentials(protocol)
+			if err != nil {
+				t.Fatalf("load %s builtin credentials: %v", protocol, err)
+			}
+			if len(creds) == 0 {
+				t.Fatalf("expected builtin credentials for %s", protocol)
+			}
+		})
+	}
+}
+
 func TestBuiltinCredentialsLoadSNMPCommunityMapping(t *testing.T) {
 	creds, err := BuiltinCredentials("snmp")
 	if err != nil {

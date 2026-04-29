@@ -266,6 +266,23 @@ func TestLookupProtocolSpecIncludesPhaseThreeUnauthorizedProtocols(t *testing.T)
 	}
 }
 
+func TestLookupProtocolSpecSupportsMongoDBCredentialAndUnauthorized(t *testing.T) {
+	spec, ok := LookupProtocolSpec("mongodb", 27017)
+	if !ok {
+		t.Fatal("expected mongodb protocol spec")
+	}
+	wantKinds := []ProbeKind{ProbeKindCredential, ProbeKindUnauthorized}
+	if !reflect.DeepEqual(spec.ProbeKinds, wantKinds) {
+		t.Fatalf("expected mongodb probe kinds %v, got %v", wantKinds, spec.ProbeKinds)
+	}
+	if !ProtocolSupportsKind("mongodb", ProbeKindCredential) {
+		t.Fatal("expected mongodb credential probing to be declared")
+	}
+	if !ProtocolSupportsKind("mongodb", ProbeKindUnauthorized) {
+		t.Fatal("expected mongodb unauthorized probing to stay declared")
+	}
+}
+
 func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	if !ProtocolSupportsKind("redis", ProbeKindCredential) {
 		t.Fatal("expected redis to support credential probing")
@@ -273,8 +290,8 @@ func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	if !ProtocolSupportsKind("redis", ProbeKindUnauthorized) {
 		t.Fatal("expected redis to support unauthorized probing")
 	}
-	if ProtocolSupportsKind("mongodb", ProbeKindCredential) {
-		t.Fatal("expected mongodb credential probing to stay unsupported")
+	if !ProtocolSupportsKind("mongodb", ProbeKindCredential) {
+		t.Fatal("expected mongodb credential probing to be declared")
 	}
 	if !ProtocolSupportsKind("mongodb", ProbeKindUnauthorized) {
 		t.Fatal("expected mongodb unauthorized probing to be declared")

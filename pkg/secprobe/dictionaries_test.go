@@ -55,6 +55,17 @@ func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForAlias(t *testing.T
 	}
 }
 
+func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForMongoAlias(t *testing.T) {
+	got := CredentialDictionaryCandidates("mongo", "/tmp/dicts")
+	want := []string{
+		filepath.Join("/tmp/dicts", "mongodb.txt"),
+		filepath.Join("/tmp/dicts", "mongo.txt"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CredentialDictionaryCandidates(%q) = %v, want %v", "mongo", got, want)
+	}
+}
+
 func TestCredentialDictionaryCandidatesUsesCatalogDictNamesForBatchAAliases(t *testing.T) {
 	tests := []struct {
 		protocol string

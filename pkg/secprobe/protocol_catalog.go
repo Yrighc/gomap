@@ -107,7 +107,7 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		Aliases:            []string{"mongo"},
 		Ports:              []int{27017},
 		DictNames:          []string{"mongodb", "mongo"},
-		ProbeKinds:         []ProbeKind{ProbeKindUnauthorized},
+		ProbeKinds:         []ProbeKind{ProbeKindCredential, ProbeKindUnauthorized},
 		SupportsEnrichment: true,
 	},
 	{
