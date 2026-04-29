@@ -3,6 +3,7 @@ package secprobe
 import (
 	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
+	memcachedprobe "github.com/yrighc/gomap/internal/secprobe/memcached"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
@@ -39,6 +40,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(telnetprobe.New())
 	r.registerCoreProber(vncprobe.New())
 	r.registerCoreProber(mongodbprobe.NewUnauthorized())
+	r.registerCoreProber(memcachedprobe.NewUnauthorized())
 }
 
 func DefaultRegistry() *Registry {

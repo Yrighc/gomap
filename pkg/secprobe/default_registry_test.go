@@ -84,6 +84,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			kind:      ProbeKindUnauthorized,
 			want:      "mongodb-unauthorized",
 		},
+		{
+			name:      "memcached unauthorized",
+			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
+			kind:      ProbeKindUnauthorized,
+			want:      "memcached-unauthorized",
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +129,8 @@ func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 		{name: "rdp credential", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, kind: ProbeKindCredential, wantOK: true, wantName: "rdp"},
 		{name: "vnc credential", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, kind: ProbeKindCredential, wantOK: true, wantName: "vnc"},
 		{name: "smb credential", candidate: SecurityCandidate{Service: "smb", Port: 445}, kind: ProbeKindCredential, wantOK: true, wantName: "smb"},
+		{name: "memcached credential miss", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindCredential, wantOK: false},
+		{name: "memcached unauthorized hit", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "memcached-unauthorized"},
 		{name: "mongodb credential miss", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: false},
 		{name: "mongodb unauthorized hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "mongodb-unauthorized"},
 	}
@@ -166,6 +174,11 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 		{
 			name:      "mongodb unauthorized",
 			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
+			kind:      ProbeKindUnauthorized,
+		},
+		{
+			name:      "memcached unauthorized",
+			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
 			kind:      ProbeKindUnauthorized,
 		},
 		{

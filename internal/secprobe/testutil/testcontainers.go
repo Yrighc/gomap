@@ -175,6 +175,20 @@ func StartMongoDBNoAuth(t *testing.T) ServiceContainer {
 	}, "27017/tcp")
 }
 
+func StartMemcachedNoAuth(t *testing.T) ServiceContainer {
+	t.Helper()
+
+	return startServiceContainer(t, testcontainers.ContainerRequest{
+		Image:        "memcached:1.6.38-alpine",
+		ExposedPorts: []string{"11211/tcp"},
+		Cmd:          []string{"memcached", "-m", "64", "-p", "11211", "-u", "memcache", "-vv"},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("11211/tcp"),
+			wait.ForLog("server listening"),
+		).WithStartupTimeout(60 * time.Second),
+	}, "11211/tcp")
+}
+
 func startServiceContainer(t *testing.T, req testcontainers.ContainerRequest, port string) ServiceContainer {
 	t.Helper()
 

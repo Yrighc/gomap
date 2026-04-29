@@ -261,6 +261,35 @@ func TestRunUsesDefaultRegistryForMongoDBUnauthorized(t *testing.T) {
 	}
 }
 
+func TestRunUsesDefaultRegistryForMemcachedUnauthorized(t *testing.T) {
+	container := testutil.StartMemcachedNoAuth(t)
+
+	result := Run(context.Background(), []SecurityCandidate{{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "memcached",
+	}}, CredentialProbeOptions{
+		DictDir:            filepath.Join(t.TempDir(), "missing"),
+		Timeout:            5 * time.Second,
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected memcached unauthorized success via default registry, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected memcached unauthorized probe kind via default registry, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected memcached unauthorized finding type via default registry, got %+v", got)
+	}
+}
+
 func TestRunSkipsUnsupportedCandidates(t *testing.T) {
 	r := NewRegistry()
 	result := RunWithRegistry(context.Background(), r, []SecurityCandidate{{Service: "http", Port: 80}}, CredentialProbeOptions{})
