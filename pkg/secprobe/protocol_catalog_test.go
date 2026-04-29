@@ -226,6 +226,46 @@ func TestLookupProtocolSpecIncludesPhaseTwoBatchBCredentialProtocols(t *testing.
 	}
 }
 
+func TestLookupProtocolSpecIncludesPhaseThreeUnauthorizedProtocols(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		port    int
+		want    ProtocolSpec
+	}{
+		{
+			name:    "memcached by name",
+			service: "memcached",
+			want: ProtocolSpec{
+				Name:       "memcached",
+				Ports:      []int{11211},
+				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
+			},
+		},
+		{
+			name: "zookeeper by port",
+			port: 2181,
+			want: ProtocolSpec{
+				Name:       "zookeeper",
+				Ports:      []int{2181},
+				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, ok := LookupProtocolSpec(tt.service, tt.port)
+			if !ok {
+				t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
+			}
+			if !reflect.DeepEqual(spec, tt.want) {
+				t.Fatalf("expected %#v, got %#v", tt.want, spec)
+			}
+		})
+	}
+}
+
 func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	if !ProtocolSupportsKind("redis", ProbeKindCredential) {
 		t.Fatal("expected redis to support credential probing")
@@ -238,5 +278,17 @@ func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	}
 	if !ProtocolSupportsKind("mongodb", ProbeKindUnauthorized) {
 		t.Fatal("expected mongodb unauthorized probing to be declared")
+	}
+	if !ProtocolSupportsKind("memcached", ProbeKindUnauthorized) {
+		t.Fatal("expected memcached unauthorized probing to be declared")
+	}
+	if ProtocolSupportsKind("memcached", ProbeKindCredential) {
+		t.Fatal("expected memcached credential probing to stay unsupported")
+	}
+	if !ProtocolSupportsKind("zookeeper", ProbeKindUnauthorized) {
+		t.Fatal("expected zookeeper unauthorized probing to be declared")
+	}
+	if ProtocolSupportsKind("zookeeper", ProbeKindCredential) {
+		t.Fatal("expected zookeeper credential probing to stay unsupported")
 	}
 }

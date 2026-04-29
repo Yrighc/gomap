@@ -50,6 +50,11 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
 	},
 	{
+		Name:       "memcached",
+		Ports:      []int{11211},
+		ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
+	},
+	{
 		Name:       "oracle",
 		Aliases:    []string{"oracle-tns"},
 		Ports:      []int{1521},
@@ -110,6 +115,11 @@ var builtinProtocolSpecs = []ProtocolSpec{
 		Ports:      []int{5900},
 		DictNames:  []string{"vnc"},
 		ProbeKinds: []ProbeKind{ProbeKindCredential},
+	},
+	{
+		Name:       "zookeeper",
+		Ports:      []int{2181},
+		ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
 	},
 }
 
