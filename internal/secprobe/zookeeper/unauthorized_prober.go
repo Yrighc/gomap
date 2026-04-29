@@ -40,39 +40,11 @@ var openZookeeper = func(ctx context.Context, candidate core.SecurityCandidate, 
 	if err != nil {
 		return nil, err
 	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			conn.Close()
-			return nil, ctx.Err()
-		case <-timer.C:
-			conn.Close()
-			return nil, context.DeadlineExceeded
-		case event, ok := <-events:
-			if !ok {
-				conn.Close()
-				return nil, zk.ErrConnectionClosed
-			}
-			if event.Err != nil {
-				conn.Close()
-				return nil, event.Err
-			}
-			if event.State == zk.StateConnected || event.State == zk.StateHasSession {
-				return connClient{conn: conn}, nil
-			}
-			if event.State == zk.StateAuthFailed || event.State == zk.StateExpired {
-				conn.Close()
-				if event.Err != nil {
-					return nil, event.Err
-				}
-				return nil, errors.New(event.State.String())
-			}
-		}
+	if err := awaitZookeeperSession(ctx, timeout, events, conn.Close); err != nil {
+		return nil, err
 	}
+
+	return connClient{conn: conn}, nil
 }
 
 func NewUnauthorized() core.Prober { return unauthorizedProber{} }
@@ -134,7 +106,7 @@ func classifyZookeeperUnauthorizedFailure(err error) core.FailureReason {
 		return core.FailureReasonTimeout
 	case errors.Is(err, context.Canceled):
 		return core.FailureReasonCanceled
-	case errors.Is(err, zk.ErrNoAuth):
+	case errors.Is(err, zk.ErrNoAuth), errors.Is(err, zk.ErrAuthFailed):
 		return core.FailureReasonAuthentication
 	case isZookeeperConnectionError(err):
 		return core.FailureReasonConnection
@@ -144,7 +116,7 @@ func classifyZookeeperUnauthorizedFailure(err error) core.FailureReason {
 }
 
 func isZookeeperConnectionError(err error) bool {
-	if errors.Is(err, zk.ErrConnectionClosed) || errors.Is(err, zk.ErrClosing) || errors.Is(err, zk.ErrNoServer) {
+	if errors.Is(err, zk.ErrConnectionClosed) || errors.Is(err, zk.ErrClosing) || errors.Is(err, zk.ErrNoServer) || errors.Is(err, zk.ErrSessionExpired) {
 		return true
 	}
 
@@ -167,5 +139,40 @@ func isZookeeperConnectionError(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func awaitZookeeperSession(ctx context.Context, timeout time.Duration, events <-chan zk.Event, closeConn func()) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			closeConn()
+			return ctx.Err()
+		case <-timer.C:
+			closeConn()
+			return context.DeadlineExceeded
+		case event, ok := <-events:
+			if !ok {
+				closeConn()
+				return zk.ErrConnectionClosed
+			}
+			if event.Err != nil {
+				closeConn()
+				return event.Err
+			}
+			switch event.State {
+			case zk.StateConnected, zk.StateHasSession, zk.StateConnectedReadOnly:
+				return nil
+			case zk.StateAuthFailed:
+				closeConn()
+				return zk.ErrAuthFailed
+			case zk.StateExpired:
+				closeConn()
+				return zk.ErrSessionExpired
+			}
+		}
 	}
 }

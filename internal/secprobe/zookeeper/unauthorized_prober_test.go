@@ -140,3 +140,60 @@ func TestZookeeperUnauthorizedProberClassifiesDeadlineExceededBeforeProbe(t *tes
 		t.Fatalf("expected timeout failure reason, got %+v", result)
 	}
 }
+
+func TestAwaitZookeeperSessionTreatsConnectedReadOnlyAsSuccess(t *testing.T) {
+	events := make(chan zk.Event, 1)
+	events <- zk.Event{State: zk.StateConnectedReadOnly}
+
+	closed := false
+	err := awaitZookeeperSession(context.Background(), time.Second, events, func() {
+		closed = true
+	})
+
+	if err != nil {
+		t.Fatalf("expected read-only session success, got %v", err)
+	}
+	if closed {
+		t.Fatal("expected connection to stay open on read-only success")
+	}
+}
+
+func TestAwaitZookeeperSessionMapsAuthFailedToAuthenticationError(t *testing.T) {
+	events := make(chan zk.Event, 1)
+	events <- zk.Event{State: zk.StateAuthFailed}
+
+	closed := false
+	err := awaitZookeeperSession(context.Background(), time.Second, events, func() {
+		closed = true
+	})
+
+	if !errors.Is(err, zk.ErrAuthFailed) {
+		t.Fatalf("expected zk.ErrAuthFailed, got %v", err)
+	}
+	if classifyZookeeperUnauthorizedFailure(err) != core.FailureReasonAuthentication {
+		t.Fatalf("expected authentication failure reason, got %v", classifyZookeeperUnauthorizedFailure(err))
+	}
+	if !closed {
+		t.Fatal("expected connection to close on auth failure")
+	}
+}
+
+func TestAwaitZookeeperSessionMapsExpiredToConnectionError(t *testing.T) {
+	events := make(chan zk.Event, 1)
+	events <- zk.Event{State: zk.StateExpired}
+
+	closed := false
+	err := awaitZookeeperSession(context.Background(), time.Second, events, func() {
+		closed = true
+	})
+
+	if !errors.Is(err, zk.ErrSessionExpired) {
+		t.Fatalf("expected zk.ErrSessionExpired, got %v", err)
+	}
+	if classifyZookeeperUnauthorizedFailure(err) != core.FailureReasonConnection {
+		t.Fatalf("expected connection failure reason, got %v", classifyZookeeperUnauthorizedFailure(err))
+	}
+	if !closed {
+		t.Fatal("expected connection to close on expired session")
+	}
+}
