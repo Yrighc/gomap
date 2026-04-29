@@ -32,6 +32,7 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 		ResolvedIP: "127.0.0.1",
 		Ports: []assetprobe.PortResult{
 			{Port: 22, Open: true, Service: "ssh"},
+			{Port: 161, Open: true, Service: "snmp"},
 			{Port: 445, Open: true, Service: "cifs"},
 			{Port: 587, Open: true, Service: "smtp"},
 			{Port: 1433, Open: true, Service: "mssql"},
@@ -43,10 +44,10 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 	}
 
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 8 {
+	if len(candidates) != 9 {
 		t.Fatalf("expected registered default candidates, got %#v", candidates)
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "smb" || candidates[2].Service != "smtp" || candidates[3].Service != "mssql" || candidates[4].Service != "oracle" || candidates[5].Service != "rdp" || candidates[6].Service != "amqp" || candidates[7].Service != "vnc" {
+	if candidates[0].Service != "ssh" || candidates[1].Service != "snmp" || candidates[2].Service != "smb" || candidates[3].Service != "smtp" || candidates[4].Service != "mssql" || candidates[5].Service != "oracle" || candidates[6].Service != "rdp" || candidates[7].Service != "amqp" || candidates[8].Service != "vnc" {
 		t.Fatalf("unexpected candidate order: %#v", candidates)
 	}
 }

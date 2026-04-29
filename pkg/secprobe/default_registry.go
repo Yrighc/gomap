@@ -12,6 +12,7 @@ import (
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
 	smbprobe "github.com/yrighc/gomap/internal/secprobe/smb"
 	smtpprobe "github.com/yrighc/gomap/internal/secprobe/smtp"
+	snmpprobe "github.com/yrighc/gomap/internal/secprobe/snmp"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
@@ -30,6 +31,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(rdpprobe.New())
 	r.registerCoreProber(redisprobe.New())
 	r.registerCoreProber(redisprobe.NewUnauthorized())
+	r.registerCoreProber(snmpprobe.New())
 	r.registerCoreProber(smbprobe.New())
 	r.registerCoreProber(smtpprobe.New())
 	r.registerCoreProber(oracledbprobe.New())

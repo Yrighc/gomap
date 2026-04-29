@@ -8,6 +8,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5
 	github.com/docker/go-connections v0.5.0
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/gosnmp/gosnmp v1.40.0
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/lib/pq v1.12.3

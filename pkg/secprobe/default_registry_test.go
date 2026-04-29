@@ -49,6 +49,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			want:      "oracle",
 		},
 		{
+			name:      "snmp credential",
+			candidate: SecurityCandidate{Service: "snmp", Port: 161},
+			kind:      ProbeKindCredential,
+			want:      "snmp",
+		},
+		{
 			name:      "amqp credential",
 			candidate: SecurityCandidate{Service: "amqp", Port: 5672},
 			kind:      ProbeKindCredential,
@@ -112,6 +118,7 @@ func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 		{name: "mssql credential", candidate: SecurityCandidate{Service: "mssql", Port: 1433}, kind: ProbeKindCredential, wantOK: true, wantName: "mssql"},
 		{name: "smtp credential", candidate: SecurityCandidate{Service: "smtp", Port: 587}, kind: ProbeKindCredential, wantOK: true, wantName: "smtp"},
 		{name: "oracle credential", candidate: SecurityCandidate{Service: "oracle", Port: 1521}, kind: ProbeKindCredential, wantOK: true, wantName: "oracle"},
+		{name: "snmp credential", candidate: SecurityCandidate{Service: "snmp", Port: 161}, kind: ProbeKindCredential, wantOK: true, wantName: "snmp"},
 		{name: "amqp credential", candidate: SecurityCandidate{Service: "amqp", Port: 5672}, kind: ProbeKindCredential, wantOK: true, wantName: "amqp"},
 		{name: "rdp credential", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, kind: ProbeKindCredential, wantOK: true, wantName: "rdp"},
 		{name: "vnc credential", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, kind: ProbeKindCredential, wantOK: true, wantName: "vnc"},
