@@ -66,6 +66,15 @@ func TestBuildCandidatesDoesNotBroadenOracleBeyondDefaultPort(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceNameKeepsOracleBoundToDefaultPort(t *testing.T) {
+	if got := NormalizeServiceName("oracle", 1521); got != "oracle" {
+		t.Fatalf("expected oracle on 1521, got %q", got)
+	}
+	if got := NormalizeServiceName("oracle", 1522); got != "" {
+		t.Fatalf("expected oracle on 1522 to stay unsupported, got %q", got)
+	}
+}
+
 func TestNormalizeServiceNameUsesKnownPortFallback(t *testing.T) {
 	got := NormalizeServiceName("", 5432)
 	if got != "postgresql" {

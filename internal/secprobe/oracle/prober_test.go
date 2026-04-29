@@ -88,6 +88,42 @@ func TestOracleProberTriesKnownServiceNamesInOrder(t *testing.T) {
 	assertOracleServiceNames(t, attempts, []string{"XEPDB1", "ORCLPDB1", "XE"})
 }
 
+func TestOracleProberKeepsServiceFallbackWithinSharedTimeout(t *testing.T) {
+	originalOpen := openOracle
+	t.Cleanup(func() { openOracle = originalOpen })
+
+	attempts := 0
+	openOracle = func(context.Context, string) (oracleDB, error) {
+		attempts++
+		if attempts < 3 {
+			return blockingOracleDB{}, nil
+		}
+		return &fakeOracleDB{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	result := New().Probe(ctx, core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       1521,
+		Service:    "oracle",
+	}, core.CredentialProbeOptions{
+		Timeout:       120 * time.Millisecond,
+		StopOnSuccess: true,
+	}, []core.Credential{
+		{Username: "system", Password: "oracle"},
+	})
+
+	if !result.Success {
+		t.Fatalf("expected oracle success after timeout-bounded fallback, got %+v", result)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected three oracle attempts within shared timeout, got %d", attempts)
+	}
+}
+
 func TestOracleProberClassifiesAuthenticationFailure(t *testing.T) {
 	originalOpen := openOracle
 	t.Cleanup(func() { openOracle = originalOpen })
@@ -222,6 +258,37 @@ func TestOracleProberMatchRequiresDefaultPort(t *testing.T) {
 		t.Fatal("expected oracle prober to reject non-1521 ports")
 	}
 }
+
+func TestBuildOracleDSNAttemptsUsesIPv6SafeHostPort(t *testing.T) {
+	attempts := buildOracleDSNAttempts(core.SecurityCandidate{
+		ResolvedIP: "2001:db8::1",
+		Port:       1521,
+	}, core.Credential{
+		Username: "system",
+		Password: "oracle",
+	}, core.CredentialProbeOptions{Timeout: 5 * time.Second})
+
+	if len(attempts) == 0 {
+		t.Fatal("expected oracle dsn attempts")
+	}
+
+	parsed, err := url.Parse(attempts[0])
+	if err != nil {
+		t.Fatalf("parse oracle dsn: %v", err)
+	}
+	if parsed.Host != "[2001:db8::1]:1521" {
+		t.Fatalf("expected IPv6-safe host, got %q", parsed.Host)
+	}
+}
+
+type blockingOracleDB struct{}
+
+func (blockingOracleDB) PingContext(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (blockingOracleDB) Close() error { return nil }
 
 func assertOracleServiceNames(t *testing.T, attempts []string, want []string) {
 	t.Helper()

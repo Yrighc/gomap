@@ -115,3 +115,17 @@ func TestScanMapsServicesIntoCandidatesAndBuiltinOptions(t *testing.T) {
 		t.Fatalf("unexpected scan result: %+v", got)
 	}
 }
+
+func TestScanRejectsOracleOutsideDefaultPort(t *testing.T) {
+	got := Scan(context.Background(), ScanRequest{
+		Target:  "demo.local",
+		Timeout: time.Second,
+		Services: []ScanService{
+			{Port: 1522, Service: "oracle"},
+		},
+	})
+
+	if got.Error != "unsupported service \"oracle\" on port 1522" {
+		t.Fatalf("expected oracle non-default port rejection, got %+v", got)
+	}
+}

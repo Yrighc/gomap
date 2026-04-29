@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,8 @@ type oracleDB interface {
 type sqlOracleDB struct {
 	db *sql.DB
 }
+
+var oracleServiceNames = []string{"XEPDB1", "ORCLPDB1", "XE"}
 
 func (db sqlOracleDB) PingContext(ctx context.Context) error { return db.db.PingContext(ctx) }
 
@@ -58,7 +62,7 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 	successResult := result
 	successFound := false
 	attempted := false
-	attemptTimeout := oracleAttemptTimeout(opts.Timeout)
+	attemptTimeout := oraclePerAttemptTimeout(opts.Timeout, len(oracleServiceNames))
 
 	for _, cred := range creds {
 		if err := ctx.Err(); err != nil {
@@ -79,7 +83,7 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 			if err != nil {
 				result.Error = err.Error()
 				result.FailureReason = classifyOracleFailure(err)
-				if isTerminalOracleFailure(result.FailureReason) {
+				if shouldStopOracleAttempts(ctx, result.FailureReason) {
 					if successFound {
 						return successResult
 					}
@@ -109,7 +113,7 @@ func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts 
 
 			result.Error = err.Error()
 			result.FailureReason = classifyOracleFailure(err)
-			if isTerminalOracleFailure(result.FailureReason) {
+			if shouldStopOracleAttempts(ctx, result.FailureReason) {
 				if successFound {
 					return successResult
 				}
@@ -135,15 +139,14 @@ func buildOracleDSNAttempts(candidate core.SecurityCandidate, cred core.Credenti
 		timeoutSeconds = 5
 	}
 
-	serviceNames := []string{"XEPDB1", "ORCLPDB1", "XE", "ORCL"}
-	out := make([]string, 0, len(serviceNames))
-	for _, serviceName := range serviceNames {
+	out := make([]string, 0, len(oracleServiceNames))
+	for _, serviceName := range oracleServiceNames {
 		query := url.Values{}
 		query.Set("timeout", fmt.Sprintf("%d", timeoutSeconds))
 		out = append(out, (&url.URL{
 			Scheme:   "oracle",
 			User:     url.UserPassword(cred.Username, cred.Password),
-			Host:     fmt.Sprintf("%s:%d", host, candidate.Port),
+			Host:     net.JoinHostPort(host, strconv.Itoa(candidate.Port)),
 			Path:     serviceName,
 			RawQuery: query.Encode(),
 		}).String())
@@ -156,6 +159,18 @@ func oracleAttemptTimeout(timeout time.Duration) time.Duration {
 		return 5 * time.Second
 	}
 	return timeout
+}
+
+func oraclePerAttemptTimeout(timeout time.Duration, attempts int) time.Duration {
+	total := oracleAttemptTimeout(timeout)
+	if attempts <= 1 {
+		return total
+	}
+	perAttempt := total / time.Duration(attempts)
+	if perAttempt <= 0 {
+		return total
+	}
+	return perAttempt
 }
 
 func classifyOracleFailure(err error) core.FailureReason {
@@ -191,4 +206,14 @@ func ctxFailureReason(err error) core.FailureReason {
 
 func isTerminalOracleFailure(reason core.FailureReason) bool {
 	return reason == core.FailureReasonCanceled || reason == core.FailureReasonTimeout
+}
+
+func shouldStopOracleAttempts(ctx context.Context, reason core.FailureReason) bool {
+	if !isTerminalOracleFailure(reason) {
+		return false
+	}
+	if reason == core.FailureReasonTimeout && ctx.Err() == nil {
+		return false
+	}
+	return true
 }

@@ -117,14 +117,22 @@ func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	token := normalizeProtocolToken(service)
 	if token != "" {
 		for _, spec := range builtinProtocolSpecs {
-			if spec.Name == token {
-				return cloneProtocolSpec(spec), true
-			}
-			for _, alias := range spec.Aliases {
-				if alias == token {
-					return cloneProtocolSpec(spec), true
+			matched := spec.Name == token
+			if !matched {
+				for _, alias := range spec.Aliases {
+					if alias == token {
+						matched = true
+						break
+					}
 				}
 			}
+			if !matched {
+				continue
+			}
+			if port != 0 && requiresStrictPortMatch(spec.Name) && !specSupportsPort(spec, port) {
+				return ProtocolSpec{}, false
+			}
+			return cloneProtocolSpec(spec), true
 		}
 	}
 
@@ -167,4 +175,17 @@ func cloneProtocolSpec(spec ProtocolSpec) ProtocolSpec {
 	spec.DictNames = append([]string(nil), spec.DictNames...)
 	spec.ProbeKinds = append([]ProbeKind(nil), spec.ProbeKinds...)
 	return spec
+}
+
+func requiresStrictPortMatch(name string) bool {
+	return name == "oracle"
+}
+
+func specSupportsPort(spec ProtocolSpec, port int) bool {
+	for _, candidatePort := range spec.Ports {
+		if candidatePort == port {
+			return true
+		}
+	}
+	return false
 }
