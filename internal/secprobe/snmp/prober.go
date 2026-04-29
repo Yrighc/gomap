@@ -3,6 +3,7 @@ package snmp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -36,13 +37,18 @@ func (c *goSNMPClient) Get(oids []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(packet.Variables) == 0 {
-		return "", errors.New("snmp returned no variables")
+
+	oid := ""
+	if len(oids) > 0 {
+		oid = oids[0]
 	}
-	return packet.Variables[0].Name, nil
+	if err := validateSNMPResponse(packet, oid); err != nil {
+		return "", err
+	}
+	return fmt.Sprint(packet.Variables[0].Value), nil
 }
 
-var openSNMP = func(_ context.Context, candidate core.SecurityCandidate, community string, timeout time.Duration) (snmpClient, error) {
+var openSNMP = func(ctx context.Context, candidate core.SecurityCandidate, community string, timeout time.Duration) (snmpClient, error) {
 	host := candidate.ResolvedIP
 	if host == "" {
 		host = candidate.Target
@@ -53,6 +59,7 @@ var openSNMP = func(_ context.Context, candidate core.SecurityCandidate, communi
 		Port:      uint16(candidate.Port),
 		Community: community,
 		Version:   gosnmp.Version2c,
+		Context:   ctx,
 		Timeout:   timeout,
 		Retries:   0,
 	}
@@ -190,4 +197,29 @@ func ctxFailureReason(err error) core.FailureReason {
 
 func isTerminalSNMPFailure(reason core.FailureReason) bool {
 	return reason == core.FailureReasonCanceled || reason == core.FailureReasonTimeout
+}
+
+func validateSNMPResponse(packet *gosnmp.SnmpPacket, oid string) error {
+	if packet == nil {
+		return errors.New("snmp returned nil packet")
+	}
+	if packet.Error != gosnmp.NoError {
+		return fmt.Errorf("snmp returned error status %s", packet.Error)
+	}
+	if len(packet.Variables) == 0 {
+		return errors.New("snmp returned no variables")
+	}
+
+	variable := packet.Variables[0]
+	if oid != "" && variable.Name != oid {
+		return fmt.Errorf("snmp returned unexpected oid %q", variable.Name)
+	}
+	switch variable.Type {
+	case gosnmp.NoSuchObject, gosnmp.NoSuchInstance, gosnmp.EndOfMibView:
+		return fmt.Errorf("snmp returned non-readable varbind type %s", variable.Type)
+	}
+	if variable.Value == nil {
+		return errors.New("snmp returned empty value")
+	}
+	return nil
 }

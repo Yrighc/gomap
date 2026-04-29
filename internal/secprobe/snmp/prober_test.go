@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosnmp/gosnmp"
 	"github.com/yrighc/gomap/internal/secprobe/core"
 )
 
@@ -213,5 +214,69 @@ func TestSNMPProberClassifiesDeadlineExceededBeforeProbe(t *testing.T) {
 	}
 	if result.FailureReason != core.FailureReasonTimeout {
 		t.Fatalf("expected timeout failure reason, got %+v", result)
+	}
+}
+
+func TestValidateSNMPResponseRejectsProtocolErrorStatus(t *testing.T) {
+	err := validateSNMPResponse(&gosnmp.SnmpPacket{
+		Error: gosnmp.NoAccess,
+		Variables: []gosnmp.SnmpPDU{{
+			Name:  sysDescrOID,
+			Type:  gosnmp.OctetString,
+			Value: []byte("Linux"),
+		}},
+	}, sysDescrOID)
+	if err == nil {
+		t.Fatal("expected snmp error status to be rejected")
+	}
+}
+
+func TestValidateSNMPResponseRejectsNoSuchInstance(t *testing.T) {
+	err := validateSNMPResponse(&gosnmp.SnmpPacket{
+		Error: gosnmp.NoError,
+		Variables: []gosnmp.SnmpPDU{{
+			Name: sysDescrOID,
+			Type: gosnmp.NoSuchInstance,
+		}},
+	}, sysDescrOID)
+	if err == nil {
+		t.Fatal("expected non-readable varbind type to be rejected")
+	}
+}
+
+func TestValidateSNMPResponseRejectsUnexpectedOID(t *testing.T) {
+	err := validateSNMPResponse(&gosnmp.SnmpPacket{
+		Error: gosnmp.NoError,
+		Variables: []gosnmp.SnmpPDU{{
+			Name:  ".1.3.6.1.2.1.1.5.0",
+			Type:  gosnmp.OctetString,
+			Value: []byte("other"),
+		}},
+	}, sysDescrOID)
+	if err == nil {
+		t.Fatal("expected unexpected oid to be rejected")
+	}
+}
+
+func TestOpenSNMPPropagatesContextToClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := openSNMP(ctx, core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       161,
+		Service:    "snmp",
+	}, "public", 5*time.Second)
+	if err != nil {
+		t.Fatalf("open snmp client: %v", err)
+	}
+
+	goClient, ok := client.(*goSNMPClient)
+	if !ok {
+		t.Fatalf("expected goSNMPClient, got %T", client)
+	}
+	if goClient.client.Context != ctx {
+		t.Fatal("expected SNMP client to reuse caller context")
 	}
 }
