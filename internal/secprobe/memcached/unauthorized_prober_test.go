@@ -80,6 +80,70 @@ func TestMemcachedUnauthorizedProberRequiresVersionForConfirmation(t *testing.T)
 	}
 }
 
+func TestMemcachedUnauthorizedProberRequiresEndBeforeConfirmingVersion(t *testing.T) {
+	address := startMemcachedStatsServer(t, "STAT version 1.6.24\r\n")
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("convert port: %v", err)
+	}
+
+	prober := memcachedprobe.NewUnauthorized()
+	result := prober.Probe(context.Background(), secprobe.SecurityCandidate{
+		Target:     host,
+		ResolvedIP: host,
+		Port:       port,
+		Service:    "memcached",
+	}, secprobe.CredentialProbeOptions{
+		Timeout: 2 * time.Second,
+	}, nil)
+
+	if result.Success {
+		t.Fatalf("expected version without END to fail, got %+v", result)
+	}
+	if result.Stage != core.StageAttempted {
+		t.Fatalf("expected attempted stage for interrupted stats exchange, got %+v", result)
+	}
+	if result.FailureReason != core.FailureReasonConnection {
+		t.Fatalf("expected connection failure for interrupted stats exchange, got %+v", result)
+	}
+}
+
+func TestMemcachedUnauthorizedProberClassifiesTruncatedStatsAsConnectionFailure(t *testing.T) {
+	address := startMemcachedStatsServer(t, "STAT version 1.6.24\r\nSTAT pid 7\r")
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("convert port: %v", err)
+	}
+
+	prober := memcachedprobe.NewUnauthorized()
+	result := prober.Probe(context.Background(), secprobe.SecurityCandidate{
+		Target:     host,
+		ResolvedIP: host,
+		Port:       port,
+		Service:    "memcached",
+	}, secprobe.CredentialProbeOptions{
+		Timeout: 2 * time.Second,
+	}, nil)
+
+	if result.Success {
+		t.Fatalf("expected truncated stats response to fail, got %+v", result)
+	}
+	if result.Stage != core.StageAttempted {
+		t.Fatalf("expected attempted stage for truncated stats response, got %+v", result)
+	}
+	if result.FailureReason != core.FailureReasonConnection {
+		t.Fatalf("expected connection failure for truncated stats response, got %+v", result)
+	}
+}
+
 func TestMemcachedUnauthorizedProberDoesNotMarkAttemptedWhenContextCanceledBeforeProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

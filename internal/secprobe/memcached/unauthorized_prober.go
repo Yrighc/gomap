@@ -3,7 +3,9 @@ package memcached
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -88,6 +90,7 @@ func (unauthorizedProber) Probe(ctx context.Context, candidate core.SecurityCand
 }
 func readStatsVersion(conn net.Conn) (string, error) {
 	reader := bufio.NewReader(conn)
+	var version string
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -97,9 +100,9 @@ func readStatsVersion(conn net.Conn) (string, error) {
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "END":
-			return "", nil
+			return version, nil
 		case strings.HasPrefix(line, "STAT version "):
-			return strings.TrimSpace(strings.TrimPrefix(line, "STAT version ")), nil
+			version = strings.TrimSpace(strings.TrimPrefix(line, "STAT version "))
 		case line == "":
 			continue
 		case strings.HasPrefix(line, "ERROR"), strings.HasPrefix(line, "CLIENT_ERROR"), strings.HasPrefix(line, "SERVER_ERROR"):
@@ -114,6 +117,9 @@ func classifyMemcachedUnauthorizedFailure(err error) core.FailureReason {
 	}
 	if reason := ctxFailureReason(err); reason != "" {
 		return reason
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return core.FailureReasonConnection
 	}
 
 	text := strings.ToLower(err.Error())
