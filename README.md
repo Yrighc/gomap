@@ -179,7 +179,7 @@ gomap weak -target example.com -ports 21,22,3306,5432,6379
 启用未授权探测与补采示例：
 
 ```bash
-gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichment
+gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enable-enrichment
 ```
 
 常用参数：
@@ -192,7 +192,7 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 - `-up`: 内联凭证，格式 `admin : admin,root : root`
 - `-upf`: 凭证文件，一行一个 `username : password`
 - `-stop-on-success`: 单目标命中后停止继续尝试
-- `-enable-unauth`: 启用 `redis` / `mongodb` 未授权访问探测
+- `-enable-unauth`: 启用 `redis` / `mongodb` / `memcached` / `zookeeper` 未授权访问探测
 - `-enable-enrichment`: 对成功 finding 追加详情补采
 - `-v`: 同时输出控制台日志
 
@@ -209,6 +209,8 @@ gomap weak -target example.com -ports 6379,27017 -enable-unauth -enable-enrichme
 
 - `secprobe` 在 `v1.4` 之后采用“代码驱动协议实现 + 配置驱动协议元数据”的扩展模式：协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中，协议名、别名、默认端口、字典名、能力声明等元数据集中收敛。
 - 新增协议不建议只改配置文件；仅补 catalog / 字典等配置并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的协议实现代码，并完成默认 registry 注册；若协议支持 enrichment，还需要接到 `enrichment_router.go`。
+- `memcached` 与 `zookeeper` 第一版按 `unauthorized` 协议接入，使用只读确认动作，不依赖凭证字典。
+- `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
 - 扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 
 ### 5.5 端口扫描后附加弱口令探测
@@ -220,7 +222,7 @@ gomap port -target example.com -ports 21,22,3306,5432,6379 -weak
 启用未授权探测与补采示例：
 
 ```bash
-gomap port -target example.com -ports 6379,27017 -weak -weak-enable-unauth -weak-enable-enrichment
+gomap port -target example.com -ports 6379,27017,11211,2181 -weak -weak-enable-unauth -weak-enable-enrichment
 ```
 
 说明：
