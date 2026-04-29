@@ -17,6 +17,7 @@ import (
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
+	zookeeperprobe "github.com/yrighc/gomap/internal/secprobe/zookeeper"
 )
 
 func RegisterDefaultProbers(r *Registry) {
@@ -36,6 +37,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(smbprobe.New())
 	r.registerCoreProber(smtpprobe.New())
 	r.registerCoreProber(oracledbprobe.New())
+	r.registerCoreProber(zookeeperprobe.NewUnauthorized())
 	r.registerCoreProber(amqpprobe.New())
 	r.registerCoreProber(telnetprobe.New())
 	r.registerCoreProber(vncprobe.New())

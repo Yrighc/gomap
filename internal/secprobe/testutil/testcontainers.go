@@ -189,6 +189,19 @@ func StartMemcachedNoAuth(t *testing.T) ServiceContainer {
 	}, "11211/tcp")
 }
 
+func StartZookeeperNoAuth(t *testing.T) ServiceContainer {
+	t.Helper()
+
+	return startServiceContainer(t, testcontainers.ContainerRequest{
+		Image:        "zookeeper:3.9.3",
+		ExposedPorts: []string{"2181/tcp"},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("2181/tcp"),
+			wait.ForLog("Started AdminServer on address"),
+		).WithStartupTimeout(120 * time.Second),
+	}, "2181/tcp")
+}
+
 func startServiceContainer(t *testing.T, req testcontainers.ContainerRequest, port string) ServiceContainer {
 	t.Helper()
 

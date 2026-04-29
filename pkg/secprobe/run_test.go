@@ -290,6 +290,34 @@ func TestRunUsesDefaultRegistryForMemcachedUnauthorized(t *testing.T) {
 	}
 }
 
+func TestRunUsesDefaultRegistryForZookeeperUnauthorized(t *testing.T) {
+	container := testutil.StartZookeeperNoAuth(t)
+
+	result := Run(context.Background(), []SecurityCandidate{{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "zookeeper",
+	}}, CredentialProbeOptions{
+		Timeout:            5 * time.Second,
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected zookeeper unauthorized success via default registry, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindUnauthorized {
+		t.Fatalf("expected zookeeper unauthorized probe kind via default registry, got %+v", got)
+	}
+	if got.FindingType != FindingTypeUnauthorizedAccess {
+		t.Fatalf("expected zookeeper unauthorized finding type via default registry, got %+v", got)
+	}
+}
+
 func TestRunSkipsUnsupportedCandidates(t *testing.T) {
 	r := NewRegistry()
 	result := RunWithRegistry(context.Background(), r, []SecurityCandidate{{Service: "http", Port: 80}}, CredentialProbeOptions{})

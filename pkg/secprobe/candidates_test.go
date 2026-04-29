@@ -37,6 +37,7 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 			{Port: 587, Open: true, Service: "smtp"},
 			{Port: 1433, Open: true, Service: "mssql"},
 			{Port: 1521, Open: true, Service: "oracle-tns"},
+			{Port: 2181, Open: true, Service: "zookeeper"},
 			{Port: 3389, Open: true, Service: "rdp"},
 			{Port: 5672, Open: true, Service: "amqp"},
 			{Port: 5900, Open: true, Service: "vnc"},
@@ -45,10 +46,10 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 	}
 
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 10 {
+	if len(candidates) != 11 {
 		t.Fatalf("expected registered default candidates, got %#v", candidates)
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "snmp" || candidates[2].Service != "smb" || candidates[3].Service != "smtp" || candidates[4].Service != "mssql" || candidates[5].Service != "oracle" || candidates[6].Service != "rdp" || candidates[7].Service != "amqp" || candidates[8].Service != "vnc" || candidates[9].Service != "memcached" {
+	if candidates[0].Service != "ssh" || candidates[1].Service != "snmp" || candidates[2].Service != "smb" || candidates[3].Service != "smtp" || candidates[4].Service != "mssql" || candidates[5].Service != "oracle" || candidates[6].Service != "zookeeper" || candidates[7].Service != "rdp" || candidates[8].Service != "amqp" || candidates[9].Service != "vnc" || candidates[10].Service != "memcached" {
 		t.Fatalf("unexpected candidate order: %#v", candidates)
 	}
 }

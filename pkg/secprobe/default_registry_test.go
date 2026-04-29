@@ -90,6 +90,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			kind:      ProbeKindUnauthorized,
 			want:      "memcached-unauthorized",
 		},
+		{
+			name:      "zookeeper unauthorized",
+			candidate: SecurityCandidate{Service: "zookeeper", Port: 2181},
+			kind:      ProbeKindUnauthorized,
+			want:      "zookeeper-unauthorized",
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,6 +139,8 @@ func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 		{name: "memcached unauthorized hit", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "memcached-unauthorized"},
 		{name: "mongodb credential miss", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: false},
 		{name: "mongodb unauthorized hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "mongodb-unauthorized"},
+		{name: "zookeeper credential miss", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindCredential, wantOK: false},
+		{name: "zookeeper unauthorized hit", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "zookeeper-unauthorized"},
 	}
 
 	for _, tt := range tests {
@@ -179,6 +187,11 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 		{
 			name:      "memcached unauthorized",
 			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
+			kind:      ProbeKindUnauthorized,
+		},
+		{
+			name:      "zookeeper unauthorized",
+			candidate: SecurityCandidate{Service: "zookeeper", Port: 2181},
 			kind:      ProbeKindUnauthorized,
 		},
 		{
