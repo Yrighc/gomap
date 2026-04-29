@@ -38,6 +38,8 @@ jobs:
         run: go vet ./...
 
       - name: Test
+        env:
+          GOMAP_INTEGRATION: "0"
         run: go test ./...
 
       - name: Build CLI

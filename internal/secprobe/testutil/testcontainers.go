@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -54,8 +55,28 @@ type MongoDBConfig struct {
 	Password string
 }
 
+func integrationEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOMAP_INTEGRATION"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func requireIntegration(t *testing.T) {
+	t.Helper()
+
+	if integrationEnabled() {
+		return
+	}
+
+	t.Skip("integration service tests are disabled; set GOMAP_INTEGRATION=1 to run them locally")
+}
+
 func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 	t.Helper()
+	requireIntegration(t)
 
 	t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 
@@ -230,6 +251,7 @@ func StartZookeeperNoAuth(t *testing.T) ServiceContainer {
 
 func startServiceContainer(t *testing.T, req testcontainers.ContainerRequest, port string) ServiceContainer {
 	t.Helper()
+	requireIntegration(t)
 
 	t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 
@@ -313,6 +335,7 @@ func (s *FakeTelnetServer) Attempts() int {
 
 func StartFakeTelnet(t *testing.T, username, password string) *FakeTelnetServer {
 	t.Helper()
+	requireIntegration(t)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

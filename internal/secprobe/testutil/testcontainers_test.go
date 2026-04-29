@@ -6,6 +6,27 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+func TestIntegrationEnabledDefaultsToFalse(t *testing.T) {
+	t.Setenv("GOMAP_INTEGRATION", "")
+
+	if integrationEnabled() {
+		t.Fatal("expected integration tests to stay disabled by default")
+	}
+}
+
+func TestIntegrationEnabledAcceptsExplicitOptIn(t *testing.T) {
+	tests := []string{"1", "true", "TRUE", "yes", "on"}
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("GOMAP_INTEGRATION", value)
+
+			if !integrationEnabled() {
+				t.Fatalf("expected %q to enable integration tests", value)
+			}
+		})
+	}
+}
+
 func TestMySQLContainerRequestWaitsForFinalReadyLog(t *testing.T) {
 	req := mysqlContainerRequest(MySQLConfig{
 		Database: "gomap",
