@@ -193,7 +193,10 @@ func StartMongoDBWithAuth(t *testing.T, cfg MongoDBConfig) ServiceContainer {
 		Cmd: []string{"mongod", "--auth", "--bind_ip_all", "--port", "27017"},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("27017/tcp"),
-			wait.ForLog("Waiting for connections"),
+			// The official MongoDB image starts a temporary server to create the
+			// root user, then restarts into the final auth-enabled server.
+			wait.ForLog("MongoDB init process complete; ready for start up."),
+			wait.ForLog("Waiting for connections").WithOccurrence(2),
 		).WithStartupTimeout(120 * time.Second),
 	}, "27017/tcp")
 }
