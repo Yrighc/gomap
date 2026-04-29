@@ -178,7 +178,7 @@ func cloneProtocolSpec(spec ProtocolSpec) ProtocolSpec {
 }
 
 func requiresStrictPortMatch(name string) bool {
-	return name == "oracle"
+	return name == "oracle" || name == "snmp"
 }
 
 func specSupportsPort(spec ProtocolSpec, port int) bool {

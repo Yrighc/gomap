@@ -67,12 +67,36 @@ func TestBuildCandidatesDoesNotBroadenOracleBeyondDefaultPort(t *testing.T) {
 	}
 }
 
+func TestBuildCandidatesDoesNotBroadenSNMPBeyondDefaultPort(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 162, Open: true, Service: "snmp"},
+		},
+	}
+
+	candidates := BuildCandidates(res, CredentialProbeOptions{})
+	if len(candidates) != 0 {
+		t.Fatalf("expected non-161 snmp service to stay unsupported, got %#v", candidates)
+	}
+}
+
 func TestNormalizeServiceNameKeepsOracleBoundToDefaultPort(t *testing.T) {
 	if got := NormalizeServiceName("oracle", 1521); got != "oracle" {
 		t.Fatalf("expected oracle on 1521, got %q", got)
 	}
 	if got := NormalizeServiceName("oracle", 1522); got != "" {
 		t.Fatalf("expected oracle on 1522 to stay unsupported, got %q", got)
+	}
+}
+
+func TestNormalizeServiceNameKeepsSNMPBoundToDefaultPort(t *testing.T) {
+	if got := NormalizeServiceName("snmp", 161); got != "snmp" {
+		t.Fatalf("expected snmp on 161, got %q", got)
+	}
+	if got := NormalizeServiceName("snmp", 162); got != "" {
+		t.Fatalf("expected snmp on 162 to stay unsupported, got %q", got)
 	}
 }
 

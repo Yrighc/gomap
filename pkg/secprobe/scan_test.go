@@ -129,3 +129,17 @@ func TestScanRejectsOracleOutsideDefaultPort(t *testing.T) {
 		t.Fatalf("expected oracle non-default port rejection, got %+v", got)
 	}
 }
+
+func TestScanRejectsSNMPOutsideDefaultPort(t *testing.T) {
+	got := Scan(context.Background(), ScanRequest{
+		Target:  "demo.local",
+		Timeout: time.Second,
+		Services: []ScanService{
+			{Port: 162, Service: "snmp"},
+		},
+	})
+
+	if got.Error != "unsupported service \"snmp\" on port 162" {
+		t.Fatalf("expected snmp non-default port rejection, got %+v", got)
+	}
+}

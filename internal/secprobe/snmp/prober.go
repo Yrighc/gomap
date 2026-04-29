@@ -68,7 +68,7 @@ func (prober) Name() string { return "snmp" }
 func (prober) Kind() core.ProbeKind { return core.ProbeKindCredential }
 
 func (prober) Match(candidate core.SecurityCandidate) bool {
-	return candidate.Service == "snmp"
+	return candidate.Service == "snmp" && candidate.Port == 161
 }
 
 func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {
