@@ -1,4 +1,10 @@
 admin : admin
+admin : 123456
+admin : password
 root : root
 root : 123456
+root : password
 user : user
+guest : guest
+test : test
+demo : demo

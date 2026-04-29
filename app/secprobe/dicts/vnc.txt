@@ -1,4 +1,8 @@
  : 123456
- : vnc
- : admin
  : password
+ : admin
+ : 123123
+ : qwerty
+ : abc123
+ : vnc
+ : 000000

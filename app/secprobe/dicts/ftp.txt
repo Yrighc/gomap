@@ -1,4 +1,10 @@
 ftp : ftp
 ftp : 123456
+ftp : password
 admin : admin
+admin : 123456
+admin : password
 anonymous : anonymous
+user : user
+guest : guest
+test : test

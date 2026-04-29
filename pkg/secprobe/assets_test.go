@@ -76,6 +76,31 @@ func TestBuiltinCredentialsLoadSNMPCommunityMapping(t *testing.T) {
 	}
 }
 
+func TestBuiltinCredentialsIncludeChujiuDerivedDefaults(t *testing.T) {
+	tests := []struct {
+		protocol string
+		want     Credential
+	}{
+		{protocol: "ssh", want: Credential{Username: "root", Password: "password"}},
+		{protocol: "mssql", want: Credential{Username: "sa", Password: "password"}},
+		{protocol: "redis", want: Credential{Username: "default", Password: "password"}},
+		{protocol: "vnc", want: Credential{Username: "", Password: "qwerty"}},
+		{protocol: "smtp", want: Credential{Username: "mail", Password: "mail"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.protocol, func(t *testing.T) {
+			creds, err := BuiltinCredentials(tt.protocol)
+			if err != nil {
+				t.Fatalf("load %s builtin credentials: %v", tt.protocol, err)
+			}
+			if !containsCredential(creds, tt.want) {
+				t.Fatalf("expected %s builtin credentials to include %+v, got %+v", tt.protocol, tt.want, creds)
+			}
+		})
+	}
+}
+
 func TestSecurityResultToJSON(t *testing.T) {
 	res := SecurityResult{
 		Target:      "example.com",
@@ -205,4 +230,13 @@ func TestParseCredentialLinesAllowsEmptyUsername(t *testing.T) {
 	if creds[0].Username != "" || creds[0].Password != "123456" {
 		t.Fatalf("unexpected parsed credential: %+v", creds[0])
 	}
+}
+
+func containsCredential(creds []Credential, want Credential) bool {
+	for _, cred := range creds {
+		if cred == want {
+			return true
+		}
+	}
+	return false
 }

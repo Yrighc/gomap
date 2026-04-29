@@ -1,4 +1,8 @@
 default : 123456
+default : password
 default : redis
 redis : redis
+redis : 123456
+admin : admin
+admin : 123456
 redis : {{key}}

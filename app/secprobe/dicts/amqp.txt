@@ -1,4 +1,7 @@
 guest : guest
 admin : admin
+admin : 123456
+admin : password
 rabbitmq : rabbitmq
 test : test
+demo : demo
