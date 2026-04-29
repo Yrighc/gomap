@@ -116,6 +116,62 @@ func TestOracleProberClassifiesAuthenticationFailure(t *testing.T) {
 	}
 }
 
+func TestOracleProberClassifiesConnectionFailure(t *testing.T) {
+	originalOpen := openOracle
+	t.Cleanup(func() { openOracle = originalOpen })
+
+	openOracle = func(context.Context, string) (oracleDB, error) {
+		return &fakeOracleDB{pingErr: errors.New("ORA-12514: service not known")}, nil
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       1521,
+		Service:    "oracle",
+	}, core.CredentialProbeOptions{Timeout: 5 * time.Second}, []core.Credential{
+		{Username: "system", Password: "oracle"},
+	})
+
+	if result.Success {
+		t.Fatalf("expected oracle connection failure, got %+v", result)
+	}
+	if result.Stage != core.StageAttempted {
+		t.Fatalf("expected attempted stage, got %+v", result)
+	}
+	if result.FailureReason != core.FailureReasonConnection {
+		t.Fatalf("expected connection failure reason, got %+v", result)
+	}
+}
+
+func TestOracleProberClassifiesInsufficientConfirmation(t *testing.T) {
+	originalOpen := openOracle
+	t.Cleanup(func() { openOracle = originalOpen })
+
+	openOracle = func(context.Context, string) (oracleDB, error) {
+		return &fakeOracleDB{pingErr: errors.New("oracle returned unexpected state")}, nil
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "127.0.0.1",
+		ResolvedIP: "127.0.0.1",
+		Port:       1521,
+		Service:    "oracle",
+	}, core.CredentialProbeOptions{Timeout: 5 * time.Second}, []core.Credential{
+		{Username: "system", Password: "oracle"},
+	})
+
+	if result.Success {
+		t.Fatalf("expected oracle insufficient-confirmation failure, got %+v", result)
+	}
+	if result.Stage != core.StageAttempted {
+		t.Fatalf("expected attempted stage, got %+v", result)
+	}
+	if result.FailureReason != core.FailureReasonInsufficientConfirmation {
+		t.Fatalf("expected insufficient-confirmation failure reason, got %+v", result)
+	}
+}
+
 func TestOracleProberClassifiesCanceledContextBeforeProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -155,6 +211,15 @@ func TestOracleProberClassifiesDeadlineExceededBeforeProbe(t *testing.T) {
 	}
 	if result.FailureReason != core.FailureReasonTimeout {
 		t.Fatalf("expected timeout failure reason, got %+v", result)
+	}
+}
+
+func TestOracleProberMatchRequiresDefaultPort(t *testing.T) {
+	if !New().Match(core.SecurityCandidate{Service: "oracle", Port: 1521}) {
+		t.Fatal("expected oracle prober to match default port 1521")
+	}
+	if New().Match(core.SecurityCandidate{Service: "oracle", Port: 1522}) {
+		t.Fatal("expected oracle prober to reject non-1521 ports")
 	}
 }
 

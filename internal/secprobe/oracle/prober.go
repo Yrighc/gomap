@@ -43,7 +43,7 @@ func (prober) Name() string { return "oracle" }
 func (prober) Kind() core.ProbeKind { return core.ProbeKindCredential }
 
 func (prober) Match(candidate core.SecurityCandidate) bool {
-	return candidate.Service == "oracle"
+	return candidate.Service == "oracle" && candidate.Port == 1521
 }
 
 func (prober) Probe(ctx context.Context, candidate core.SecurityCandidate, opts core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {

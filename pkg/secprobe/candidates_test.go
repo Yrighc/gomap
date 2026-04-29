@@ -51,6 +51,21 @@ func TestBuildCandidatesIncludesDefaultRegisteredCatalogProtocols(t *testing.T) 
 	}
 }
 
+func TestBuildCandidatesDoesNotBroadenOracleBeyondDefaultPort(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 1522, Open: true, Service: "oracle"},
+		},
+	}
+
+	candidates := BuildCandidates(res, CredentialProbeOptions{})
+	if len(candidates) != 0 {
+		t.Fatalf("expected non-1521 oracle service to stay unsupported, got %#v", candidates)
+	}
+}
+
 func TestNormalizeServiceNameUsesKnownPortFallback(t *testing.T) {
 	got := NormalizeServiceName("", 5432)
 	if got != "postgresql" {
