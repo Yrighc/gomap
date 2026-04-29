@@ -128,9 +128,9 @@ func mysqlContainerRequest(cfg MySQLConfig) testcontainers.ContainerRequest {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("3306/tcp"),
-			// The official MySQL image emits this line during an init-time
-			// temporary server start and again after the final server is ready.
-			wait.ForLog("ready for connections").WithOccurrence(2),
+			// The official MySQL image starts a temporary server during init.
+			// Wait for the final mysqld log line that advertises port 3306.
+			wait.ForLog("port: 3306"),
 		).WithStartupTimeout(120 * time.Second),
 	}
 }

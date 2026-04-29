@@ -34,7 +34,7 @@ func TestMySQLContainerRequestWaitsForFinalReadyLog(t *testing.T) {
 		Password: "gomap-pass",
 	})
 
-	assertFinalReadyLogOccurrence(t, req.WaitingFor, "ready for connections")
+	assertLogStrategyPresent(t, req.WaitingFor, "port: 3306")
 }
 
 func TestPostgreSQLContainerRequestWaitsForFinalReadyLog(t *testing.T) {
@@ -45,6 +45,24 @@ func TestPostgreSQLContainerRequestWaitsForFinalReadyLog(t *testing.T) {
 	})
 
 	assertFinalReadyLogOccurrence(t, req.WaitingFor, "database system is ready to accept connections")
+}
+
+func assertLogStrategyPresent(t *testing.T, strategy wait.Strategy, logLine string) {
+	t.Helper()
+
+	multi, ok := strategy.(*wait.MultiStrategy)
+	if !ok {
+		t.Fatalf("expected MultiStrategy, got %T", strategy)
+	}
+
+	for _, item := range multi.Strategies {
+		logStrategy, ok := item.(*wait.LogStrategy)
+		if ok && logStrategy.Log == logLine {
+			return
+		}
+	}
+
+	t.Fatalf("expected log strategy for %q", logLine)
 }
 
 func assertFinalReadyLogOccurrence(t *testing.T, strategy wait.Strategy, logLine string) {
