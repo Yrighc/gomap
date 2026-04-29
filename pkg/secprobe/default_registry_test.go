@@ -85,6 +85,12 @@ func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
 			want:      "mongodb-unauthorized",
 		},
 		{
+			name:      "mongodb credential",
+			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
+			kind:      ProbeKindCredential,
+			want:      "mongodb",
+		},
+		{
 			name:      "memcached unauthorized",
 			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
 			kind:      ProbeKindUnauthorized,
@@ -137,7 +143,7 @@ func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 		{name: "smb credential", candidate: SecurityCandidate{Service: "smb", Port: 445}, kind: ProbeKindCredential, wantOK: true, wantName: "smb"},
 		{name: "memcached credential miss", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindCredential, wantOK: false},
 		{name: "memcached unauthorized hit", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "memcached-unauthorized"},
-		{name: "mongodb credential miss", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: false},
+		{name: "mongodb credential hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: true, wantName: "mongodb"},
 		{name: "mongodb unauthorized hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "mongodb-unauthorized"},
 		{name: "zookeeper credential miss", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindCredential, wantOK: false},
 		{name: "zookeeper unauthorized hit", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "zookeeper-unauthorized"},
@@ -195,7 +201,7 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 			kind:      ProbeKindUnauthorized,
 		},
 		{
-			name:      "mongodb credential miss",
+			name:      "mongodb credential hit",
 			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
 			kind:      ProbeKindCredential,
 		},

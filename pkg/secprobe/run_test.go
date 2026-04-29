@@ -375,6 +375,40 @@ func TestRunUsesDefaultRegistryForMongoDBUnauthorized(t *testing.T) {
 	}
 }
 
+func TestRunUsesDefaultRegistryForMongoDBCredentialAfterUnauthorizedFailure(t *testing.T) {
+	container := testutil.StartMongoDBWithAuth(t, testutil.MongoDBConfig{
+		Username: "admin",
+		Password: "admin",
+	})
+
+	result := Run(context.Background(), []SecurityCandidate{{
+		Target:     container.Host,
+		ResolvedIP: container.Host,
+		Port:       container.Port,
+		Service:    "mongodb",
+	}}, CredentialProbeOptions{
+		Timeout:            5 * time.Second,
+		EnableUnauthorized: true,
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected mongodb credential success via default registry fallback, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindCredential {
+		t.Fatalf("expected mongodb credential probe kind via default registry fallback, got %+v", got)
+	}
+	if got.FindingType != FindingTypeCredentialValid {
+		t.Fatalf("expected mongodb credential finding type via default registry fallback, got %+v", got)
+	}
+	if got.Username == "" || got.Password == "" {
+		t.Fatalf("expected mongodb credential result to include username/password, got %+v", got)
+	}
+}
+
 func TestRunUsesDefaultRegistryForMemcachedUnauthorized(t *testing.T) {
 	container := testutil.StartMemcachedNoAuth(t)
 

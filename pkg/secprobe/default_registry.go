@@ -31,6 +31,8 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(mysqlprobe.New())
 	r.registerCoreProber(postgresqlprobe.New())
 	r.registerCoreProber(oracledbprobe.New())
+	r.registerCoreProber(mongodbprobe.New())
+	r.registerCoreProber(mongodbprobe.NewUnauthorized())
 	r.registerCoreProber(zookeeperprobe.NewUnauthorized())
 	r.registerCoreProber(rdpprobe.New())
 	r.registerCoreProber(redisprobe.New())
@@ -41,7 +43,6 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(amqpprobe.New())
 	r.registerCoreProber(telnetprobe.New())
 	r.registerCoreProber(vncprobe.New())
-	r.registerCoreProber(mongodbprobe.NewUnauthorized())
 	r.registerCoreProber(memcachedprobe.NewUnauthorized())
 }
 

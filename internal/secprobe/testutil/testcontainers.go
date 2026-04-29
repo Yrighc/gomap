@@ -49,6 +49,11 @@ type RedisConfig struct {
 	Password string
 }
 
+type MongoDBConfig struct {
+	Username string
+	Password string
+}
+
 func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 	t.Helper()
 
@@ -168,6 +173,24 @@ func StartMongoDBNoAuth(t *testing.T) ServiceContainer {
 		Image:        "mongo:7.0.16",
 		ExposedPorts: []string{"27017/tcp"},
 		Cmd:          []string{"mongod", "--bind_ip_all", "--port", "27017"},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort("27017/tcp"),
+			wait.ForLog("Waiting for connections"),
+		).WithStartupTimeout(120 * time.Second),
+	}, "27017/tcp")
+}
+
+func StartMongoDBWithAuth(t *testing.T, cfg MongoDBConfig) ServiceContainer {
+	t.Helper()
+
+	return startServiceContainer(t, testcontainers.ContainerRequest{
+		Image:        "mongo:7.0.16",
+		ExposedPorts: []string{"27017/tcp"},
+		Env: map[string]string{
+			"MONGO_INITDB_ROOT_USERNAME": cfg.Username,
+			"MONGO_INITDB_ROOT_PASSWORD": cfg.Password,
+		},
+		Cmd: []string{"mongod", "--auth", "--bind_ip_all", "--port", "27017"},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("27017/tcp"),
 			wait.ForLog("Waiting for connections"),
