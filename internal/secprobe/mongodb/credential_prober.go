@@ -65,13 +65,12 @@ func (credentialProber) Match(candidate core.SecurityCandidate) bool {
 
 func (credentialProber) Probe(ctx context.Context, candidate core.SecurityCandidate, opts core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {
 	result := core.SecurityResult{
-		Target:       candidate.Target,
-		ResolvedIP:   candidate.ResolvedIP,
-		Port:         candidate.Port,
-		Service:      candidate.Service,
-		ProbeKind:    core.ProbeKindCredential,
-		FindingType:  core.FindingTypeCredentialValid,
-		Capabilities: []core.Capability{core.CapabilityEnumerable},
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindCredential,
+		FindingType: core.FindingTypeCredentialValid,
 	}
 	successResult := result
 	successFound := false
@@ -92,6 +91,12 @@ func (credentialProber) Probe(ctx context.Context, candidate core.SecurityCandid
 		if err != nil {
 			result.Error = err.Error()
 			result.FailureReason = classifyMongoCredentialFailure(err)
+			if isTerminalMongoCredentialFailure(result.FailureReason) {
+				if successFound {
+					return successResult
+				}
+				return result
+			}
 			continue
 		}
 
@@ -116,6 +121,9 @@ func (credentialProber) Probe(ctx context.Context, candidate core.SecurityCandid
 			if listErr != nil {
 				result.Error = listErr.Error()
 				result.FailureReason = classifyMongoCredentialFailure(listErr)
+				if isTerminalMongoCredentialFailure(result.FailureReason) {
+					return
+				}
 				return
 			}
 			if len(names) == 0 {
@@ -132,8 +140,16 @@ func (credentialProber) Probe(ctx context.Context, candidate core.SecurityCandid
 			successResult.Evidence = "listDatabaseNames succeeded after authentication"
 			successResult.Error = ""
 			successResult.FailureReason = ""
+			successResult.Capabilities = []core.Capability{core.CapabilityEnumerable}
 			successFound = true
 		}()
+
+		if isTerminalMongoCredentialFailure(result.FailureReason) {
+			if successFound {
+				return successResult
+			}
+			return result
+		}
 
 		if successFound && opts.StopOnSuccess {
 			return successResult
@@ -190,4 +206,8 @@ func classifyMongoCredentialFailure(err error) core.FailureReason {
 	default:
 		return core.FailureReasonInsufficientConfirmation
 	}
+}
+
+func isTerminalMongoCredentialFailure(reason core.FailureReason) bool {
+	return reason == core.FailureReasonCanceled || reason == core.FailureReasonTimeout
 }

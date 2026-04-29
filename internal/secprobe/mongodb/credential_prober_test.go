@@ -110,6 +110,9 @@ func TestMongoDBCredentialProberClassifiesAuthenticationFailure(t *testing.T) {
 	if result.FailureReason != core.FailureReasonAuthentication {
 		t.Fatalf("expected authentication failure reason, got %+v", result)
 	}
+	if len(result.Capabilities) != 0 {
+		t.Fatalf("expected no capabilities on failed result, got %+v", result)
+	}
 }
 
 func TestMongoDBCredentialProberClassifiesConnectionFailure(t *testing.T) {
@@ -200,5 +203,82 @@ func TestMongoDBCredentialProberRequiresVisibleDatabasesForConfirmation(t *testi
 	}
 	if result.FailureReason != core.FailureReasonInsufficientConfirmation {
 		t.Fatalf("expected insufficient-confirmation failure reason, got %+v", result)
+	}
+	if len(result.Capabilities) != 0 {
+		t.Fatalf("expected no capabilities on insufficient confirmation, got %+v", result)
+	}
+}
+
+func TestMongoDBCredentialProberReturnsImmediatelyOnTimeoutDuringOpen(t *testing.T) {
+	originalOpen := openMongoCredentialClient
+	t.Cleanup(func() {
+		openMongoCredentialClient = originalOpen
+	})
+
+	attempts := 0
+	openMongoCredentialClient = func(ctx context.Context, candidate core.SecurityCandidate, timeout time.Duration, cred core.Credential) (mongoCredentialClient, error) {
+		attempts++
+		if attempts > 1 {
+			t.Fatalf("unexpected retry after terminal timeout with credential %+v", cred)
+		}
+		return nil, context.DeadlineExceeded
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "mongo.local",
+		ResolvedIP: "127.0.0.1",
+		Port:       27017,
+		Service:    "mongodb",
+	}, core.CredentialProbeOptions{
+		Timeout: 2 * time.Second,
+	}, []core.Credential{
+		{Username: "alice", Password: "first"},
+		{Username: "bob", Password: "second"},
+	})
+
+	if attempts != 1 {
+		t.Fatalf("expected a single attempt after terminal timeout, got %d", attempts)
+	}
+	if result.FailureReason != core.FailureReasonTimeout {
+		t.Fatalf("expected timeout failure reason, got %+v", result)
+	}
+}
+
+func TestMongoDBCredentialProberReturnsImmediatelyOnCanceledListDatabaseNames(t *testing.T) {
+	originalOpen := openMongoCredentialClient
+	t.Cleanup(func() {
+		openMongoCredentialClient = originalOpen
+	})
+
+	attempts := 0
+	openMongoCredentialClient = func(ctx context.Context, candidate core.SecurityCandidate, timeout time.Duration, cred core.Credential) (mongoCredentialClient, error) {
+		attempts++
+		if attempts > 1 {
+			t.Fatalf("unexpected retry after terminal cancel with credential %+v", cred)
+		}
+		return fakeMongoCredentialClient{
+			listDatabaseNames: func(context.Context, any) ([]string, error) {
+				return nil, context.Canceled
+			},
+		}, nil
+	}
+
+	result := New().Probe(context.Background(), core.SecurityCandidate{
+		Target:     "mongo.local",
+		ResolvedIP: "127.0.0.1",
+		Port:       27017,
+		Service:    "mongodb",
+	}, core.CredentialProbeOptions{
+		Timeout: 2 * time.Second,
+	}, []core.Credential{
+		{Username: "alice", Password: "first"},
+		{Username: "bob", Password: "second"},
+	})
+
+	if attempts != 1 {
+		t.Fatalf("expected a single attempt after terminal cancel, got %d", attempts)
+	}
+	if result.FailureReason != core.FailureReasonCanceled {
+		t.Fatalf("expected canceled failure reason, got %+v", result)
 	}
 }
