@@ -116,6 +116,27 @@ func TestScanMapsServicesIntoCandidatesAndBuiltinOptions(t *testing.T) {
 	}
 }
 
+func TestScanFallsBackToTargetWhenResolvedIPMissing(t *testing.T) {
+	restore := stubScanRunner(func(_ context.Context, candidates []SecurityCandidate, _ CredentialProbeOptions) RunResult {
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d", len(candidates))
+		}
+		if candidates[0].Target != "demo.local" {
+			t.Fatalf("unexpected target: %+v", candidates[0])
+		}
+		if candidates[0].ResolvedIP != "demo.local" {
+			t.Fatalf("expected target fallback for empty resolved ip, got %+v", candidates[0])
+		}
+		return RunResult{}
+	})
+	defer restore()
+
+	Scan(context.Background(), ScanRequest{
+		Target:   "demo.local",
+		Services: []ScanService{{Port: 22, Service: "ssh"}},
+	})
+}
+
 func TestScanRejectsOracleOutsideDefaultPort(t *testing.T) {
 	got := Scan(context.Background(), ScanRequest{
 		Target:  "demo.local",
