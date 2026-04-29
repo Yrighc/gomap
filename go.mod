@@ -17,6 +17,7 @@ require (
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/refraction-networking/utls v1.7.0
 	github.com/sergei-bronnikov/grdp v0.3.0
+	github.com/sijms/go-ora/v2 v2.7.19
 	github.com/testcontainers/testcontainers-go v0.34.1
 	go.mongodb.org/mongo-driver v1.17.4
 	go.uber.org/zap v1.27.0

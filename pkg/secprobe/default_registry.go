@@ -6,6 +6,7 @@ import (
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
+	oracledbprobe "github.com/yrighc/gomap/internal/secprobe/oracle"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	rdpprobe "github.com/yrighc/gomap/internal/secprobe/rdp"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
@@ -31,6 +32,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.registerCoreProber(redisprobe.NewUnauthorized())
 	r.registerCoreProber(smbprobe.New())
 	r.registerCoreProber(smtpprobe.New())
+	r.registerCoreProber(oracledbprobe.New())
 	r.registerCoreProber(amqpprobe.New())
 	r.registerCoreProber(telnetprobe.New())
 	r.registerCoreProber(vncprobe.New())
