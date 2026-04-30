@@ -1,6 +1,11 @@
 package secprobe
 
-import "strings"
+import (
+	"strings"
+	"sync"
+
+	"github.com/yrighc/gomap/pkg/secprobe/metadata"
+)
 
 type ProtocolSpec struct {
 	Name               string
@@ -11,7 +16,11 @@ type ProtocolSpec struct {
 	SupportsEnrichment bool
 }
 
-var builtinProtocolSpecs = []ProtocolSpec{
+var builtinMetadataSpecs = sync.OnceValues(func() (map[string]metadata.Spec, error) {
+	return metadata.LoadBuiltin()
+})
+
+var legacyProtocolSpecs = []ProtocolSpec{
 	{
 		Name:       "ftp",
 		Ports:      []int{21},
@@ -125,8 +134,40 @@ var builtinProtocolSpecs = []ProtocolSpec{
 
 func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	token := normalizeProtocolToken(service)
+	if spec, ok := lookupMetadataProtocolSpec(token, port); ok {
+		return spec, true
+	}
+	return lookupLegacyProtocolSpec(token, port)
+}
+
+func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool) {
+	specs, err := builtinMetadataSpecs()
+	if err != nil {
+		return ProtocolSpec{}, false
+	}
+
 	if token != "" {
-		for _, spec := range builtinProtocolSpecs {
+		for _, spec := range specs {
+			if spec.Name == token || containsString(spec.Aliases, token) {
+				return fromMetadataSpec(spec), true
+			}
+		}
+	}
+
+	if port != 0 {
+		for _, spec := range specs {
+			if containsPort(spec.Ports, port) {
+				return fromMetadataSpec(spec), true
+			}
+		}
+	}
+
+	return ProtocolSpec{}, false
+}
+
+func lookupLegacyProtocolSpec(token string, port int) (ProtocolSpec, bool) {
+	if token != "" {
+		for _, spec := range legacyProtocolSpecs {
 			matched := spec.Name == token
 			if !matched {
 				for _, alias := range spec.Aliases {
@@ -147,7 +188,7 @@ func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	}
 
 	if port != 0 {
-		for _, spec := range builtinProtocolSpecs {
+		for _, spec := range legacyProtocolSpecs {
 			for _, candidatePort := range spec.Ports {
 				if candidatePort == port {
 					return cloneProtocolSpec(spec), true
@@ -194,6 +235,43 @@ func requiresStrictPortMatch(name string) bool {
 func specSupportsPort(spec ProtocolSpec, port int) bool {
 	for _, candidatePort := range spec.Ports {
 		if candidatePort == port {
+			return true
+		}
+	}
+	return false
+}
+
+func fromMetadataSpec(spec metadata.Spec) ProtocolSpec {
+	probeKinds := make([]ProbeKind, 0, 2)
+	if spec.Capabilities.Credential {
+		probeKinds = append(probeKinds, ProbeKindCredential)
+	}
+	if spec.Capabilities.Unauthorized {
+		probeKinds = append(probeKinds, ProbeKindUnauthorized)
+	}
+
+	return ProtocolSpec{
+		Name:               spec.Name,
+		Aliases:            append([]string(nil), spec.Aliases...),
+		Ports:              append([]int(nil), spec.Ports...),
+		DictNames:          append([]string(nil), spec.Dictionary.DefaultSources...),
+		ProbeKinds:         probeKinds,
+		SupportsEnrichment: spec.Capabilities.Enrichment,
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPort(values []int, target int) bool {
+	for _, value := range values {
+		if value == target {
 			return true
 		}
 	}

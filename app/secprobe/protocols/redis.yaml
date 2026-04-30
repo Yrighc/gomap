@@ -1,0 +1,24 @@
+name: redis
+aliases:
+  - redis/ssl
+  - redis/tls
+ports:
+  - 6379
+capabilities:
+  credential: true
+  unauthorized: true
+  enrichment: true
+policy_tags:
+  lockout_risk: low
+  auth_family: password
+  transport: tcp
+dictionary:
+  default_sources:
+    - redis
+  allow_empty_username: true
+  allow_empty_password: true
+  expansion_profile: static_basic
+results:
+  credential_success_type: credential_valid
+  unauthorized_success_type: unauthorized_access
+  evidence_profile: redis_basic

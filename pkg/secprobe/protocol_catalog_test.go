@@ -56,7 +56,7 @@ func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
 		t.Fatal("expected redis protocol spec on second lookup")
 	}
 
-	if again.Aliases[0] != "redis/tls" {
+	if again.Aliases[0] != "redis/ssl" {
 		t.Fatalf("expected aliases to stay isolated, got %v", again.Aliases)
 	}
 	if again.Ports[0] != 6379 {
@@ -67,6 +67,19 @@ func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
 	}
 	if again.ProbeKinds[0] != ProbeKindCredential {
 		t.Fatalf("expected probe kinds to stay isolated, got %v", again.ProbeKinds)
+	}
+}
+
+func TestLookupProtocolSpecPrefersYAMLMetadata(t *testing.T) {
+	spec, ok := LookupProtocolSpec("redis/tls", 6379)
+	if !ok {
+		t.Fatal("expected redis/tls alias to resolve")
+	}
+	if spec.Name != "redis" {
+		t.Fatalf("expected redis spec, got %+v", spec)
+	}
+	if !spec.SupportsEnrichment {
+		t.Fatalf("expected redis enrichment support, got %+v", spec)
 	}
 }
 

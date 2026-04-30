@@ -1,0 +1,20 @@
+name: ssh
+ports:
+  - 22
+capabilities:
+  credential: true
+  unauthorized: false
+  enrichment: false
+policy_tags:
+  lockout_risk: high
+  auth_family: password
+  transport: tcp
+dictionary:
+  default_sources:
+    - ssh
+  allow_empty_username: false
+  allow_empty_password: true
+  expansion_profile: user_password_basic
+results:
+  credential_success_type: credential_valid
+  evidence_profile: ssh_basic

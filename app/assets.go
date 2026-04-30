@@ -3,9 +3,10 @@ package appassets
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 )
 
-//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mongodb.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mongodb.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt secprobe/protocols/*.yaml
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
@@ -64,4 +65,12 @@ func SecprobeDict(protocol string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported secprobe dict protocol: %s", protocol)
 	}
+}
+
+func SecprobeProtocolFiles() ([]string, error) {
+	return fs.Glob(files, "secprobe/protocols/*.yaml")
+}
+
+func SecprobeProtocol(name string) ([]byte, error) {
+	return files.ReadFile("secprobe/protocols/" + name)
 }
