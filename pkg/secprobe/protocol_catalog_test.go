@@ -86,7 +86,7 @@ func TestLookupProtocolSpecPrefersYAMLMetadata(t *testing.T) {
 	}
 }
 
-func TestLookupProtocolSpecPanicsWhenMetadataLoadFailsWithoutLegacyFallback(t *testing.T) {
+func TestLookupProtocolSpecPanicsWhenMetadataLoadFailsForMigratedProtocol(t *testing.T) {
 	restore := swapMetadataSpecLoaderForTest(func() (map[string]metadata.Spec, error) {
 		return nil, errors.New("boom")
 	})
@@ -95,11 +95,11 @@ func TestLookupProtocolSpecPanicsWhenMetadataLoadFailsWithoutLegacyFallback(t *t
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
-			t.Fatal("expected metadata loader failure to panic without legacy fallback")
+			t.Fatal("expected metadata loader failure to panic for migrated protocol")
 		}
 	}()
 
-	LookupProtocolSpec("yaml-only", 8443)
+	LookupProtocolSpec("redis/tls", 6379)
 }
 
 func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing.T) {

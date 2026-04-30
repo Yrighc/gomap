@@ -143,14 +143,10 @@ func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	if ok {
 		return spec, true
 	}
-	legacySpec, legacyOK := lookupLegacyProtocolSpec(token, port)
 	if err != nil {
-		if legacyOK {
-			return legacySpec, true
-		}
 		panic(fmt.Errorf("load secprobe metadata: %w", err))
 	}
-	return legacySpec, legacyOK
+	return lookupLegacyProtocolSpec(token, port)
 }
 
 func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool, error) {
