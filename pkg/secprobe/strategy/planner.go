@@ -15,6 +15,8 @@ type CompileInput struct {
 	EnableEnrichment   bool
 	StopOnSuccess      bool
 	Timeout            time.Duration
+	DictDir            string
+	Credentials        []Credential
 }
 
 func Compile(spec metadata.Spec, in CompileInput) Plan {
@@ -34,13 +36,7 @@ func Compile(spec metadata.Spec, in CompileInput) Plan {
 			Protocol: spec.Name,
 		},
 		Capabilities: capabilities,
-		Credentials: CredentialSet{
-			Source:           "builtin",
-			Dictionaries:     append([]string(nil), spec.Dictionary.DefaultSources...),
-			ExpansionProfile: spec.Dictionary.ExpansionProfile,
-			AllowEmptyUser:   spec.Dictionary.AllowEmptyUsername,
-			AllowEmptyPass:   spec.Dictionary.AllowEmptyPassword,
-		},
+		Credentials:  selectCredentialSet(spec, in),
 		Execution: ExecutionPolicy{
 			StopOnFirstSuccess: in.StopOnSuccess,
 			ConcurrencyScope:   "per_host",
@@ -54,6 +50,43 @@ func Compile(spec metadata.Spec, in CompileInput) Plan {
 			EvidenceProfile:         spec.Results.EvidenceProfile,
 		},
 	}
+}
+
+func selectCredentialSet(spec metadata.Spec, in CompileInput) CredentialSet {
+	set := CredentialSet{
+		Source:           CredentialSourceBuiltin,
+		Dictionaries:     append([]string(nil), spec.Dictionary.DefaultSources...),
+		ExpansionProfile: spec.Dictionary.ExpansionProfile,
+		AllowEmptyUser:   spec.Dictionary.AllowEmptyUsername,
+		AllowEmptyPass:   spec.Dictionary.AllowEmptyPassword,
+	}
+
+	if len(in.Credentials) > 0 {
+		set.Source = CredentialSourceInline
+		set.InlineCount = len(dedupeCredentials(in.Credentials))
+		return set
+	}
+
+	if in.DictDir != "" {
+		set.Source = CredentialSourceDirectory
+		set.Directory = in.DictDir
+	}
+
+	return set
+}
+
+func dedupeCredentials(in []Credential) []Credential {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]Credential, 0, len(in))
+	for _, cred := range in {
+		key := cred.Username + "\x00" + cred.Password
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, cred)
+	}
+	return out
 }
 
 func defaultConcurrency(lockoutRisk string) int {

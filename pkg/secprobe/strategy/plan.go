@@ -5,7 +5,14 @@ type Capability string
 const (
 	CapabilityCredential   Capability = "credential"
 	CapabilityUnauthorized Capability = "unauthorized"
-	CapabilityEnrichment   Capability = "enrichment"
+)
+
+type CredentialSource string
+
+const (
+	CredentialSourceBuiltin   CredentialSource = "builtin"
+	CredentialSourceInline    CredentialSource = "inline"
+	CredentialSourceDirectory CredentialSource = "dict_dir"
 )
 
 type Plan struct {
@@ -23,8 +30,15 @@ type Target struct {
 	Protocol string
 }
 
+type Credential struct {
+	Username string
+	Password string
+}
+
 type CredentialSet struct {
-	Source           string
+	Source           CredentialSource
+	InlineCount      int
+	Directory        string
 	Dictionaries     []string
 	ExpansionProfile string
 	AllowEmptyUser   bool
