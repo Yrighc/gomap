@@ -2,6 +2,7 @@ package secprobe
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -219,5 +220,46 @@ func TestApplyEnrichmentKeepsPriorStageWhenEnrichmentDidNotChange(t *testing.T) 
 	}
 	if got[0].Enrichment["info_excerpt"] != "same" {
 		t.Fatalf("expected enrichment payload to remain unchanged, got %+v", got[0])
+	}
+}
+
+func TestRunResultJSONOmitsInternalExecutionFieldsAfterEngineRefactor(t *testing.T) {
+	result := exportRunResult(core.RunResult{
+		Meta: core.SecurityMeta{Candidates: 1, Attempted: 1, Succeeded: 1},
+		Results: []core.SecurityResult{{
+			Target:        "demo",
+			ResolvedIP:    "127.0.0.1",
+			Port:          6379,
+			Service:       "redis",
+			ProbeKind:     core.ProbeKindUnauthorized,
+			FindingType:   core.FindingTypeUnauthorizedAccess,
+			Success:       true,
+			Evidence:      "INFO returned redis_version",
+			Stage:         core.StageEnriched,
+			SkipReason:    core.SkipReasonProbeDisabled,
+			FailureReason: core.FailureReasonAuthentication,
+			Capabilities:  []core.Capability{core.CapabilityReadable},
+			Risk:          core.RiskHigh,
+		}},
+	})
+
+	data, err := result.ToJSON(true)
+	if err != nil {
+		t.Fatalf("ToJSON error = %v", err)
+	}
+
+	var got struct {
+		Results []map[string]any
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+	if len(got.Results) != 1 {
+		t.Fatalf("expected 1 exported result, got %d", len(got.Results))
+	}
+	for _, hidden := range []string{"Stage", "SkipReason", "FailureReason", "Capabilities", "Risk"} {
+		if _, exists := got.Results[0][hidden]; exists {
+			t.Fatalf("unexpected internal field %q in JSON: %s", hidden, string(data))
+		}
 	}
 }

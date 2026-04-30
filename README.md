@@ -213,6 +213,13 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
 - 扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 
+### 5.4.2 secprobe engine phase 1
+
+- 协议元数据开始从硬编码 catalog 条目逐步收敛到 `app/secprobe/protocols/*.yaml`
+- `Run` / `RunWithRegistry` 会先把协议元数据与运行时参数编译成 `Plan`，再交给统一 engine 执行
+- `redis` 与 `ssh` 已优先接入 atomic plugin 路径，由 engine 负责 capability 顺序、credential loop 与 stop-on-success
+- 其余历史协议仍通过 legacy adapter 保持兼容，后续会逐步迁移
+
 ### 5.5 端口扫描后附加弱口令探测
 
 ```bash
