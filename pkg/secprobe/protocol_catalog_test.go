@@ -1,8 +1,11 @@
 package secprobe
 
 import (
+	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/yrighc/gomap/pkg/secprobe/metadata"
 )
 
 func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
@@ -80,6 +83,44 @@ func TestLookupProtocolSpecPrefersYAMLMetadata(t *testing.T) {
 	}
 	if !spec.SupportsEnrichment {
 		t.Fatalf("expected redis enrichment support, got %+v", spec)
+	}
+}
+
+func TestLookupProtocolSpecPanicsWhenMetadataLoadFailsWithoutLegacyFallback(t *testing.T) {
+	restore := swapMetadataSpecLoaderForTest(func() (map[string]metadata.Spec, error) {
+		return nil, errors.New("boom")
+	})
+	defer restore()
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected metadata loader failure to panic without legacy fallback")
+		}
+	}()
+
+	LookupProtocolSpec("yaml-only", 8443)
+}
+
+func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing.T) {
+	restore := swapMetadataSpecLoaderForTest(func() (map[string]metadata.Spec, error) {
+		return map[string]metadata.Spec{
+			"oracle": {
+				Name:       "oracle",
+				Aliases:    []string{"oracle-tns"},
+				Ports:      []int{1521},
+				Dictionary: metadata.Dictionary{DefaultSources: []string{"oracle"}},
+				Capabilities: metadata.Capabilities{
+					Credential: true,
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	spec, ok := LookupProtocolSpec("oracle-tns", 3306)
+	if ok {
+		t.Fatalf("expected strict metadata token match to reject wrong port, got %+v", spec)
 	}
 }
 

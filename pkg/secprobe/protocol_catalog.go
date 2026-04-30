@@ -1,6 +1,7 @@
 package secprobe
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -16,9 +17,13 @@ type ProtocolSpec struct {
 	SupportsEnrichment bool
 }
 
-var builtinMetadataSpecs = sync.OnceValues(func() (map[string]metadata.Spec, error) {
-	return metadata.LoadBuiltin()
-})
+var metadataSpecLoader = metadata.LoadBuiltin
+
+var (
+	builtinMetadataSpecsOnce sync.Once
+	builtinMetadataSpecs     map[string]metadata.Spec
+	builtinMetadataSpecsErr  error
+)
 
 var legacyProtocolSpecs = []ProtocolSpec{
 	{
@@ -134,22 +139,34 @@ var legacyProtocolSpecs = []ProtocolSpec{
 
 func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
 	token := normalizeProtocolToken(service)
-	if spec, ok := lookupMetadataProtocolSpec(token, port); ok {
+	spec, ok, err := lookupMetadataProtocolSpec(token, port)
+	if ok {
 		return spec, true
 	}
-	return lookupLegacyProtocolSpec(token, port)
+	legacySpec, legacyOK := lookupLegacyProtocolSpec(token, port)
+	if err != nil {
+		if legacyOK {
+			return legacySpec, true
+		}
+		panic(fmt.Errorf("load secprobe metadata: %w", err))
+	}
+	return legacySpec, legacyOK
 }
 
-func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool) {
-	specs, err := builtinMetadataSpecs()
+func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool, error) {
+	specs, err := builtinMetadataSpecsOnceValue()
 	if err != nil {
-		return ProtocolSpec{}, false
+		return ProtocolSpec{}, false, err
 	}
 
 	if token != "" {
 		for _, spec := range specs {
 			if spec.Name == token || containsString(spec.Aliases, token) {
-				return fromMetadataSpec(spec), true
+				protocolSpec := fromMetadataSpec(spec)
+				if port != 0 && requiresStrictPortMatch(protocolSpec.Name) && !specSupportsPort(protocolSpec, port) {
+					return ProtocolSpec{}, false, nil
+				}
+				return protocolSpec, true, nil
 			}
 		}
 	}
@@ -157,12 +174,12 @@ func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool) {
 	if port != 0 {
 		for _, spec := range specs {
 			if containsPort(spec.Ports, port) {
-				return fromMetadataSpec(spec), true
+				return fromMetadataSpec(spec), true, nil
 			}
 		}
 	}
 
-	return ProtocolSpec{}, false
+	return ProtocolSpec{}, false, nil
 }
 
 func lookupLegacyProtocolSpec(token string, port int) (ProtocolSpec, bool) {
@@ -276,4 +293,17 @@ func containsPort(values []int, target int) bool {
 		}
 	}
 	return false
+}
+
+func builtinMetadataSpecsOnceValue() (map[string]metadata.Spec, error) {
+	builtinMetadataSpecsOnce.Do(func() {
+		builtinMetadataSpecs, builtinMetadataSpecsErr = metadataSpecLoader()
+	})
+	return builtinMetadataSpecs, builtinMetadataSpecsErr
+}
+
+func resetBuiltinMetadataSpecsForTest() {
+	builtinMetadataSpecsOnce = sync.Once{}
+	builtinMetadataSpecs = nil
+	builtinMetadataSpecsErr = nil
 }
