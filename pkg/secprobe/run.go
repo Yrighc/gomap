@@ -11,6 +11,11 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/engine"
+	"github.com/yrighc/gomap/pkg/secprobe/metadata"
+	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type probeStatus uint8
@@ -134,7 +139,69 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
 		return markSkipped(result, core.SkipReasonProbeDisabled, "unsupported protocol"), probeSkipped
 	}
+	if usesLegacyPublicProber(credentialProber) || usesLegacyPublicProber(unauthorizedProber) {
+		return probeCandidateLegacy(ctx, registry, candidate, opts, credentialProber, hasCredential, unauthorizedProber, hasUnauthorized)
+	}
 
+	plan, ok := compilePlanForCandidate(candidate, opts, hasCredential, hasUnauthorized)
+	if !ok {
+		result := defaultResultForCandidate(registry, candidate, opts)
+		return markSkipped(result, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
+	}
+
+	runInput := engine.Input{
+		Authenticator:       credentialAdapter(credentialProber, opts.Timeout),
+		UnauthorizedChecker: unauthorizedAdapter(unauthorizedProber, opts.Timeout),
+	}
+	if hasCredential {
+		runInput.CredentialLoader = func() ([]strategy.Credential, error) {
+			creds, err := credentialsForCandidate(candidate.Service, opts)
+			if err != nil {
+				return nil, err
+			}
+			return strategyCredentials(creds), nil
+		}
+	}
+
+	engineOut := engine.Run(ctx, plan, runInput)
+	if engineOut.CredentialError != nil {
+		base := markSkipped(
+			markMatched(defaultResultForCandidateKind(candidate, ProbeKindCredential)),
+			core.SkipReasonNoCredentials,
+			engineOut.CredentialError.Error(),
+		)
+		if engineOut.Attempted {
+			return base, probeAttemptFailed
+		}
+		return markFailedBeforeAttempt(base), probeFailedBeforeAttempt
+	}
+
+	if engineOut.Success {
+		kind := probeKindForCapability(engineOut.Capability)
+		base := markMatched(defaultResultForCandidateKind(candidate, kind))
+		return markConfirmed(normalizeResult(base, engineOut.Attempt.Legacy, kind)), probeAttemptSucceeded
+	}
+
+	if engineOut.Attempted {
+		kind := probeKindForCapability(engineOut.Capability)
+		base := markMatched(defaultResultForCandidateKind(candidate, kind))
+		return markAttemptFailure(normalizeResult(base, engineOut.Attempt.Legacy, kind)), probeAttemptFailed
+	}
+
+	result := defaultResultForCandidate(registry, candidate, opts)
+	return markSkipped(result, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
+}
+
+func probeCandidateLegacy(
+	ctx context.Context,
+	registry *Registry,
+	candidate SecurityCandidate,
+	opts CredentialProbeOptions,
+	credentialProber core.Prober,
+	hasCredential bool,
+	unauthorizedProber core.Prober,
+	hasUnauthorized bool,
+) (core.SecurityResult, probeStatus) {
 	active := make([]struct {
 		kind   ProbeKind
 		prober core.Prober
@@ -316,6 +383,165 @@ func defaultFindingTypeForKind(kind ProbeKind) string {
 		return FindingTypeUnauthorizedAccess
 	}
 	return FindingTypeCredentialValid
+}
+
+func probeKindForCapability(capability strategy.Capability) ProbeKind {
+	if capability == strategy.CapabilityUnauthorized {
+		return ProbeKindUnauthorized
+	}
+	return ProbeKindCredential
+}
+
+func usesLegacyPublicProber(prober core.Prober) bool {
+	wrapped, ok := prober.(*registryProber)
+	if !ok {
+		return false
+	}
+	_, isCoreBacked := wrapped.public.(corePublicProber)
+	return !isCoreBacked
+}
+
+func credentialAdapter(prober core.Prober, timeout time.Duration) registrybridge.CredentialAuthenticator {
+	if prober == nil {
+		return nil
+	}
+	return registrybridge.LegacyCredentialAdapter{
+		Prober:  prober,
+		Timeout: timeout,
+	}
+}
+
+func unauthorizedAdapter(prober core.Prober, timeout time.Duration) registrybridge.UnauthorizedChecker {
+	if prober == nil {
+		return nil
+	}
+	return registrybridge.LegacyUnauthorizedAdapter{
+		Prober:  prober,
+		Timeout: timeout,
+	}
+}
+
+func strategyCredentials(creds []Credential) []strategy.Credential {
+	if len(creds) == 0 {
+		return nil
+	}
+	out := make([]strategy.Credential, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, strategy.Credential{
+			Username: cred.Username,
+			Password: cred.Password,
+		})
+	}
+	return out
+}
+
+func compilePlanForCandidate(candidate SecurityCandidate, opts CredentialProbeOptions, hasCredential, hasUnauthorized bool) (strategy.Plan, bool) {
+	spec, ok := runtimeMetadataSpecForCandidate(candidate, hasCredential, hasUnauthorized)
+	if !ok {
+		return strategy.Plan{}, false
+	}
+
+	return strategy.Compile(spec, strategy.CompileInput{
+		Target:             candidate.Target,
+		IP:                 candidate.ResolvedIP,
+		Port:               candidate.Port,
+		EnableUnauthorized: opts.EnableUnauthorized,
+		EnableEnrichment:   opts.EnableEnrichment,
+		StopOnSuccess:      opts.StopOnSuccess,
+		Timeout:            opts.Timeout,
+		DictDir:            opts.DictDir,
+		Credentials:        strategyCredentials(opts.Credentials),
+	}), true
+}
+
+func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential, hasUnauthorized bool) (metadata.Spec, bool) {
+	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(candidate.Service), candidate.Port)
+	if err != nil {
+		panic(fmt.Errorf("load secprobe metadata: %w", err))
+	}
+	if ok {
+		return spec, true
+	}
+
+	if legacy, ok := lookupLegacyProtocolSpec(normalizeProtocolToken(candidate.Service), candidate.Port); ok {
+		return metadataSpecFromProtocolSpec(legacy), true
+	}
+
+	if hasCredential || hasUnauthorized {
+		return metadata.Spec{
+			Name: candidate.Service,
+			Ports: []int{
+				candidate.Port,
+			},
+			Capabilities: metadata.Capabilities{
+				Credential:   hasCredential,
+				Unauthorized: hasUnauthorized,
+			},
+			Results: metadata.ResultProfile{
+				CredentialSuccessType:   string(result.FindingTypeCredentialValid),
+				UnauthorizedSuccessType: string(result.FindingTypeUnauthorizedAccess),
+			},
+		}, true
+	}
+
+	return metadata.Spec{}, false
+}
+
+func lookupRuntimeMetadataSpec(token string, port int) (metadata.Spec, bool, error) {
+	specs, err := builtinMetadataSpecsOnceValue()
+	if err != nil {
+		return metadata.Spec{}, false, err
+	}
+
+	if token != "" {
+		for _, spec := range specs {
+			if spec.Name == token || containsString(spec.Aliases, token) {
+				if port != 0 && requiresStrictPortMatch(spec.Name) && !containsPort(spec.Ports, port) {
+					return metadata.Spec{}, false, nil
+				}
+				return spec, true, nil
+			}
+		}
+	}
+
+	if port != 0 {
+		for _, spec := range specs {
+			if containsPort(spec.Ports, port) {
+				return spec, true, nil
+			}
+		}
+	}
+
+	return metadata.Spec{}, false, nil
+}
+
+func metadataSpecFromProtocolSpec(spec ProtocolSpec) metadata.Spec {
+	return metadata.Spec{
+		Name:    spec.Name,
+		Aliases: append([]string(nil), spec.Aliases...),
+		Ports:   append([]int(nil), spec.Ports...),
+		Capabilities: metadata.Capabilities{
+			Credential:   containsProbeKind(spec.ProbeKinds, ProbeKindCredential),
+			Unauthorized: containsProbeKind(spec.ProbeKinds, ProbeKindUnauthorized),
+			Enrichment:   spec.SupportsEnrichment,
+		},
+		Dictionary: metadata.Dictionary{
+			DefaultSources: append([]string(nil), spec.DictNames...),
+		},
+		Results: metadata.ResultProfile{
+			CredentialSuccessType:   string(result.FindingTypeCredentialValid),
+			UnauthorizedSuccessType: string(result.FindingTypeUnauthorizedAccess),
+		},
+	}
+}
+
+func containsProbeKind(kinds []ProbeKind, target ProbeKind) bool {
+	for _, kind := range kinds {
+		if kind == target {
+			return true
+		}
+	}
+	return false
 }
 
 func probeKindsForCandidate(opts CredentialProbeOptions) []ProbeKind {

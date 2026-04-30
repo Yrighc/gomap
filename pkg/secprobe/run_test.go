@@ -318,6 +318,77 @@ func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 	}
 }
 
+func TestRunWithRegistryPreservesPublicProberCredentialBatchContract(t *testing.T) {
+	registry := NewRegistry()
+	prober := &observingPublicProber{
+		name:    "customsvc",
+		service: "customsvc",
+	}
+	registry.Register(prober)
+
+	opts := CredentialProbeOptions{
+		Timeout:            3 * time.Second,
+		StopOnSuccess:      false,
+		EnableUnauthorized: true,
+		DictDir:            "/tmp/dicts",
+		Credentials: []Credential{
+			{Username: "a", Password: "1"},
+			{Username: "b", Password: "2"},
+		},
+	}
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       1234,
+		Service:    "customsvc",
+	}}, opts)
+
+	if len(result.Results) != 1 || !result.Results[0].Success {
+		t.Fatalf("expected public prober success, got %+v", result)
+	}
+	if prober.calls != 1 {
+		t.Fatalf("expected public prober to be called once, got %d", prober.calls)
+	}
+	if prober.lastCredCount != 2 {
+		t.Fatalf("expected public prober to receive full credential batch, got %d", prober.lastCredCount)
+	}
+	wantOpts := opts
+	wantOpts.Concurrency = 10
+	if !reflect.DeepEqual(prober.lastOpts, wantOpts) {
+		t.Fatalf("expected public prober to receive defaulted opts, got %+v want %+v", prober.lastOpts, wantOpts)
+	}
+}
+
+func TestRunWithRegistryCoreProberContinuesWhenStopOnSuccessDisabled(t *testing.T) {
+	registry := NewRegistry()
+	prober := &observingCoreProber{name: "coresvc", service: "coresvc"}
+	registry.registerCoreProber(prober)
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       1234,
+		Service:    "coresvc",
+	}}, CredentialProbeOptions{
+		StopOnSuccess: false,
+		Credentials: []Credential{
+			{Username: "a", Password: "1"},
+			{Username: "b", Password: "2"},
+		},
+	})
+
+	if len(result.Results) != 1 || !result.Results[0].Success {
+		t.Fatalf("expected core-backed success, got %+v", result)
+	}
+	if prober.calls != 2 {
+		t.Fatalf("expected core-backed loop to continue after success, got %d calls", prober.calls)
+	}
+	if result.Results[0].Username != "b" || result.Results[0].Password != "2" {
+		t.Fatalf("expected last success to surface when stop is disabled, got %+v", result.Results[0])
+	}
+}
+
 func TestRunUsesDefaultRegistryForRedisUnauthorized(t *testing.T) {
 	container := testutil.StartRedisNoAuth(t)
 
@@ -733,6 +804,75 @@ func (s *stubSuccessProber) Probe(_ context.Context, candidate SecurityCandidate
 		Port:        candidate.Port,
 		Service:     candidate.Service,
 		FindingType: FindingTypeCredentialValid,
+		Success:     len(creds) > 0,
+	}
+	if len(creds) > 0 {
+		result.Username = creds[0].Username
+		result.Password = creds[0].Password
+	}
+	return result
+}
+
+type observingPublicProber struct {
+	name          string
+	service       string
+	calls         int
+	lastCredCount int
+	lastOpts      CredentialProbeOptions
+}
+
+func (p *observingPublicProber) Name() string { return p.name }
+
+func (p *observingPublicProber) Kind() ProbeKind { return ProbeKindCredential }
+
+func (p *observingPublicProber) Match(candidate SecurityCandidate) bool {
+	return candidate.Service == p.service
+}
+
+func (p *observingPublicProber) Probe(_ context.Context, candidate SecurityCandidate, opts CredentialProbeOptions, creds []Credential) SecurityResult {
+	p.calls++
+	p.lastCredCount = len(creds)
+	p.lastOpts = opts
+
+	result := SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   ProbeKindCredential,
+		FindingType: FindingTypeCredentialValid,
+		Success:     len(creds) > 0,
+	}
+	if len(creds) > 0 {
+		result.Username = creds[0].Username
+		result.Password = creds[0].Password
+	}
+	return result
+}
+
+type observingCoreProber struct {
+	name    string
+	service string
+	calls   int
+}
+
+func (p *observingCoreProber) Name() string { return p.name }
+
+func (p *observingCoreProber) Kind() core.ProbeKind { return core.ProbeKindCredential }
+
+func (p *observingCoreProber) Match(candidate core.SecurityCandidate) bool {
+	return candidate.Service == p.service
+}
+
+func (p *observingCoreProber) Probe(_ context.Context, candidate core.SecurityCandidate, _ core.CredentialProbeOptions, creds []core.Credential) core.SecurityResult {
+	p.calls++
+	result := core.SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindCredential,
+		FindingType: core.FindingTypeCredentialValid,
 		Success:     len(creds) > 0,
 	}
 	if len(creds) > 0 {
