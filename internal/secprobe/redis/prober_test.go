@@ -2,14 +2,68 @@ package redis_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := redisprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     6379,
+		Protocol: "redis",
+	}, strategy.Credential{Username: "default", Password: "gomap-pass"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestUnauthorizedCheckerDetectsOpenRedis(t *testing.T) {
+	checker := redisprobe.NewUnauthorizedChecker(func(context.Context, strategy.Target) error {
+		return nil
+	})
+
+	out := checker.CheckUnauthorizedOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     6379,
+		Protocol: "redis",
+	})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeUnauthorizedAccess {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestUnauthorizedCheckerMapsMissingVersionToInsufficientConfirmation(t *testing.T) {
+	checker := redisprobe.NewUnauthorizedChecker(func(context.Context, strategy.Target) error {
+		return errors.New("INFO server response missing redis_version")
+	})
+
+	out := checker.CheckUnauthorizedOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     6379,
+		Protocol: "redis",
+	})
+
+	if out.Result.ErrorCode != result.ErrorCodeInsufficientConfirmation {
+		t.Fatalf("expected insufficient confirmation, got %+v", out)
+	}
+}
 
 func TestRedisProberFindsValidCredential(t *testing.T) {
 	container := testutil.StartRedis(t, testutil.RedisConfig{

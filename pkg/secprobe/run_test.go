@@ -12,6 +12,9 @@ import (
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
+	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 func TestRunWithRegistryRoutesCandidateToUnauthorizedProber(t *testing.T) {
@@ -386,6 +389,132 @@ func TestRunWithRegistryCoreProberContinuesWhenStopOnSuccessDisabled(t *testing.
 	}
 	if result.Results[0].Username != "b" || result.Results[0].Password != "2" {
 		t.Fatalf("expected last success to surface when stop is disabled, got %+v", result.Results[0])
+	}
+}
+
+func TestRunWithRegistryPrefersAtomicCredentialPluginOverLegacyCoreProber(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterAtomicCredential("ssh", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "root",
+			Password:    "password",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "atomic ssh auth",
+		}}
+	}))
+	coreProber := &observingCoreProber{name: "ssh", service: "ssh"}
+	registry.registerCoreProber(coreProber)
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       22,
+		Service:    "ssh",
+	}}, CredentialProbeOptions{
+		StopOnSuccess: true,
+		Credentials:   []Credential{{Username: "root", Password: "password"}},
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected atomic credential success, got %+v", out)
+	}
+	if out.Results[0].Evidence != "atomic ssh auth" {
+		t.Fatalf("expected atomic evidence, got %+v", out.Results[0])
+	}
+	if coreProber.calls != 0 {
+		t.Fatalf("expected legacy core prober to stay idle, got %d calls", coreProber.calls)
+	}
+}
+
+func TestRunWithRegistryPrefersAtomicUnauthorizedPluginOverLegacyCoreProber(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterAtomicUnauthorized("redis", stubAtomicUnauthorizedChecker(func(context.Context, strategy.Target) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			FindingType: result.FindingTypeUnauthorizedAccess,
+			Evidence:    "atomic redis unauth",
+		}}
+	}))
+	coreProber := &observingCoreUnauthorizedProber{name: "redis-unauthorized", service: "redis"}
+	registry.registerCoreProber(coreProber)
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected atomic unauthorized success, got %+v", out)
+	}
+	if out.Results[0].Evidence != "atomic redis unauth" {
+		t.Fatalf("expected atomic evidence, got %+v", out.Results[0])
+	}
+	if coreProber.calls != 0 {
+		t.Fatalf("expected legacy unauthorized core prober to stay idle, got %d calls", coreProber.calls)
+	}
+}
+
+func TestRunWithRegistrySupportsAtomicOnlyCredentialPlugin(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterAtomicCredential("atomicsvc", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "root",
+			Password:    "password",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "atomic only auth",
+		}}
+	}))
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       1234,
+		Service:    "atomicsvc",
+	}}, CredentialProbeOptions{
+		StopOnSuccess: true,
+		Credentials:   []Credential{{Username: "root", Password: "password"}},
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected atomic-only success, got %+v", out)
+	}
+	if out.Results[0].Evidence != "atomic only auth" {
+		t.Fatalf("expected atomic-only evidence, got %+v", out.Results[0])
+	}
+}
+
+func TestRunWithRegistryPassesTimeoutToAtomicCredentialPlugin(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterAtomicCredential("atomicsvc", stubAtomicAuthenticator(func(ctx context.Context, _ strategy.Target, _ strategy.Credential) registrybridge.Attempt {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("expected atomic credential plugin to receive deadline")
+		}
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "deadline observed",
+		}}
+	}))
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       1234,
+		Service:    "atomicsvc",
+	}}, CredentialProbeOptions{
+		Timeout:         time.Second,
+		StopOnSuccess:   true,
+		Credentials:     []Credential{{Username: "root", Password: "password"}},
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected atomic timeout-aware success, got %+v", out)
 	}
 }
 
@@ -880,6 +1009,46 @@ func (p *observingCoreProber) Probe(_ context.Context, candidate core.SecurityCa
 		result.Password = creds[0].Password
 	}
 	return result
+}
+
+type observingCoreUnauthorizedProber struct {
+	name    string
+	service string
+	calls   int
+}
+
+func (p *observingCoreUnauthorizedProber) Name() string { return p.name }
+
+func (p *observingCoreUnauthorizedProber) Kind() core.ProbeKind { return core.ProbeKindUnauthorized }
+
+func (p *observingCoreUnauthorizedProber) Match(candidate core.SecurityCandidate) bool {
+	return candidate.Service == p.service
+}
+
+func (p *observingCoreUnauthorizedProber) Probe(_ context.Context, candidate core.SecurityCandidate, _ core.CredentialProbeOptions, _ []core.Credential) core.SecurityResult {
+	p.calls++
+	return core.SecurityResult{
+		Target:      candidate.Target,
+		ResolvedIP:  candidate.ResolvedIP,
+		Port:        candidate.Port,
+		Service:     candidate.Service,
+		ProbeKind:   core.ProbeKindUnauthorized,
+		FindingType: core.FindingTypeUnauthorizedAccess,
+		Success:     true,
+		Evidence:    "legacy redis unauth",
+	}
+}
+
+type stubAtomicAuthenticator func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt
+
+func (f stubAtomicAuthenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) registrybridge.Attempt {
+	return f(ctx, target, cred)
+}
+
+type stubAtomicUnauthorizedChecker func(context.Context, strategy.Target) registrybridge.Attempt
+
+func (f stubAtomicUnauthorizedChecker) CheckUnauthorizedOnce(ctx context.Context, target strategy.Target) registrybridge.Attempt {
+	return f(ctx, target)
 }
 
 type stubCountingProber struct {

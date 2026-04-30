@@ -80,7 +80,7 @@ func registrySupportsCandidate(registry *Registry, candidate SecurityCandidate) 
 	}
 
 	for _, kind := range spec.ProbeKinds {
-		if _, ok := registry.Lookup(candidate, kind); ok {
+		if registry.hasCapability(candidate, kind) {
 			return true
 		}
 	}

@@ -2,14 +2,67 @@ package ssh_test
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
+	gssh "golang.org/x/crypto/ssh"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := sshprobe.NewAuthenticator(func(network, addr string, config *gssh.ClientConfig) (*gssh.Client, error) {
+		if network != "tcp" {
+			t.Fatalf("network = %q, want tcp", network)
+		}
+		if addr != net.JoinHostPort("127.0.0.1", "22") {
+			t.Fatalf("addr = %q, want 127.0.0.1:22", addr)
+		}
+		if config.User != "root" {
+			t.Fatalf("user = %q, want root", config.User)
+		}
+		return nil, nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     22,
+		Protocol: "ssh",
+	}, strategy.Credential{Username: "root", Password: "password"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOncePropagatesContextDeadlineToDialTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	auth := sshprobe.NewAuthenticator(func(_ string, _ string, config *gssh.ClientConfig) (*gssh.Client, error) {
+		if config.Timeout <= 0 {
+			t.Fatalf("expected positive ssh timeout, got %v", config.Timeout)
+		}
+		return nil, nil
+	})
+
+	out := auth.AuthenticateOnce(ctx, strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     22,
+		Protocol: "ssh",
+	}, strategy.Credential{Username: "root", Password: "password"})
+
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+}
 
 func TestSSHProberFindsValidCredential(t *testing.T) {
 	container := testutil.StartLinuxServer(t, testutil.LinuxServerConfig{

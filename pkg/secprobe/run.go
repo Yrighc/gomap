@@ -132,8 +132,10 @@ func runWithRegistryInternal(ctx context.Context, registry *Registry, candidates
 }
 
 func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (core.SecurityResult, probeStatus) {
-	credentialProber, hasCredential := registry.lookupCore(candidate, ProbeKindCredential)
-	unauthorizedProber, hasUnauthorized := registry.lookupCore(candidate, ProbeKindUnauthorized)
+	credentialProber, _ := registry.lookupCore(candidate, ProbeKindCredential)
+	unauthorizedProber, _ := registry.lookupCore(candidate, ProbeKindUnauthorized)
+	hasCredential := registry.hasCapability(candidate, ProbeKindCredential)
+	hasUnauthorized := registry.hasCapability(candidate, ProbeKindUnauthorized)
 
 	if !hasCredential && hasUnauthorized && !opts.EnableUnauthorized {
 		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
@@ -150,8 +152,8 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 	}
 
 	runInput := engine.Input{
-		Authenticator:       credentialAdapter(credentialProber, opts.Timeout),
-		UnauthorizedChecker: unauthorizedAdapter(unauthorizedProber, opts.Timeout),
+		Authenticator:       credentialExecutor(registry, candidate, credentialProber, opts.Timeout),
+		UnauthorizedChecker: unauthorizedExecutor(registry, candidate, unauthorizedProber, opts.Timeout),
 	}
 	if hasCredential {
 		runInput.CredentialLoader = func() ([]strategy.Credential, error) {
@@ -178,14 +180,12 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 
 	if engineOut.Success {
 		kind := probeKindForCapability(engineOut.Capability)
-		base := markMatched(defaultResultForCandidateKind(candidate, kind))
-		return markConfirmed(normalizeResult(base, engineOut.Attempt.Legacy, kind)), probeAttemptSucceeded
+		return markConfirmed(engineAttemptResult(candidate, kind, engineOut.Attempt)), probeAttemptSucceeded
 	}
 
 	if engineOut.Attempted {
 		kind := probeKindForCapability(engineOut.Capability)
-		base := markMatched(defaultResultForCandidateKind(candidate, kind))
-		return markAttemptFailure(normalizeResult(base, engineOut.Attempt.Legacy, kind)), probeAttemptFailed
+		return markAttemptFailure(engineAttemptResult(candidate, kind, engineOut.Attempt)), probeAttemptFailed
 	}
 
 	result := defaultResultForCandidate(registry, candidate, opts)
@@ -206,13 +206,13 @@ func probeCandidateLegacy(
 		kind   ProbeKind
 		prober core.Prober
 	}, 0, 2)
-	if opts.EnableUnauthorized && hasUnauthorized {
+	if opts.EnableUnauthorized && hasUnauthorized && unauthorizedProber != nil {
 		active = append(active, struct {
 			kind   ProbeKind
 			prober core.Prober
 		}{kind: ProbeKindUnauthorized, prober: unauthorizedProber})
 	}
-	if hasCredential {
+	if hasCredential && credentialProber != nil {
 		active = append(active, struct {
 			kind   ProbeKind
 			prober core.Prober
@@ -369,10 +369,8 @@ func applyEnrichment(ctx context.Context, results []core.SecurityResult, opts Cr
 
 func defaultProbeKindForCandidate(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) ProbeKind {
 	for _, kind := range probeKindsForCandidate(opts) {
-		if registry != nil {
-			if _, ok := registry.lookupCore(candidate, kind); ok {
-				return kind
-			}
+		if registry != nil && registry.hasCapability(candidate, kind) {
+			return kind
 		}
 	}
 	return ProbeKindCredential
@@ -392,6 +390,27 @@ func probeKindForCapability(capability strategy.Capability) ProbeKind {
 	return ProbeKindCredential
 }
 
+func engineAttemptResult(candidate SecurityCandidate, kind ProbeKind, attempt registrybridge.Attempt) core.SecurityResult {
+	base := markMatched(defaultResultForCandidateKind(candidate, kind))
+	if attempt.Legacy.Target != "" || attempt.Legacy.ResolvedIP != "" || attempt.Legacy.Port != 0 || attempt.Legacy.Service != "" || attempt.Legacy.Success || attempt.Legacy.Error != "" || attempt.Legacy.FailureReason != "" {
+		return normalizeResult(base, attempt.Legacy, kind)
+	}
+
+	out := base
+	out.Success = attempt.Result.Success
+	out.Username = attempt.Result.Username
+	out.Password = attempt.Result.Password
+	out.Evidence = attempt.Result.Evidence
+	out.Error = attempt.Result.Error
+	if attempt.Result.ErrorCode != "" {
+		out.FailureReason = core.FailureReason(attempt.Result.ErrorCode)
+	}
+	if attempt.Result.FindingType != "" {
+		out.FindingType = result.LegacyFindingType(attempt.Result.FindingType)
+	}
+	return out
+}
+
 func usesLegacyPublicProber(prober core.Prober) bool {
 	wrapped, ok := prober.(*registryProber)
 	if !ok {
@@ -401,7 +420,12 @@ func usesLegacyPublicProber(prober core.Prober) bool {
 	return !isCoreBacked
 }
 
-func credentialAdapter(prober core.Prober, timeout time.Duration) registrybridge.CredentialAuthenticator {
+func credentialExecutor(registry *Registry, candidate SecurityCandidate, prober core.Prober, timeout time.Duration) registrybridge.CredentialAuthenticator {
+	if registry != nil {
+		if auth, ok := registry.lookupAtomicCredential(candidate); ok {
+			return timedCredentialAuthenticator{timeout: timeout, next: auth}
+		}
+	}
 	if prober == nil {
 		return nil
 	}
@@ -411,7 +435,12 @@ func credentialAdapter(prober core.Prober, timeout time.Duration) registrybridge
 	}
 }
 
-func unauthorizedAdapter(prober core.Prober, timeout time.Duration) registrybridge.UnauthorizedChecker {
+func unauthorizedExecutor(registry *Registry, candidate SecurityCandidate, prober core.Prober, timeout time.Duration) registrybridge.UnauthorizedChecker {
+	if registry != nil {
+		if checker, ok := registry.lookupAtomicUnauthorized(candidate); ok {
+			return timedUnauthorizedChecker{timeout: timeout, next: checker}
+		}
+	}
 	if prober == nil {
 		return nil
 	}
@@ -419,6 +448,40 @@ func unauthorizedAdapter(prober core.Prober, timeout time.Duration) registrybrid
 		Prober:  prober,
 		Timeout: timeout,
 	}
+}
+
+type timedCredentialAuthenticator struct {
+	timeout time.Duration
+	next    registrybridge.CredentialAuthenticator
+}
+
+func (t timedCredentialAuthenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) registrybridge.Attempt {
+	if t.next == nil {
+		return registrybridge.Attempt{}
+	}
+	if t.timeout <= 0 {
+		return t.next.AuthenticateOnce(ctx, target, cred)
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, t.timeout)
+	defer cancel()
+	return t.next.AuthenticateOnce(attemptCtx, target, cred)
+}
+
+type timedUnauthorizedChecker struct {
+	timeout time.Duration
+	next    registrybridge.UnauthorizedChecker
+}
+
+func (t timedUnauthorizedChecker) CheckUnauthorizedOnce(ctx context.Context, target strategy.Target) registrybridge.Attempt {
+	if t.next == nil {
+		return registrybridge.Attempt{}
+	}
+	if t.timeout <= 0 {
+		return t.next.CheckUnauthorizedOnce(ctx, target)
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, t.timeout)
+	defer cancel()
+	return t.next.CheckUnauthorizedOnce(attemptCtx, target)
 }
 
 func strategyCredentials(creds []Credential) []strategy.Credential {

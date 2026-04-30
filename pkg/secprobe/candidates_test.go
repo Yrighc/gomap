@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/yrighc/gomap/pkg/assetprobe"
+	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 func TestBuildCandidatesFiltersSupportedOpenPorts(t *testing.T) {
@@ -219,6 +222,29 @@ func TestBuildCandidatesWithRegistryIncludesCatalogProtocolWhenProberRegistered(
 	}
 }
 
+func TestBuildCandidatesWithRegistryIncludesAtomicOnlyProtocol(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 22, Open: true, Service: "ssh"},
+		},
+	}
+
+	r := NewRegistry()
+	r.RegisterAtomicCredential("ssh", stubAtomicCandidateAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{Success: true, FindingType: result.FindingTypeCredentialValid}}
+	}))
+
+	candidates := buildCandidatesWithRegistry(res, CredentialProbeOptions{}, r)
+	if len(candidates) != 1 {
+		t.Fatalf("expected atomic-only candidate, got %#v", candidates)
+	}
+	if candidates[0].Service != "ssh" {
+		t.Fatalf("expected atomic-only service, got %#v", candidates[0])
+	}
+}
+
 type stubProber struct{ name string }
 
 func (s stubProber) Name() string { return s.name }
@@ -231,4 +257,10 @@ func (s stubProber) Match(candidate SecurityCandidate) bool {
 
 func (s stubProber) Probe(_ context.Context, _ SecurityCandidate, _ CredentialProbeOptions, _ []Credential) SecurityResult {
 	return SecurityResult{Service: s.name}
+}
+
+type stubAtomicCandidateAuthenticator func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt
+
+func (f stubAtomicCandidateAuthenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) registrybridge.Attempt {
+	return f(ctx, target, cred)
 }

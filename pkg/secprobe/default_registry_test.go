@@ -223,3 +223,17 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
+	r := DefaultRegistry()
+
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "ssh", Port: 22}); !ok {
+		t.Fatal("expected ssh atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
+		t.Fatal("expected redis atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
+		t.Fatal("expected redis atomic unauthorized plugin")
+	}
+}

@@ -25,6 +25,10 @@ func RegisterDefaultProbers(r *Registry) {
 		return
 	}
 
+	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("redis", redisprobe.NewAuthenticator(nil))
+	r.RegisterAtomicUnauthorized("redis", redisprobe.NewUnauthorizedChecker(nil))
+
 	r.registerCoreProber(sshprobe.New())
 	r.registerCoreProber(ftpprobe.New())
 	r.registerCoreProber(mssqlprobe.New())
