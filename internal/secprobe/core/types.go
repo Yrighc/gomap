@@ -1,13 +1,18 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+)
 
 type ProbeKind string
 type ResultStage string
 type SkipReason string
-type FailureReason string
 type Capability string
 type RiskLevel string
+
+type FailureReason = result.ErrorCode
 
 const (
 	ProbeKindCredential   ProbeKind = "credential"
@@ -28,11 +33,11 @@ const (
 )
 
 const (
-	FailureReasonConnection               FailureReason = "connection"
-	FailureReasonAuthentication           FailureReason = "authentication"
-	FailureReasonTimeout                  FailureReason = "timeout"
-	FailureReasonCanceled                 FailureReason = "canceled"
-	FailureReasonInsufficientConfirmation FailureReason = "insufficient-confirmation"
+	FailureReasonConnection               = result.ErrorCodeConnection
+	FailureReasonAuthentication           = result.ErrorCodeAuthentication
+	FailureReasonTimeout                  = result.ErrorCodeTimeout
+	FailureReasonCanceled                 = result.ErrorCodeCanceled
+	FailureReasonInsufficientConfirmation = result.ErrorCodeInsufficientConfirmation
 )
 
 const (
