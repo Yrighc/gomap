@@ -165,6 +165,101 @@ func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryBuiltinCredentialLookupUsesAtomicCredentialShim(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []struct {
+		name      string
+		candidate SecurityCandidate
+		wantName  string
+	}{
+		{name: "ftp", candidate: SecurityCandidate{Service: "ftp", Port: 21}, wantName: "ftp"},
+		{name: "ssh", candidate: SecurityCandidate{Service: "ssh", Port: 22}, wantName: "ssh"},
+		{name: "telnet", candidate: SecurityCandidate{Service: "telnet", Port: 23}, wantName: "telnet"},
+		{name: "mysql", candidate: SecurityCandidate{Service: "mysql", Port: 3306}, wantName: "mysql"},
+		{name: "postgresql", candidate: SecurityCandidate{Service: "postgresql", Port: 5432}, wantName: "postgresql"},
+		{name: "redis", candidate: SecurityCandidate{Service: "redis", Port: 6379}, wantName: "redis"},
+		{name: "mssql", candidate: SecurityCandidate{Service: "mssql", Port: 1433}, wantName: "mssql"},
+		{name: "smtp", candidate: SecurityCandidate{Service: "smtp", Port: 587}, wantName: "smtp"},
+		{name: "oracle", candidate: SecurityCandidate{Service: "oracle", Port: 1521}, wantName: "oracle"},
+		{name: "snmp", candidate: SecurityCandidate{Service: "snmp", Port: 161}, wantName: "snmp"},
+		{name: "amqp", candidate: SecurityCandidate{Service: "amqp", Port: 5672}, wantName: "amqp"},
+		{name: "rdp", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, wantName: "rdp"},
+		{name: "vnc", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, wantName: "vnc"},
+		{name: "smb", candidate: SecurityCandidate{Service: "smb", Port: 445}, wantName: "smb"},
+		{name: "mongodb", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, wantName: "mongodb"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prober, ok := r.Lookup(tt.candidate, ProbeKindCredential)
+			if !ok {
+				t.Fatalf("expected credential lookup hit for %+v", tt.candidate)
+			}
+			if got := prober.Name(); got != tt.wantName {
+				t.Fatalf("expected public credential prober %q, got %q", tt.wantName, got)
+			}
+
+			coreProber, ok := r.lookupCore(tt.candidate, ProbeKindCredential)
+			if !ok {
+				t.Fatalf("expected internal credential lookup hit for %+v", tt.candidate)
+			}
+			wrapped, ok := coreProber.(*registryProber)
+			if !ok {
+				t.Fatalf("expected wrapped registry prober for %+v, got %T", tt.candidate, coreProber)
+			}
+			if _, ok := wrapped.public.(corePublicProber); !ok {
+				t.Fatalf("expected builtin credential lookup for %+v to stay core-backed", tt.candidate)
+			}
+			if _, ok := wrapped.core.(defaultAtomicCredentialLookup); !ok {
+				t.Fatalf("expected builtin credential core shim for %+v, got %T", tt.candidate, wrapped.core)
+			}
+		})
+	}
+}
+
+func TestDefaultRegistryUnauthorizedLookupStillUsesLegacyCoreProbers(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []struct {
+		name      string
+		candidate SecurityCandidate
+		wantName  string
+	}{
+		{name: "redis", candidate: SecurityCandidate{Service: "redis", Port: 6379}, wantName: "redis-unauthorized"},
+		{name: "mongodb", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, wantName: "mongodb-unauthorized"},
+		{name: "memcached", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, wantName: "memcached-unauthorized"},
+		{name: "zookeeper", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, wantName: "zookeeper-unauthorized"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prober, ok := r.Lookup(tt.candidate, ProbeKindUnauthorized)
+			if !ok {
+				t.Fatalf("expected unauthorized lookup hit for %+v", tt.candidate)
+			}
+			if got := prober.Name(); got != tt.wantName {
+				t.Fatalf("expected unauthorized public prober %q, got %q", tt.wantName, got)
+			}
+
+			coreProber, ok := r.lookupCore(tt.candidate, ProbeKindUnauthorized)
+			if !ok {
+				t.Fatalf("expected internal unauthorized lookup hit for %+v", tt.candidate)
+			}
+			wrapped, ok := coreProber.(*registryProber)
+			if !ok {
+				t.Fatalf("expected wrapped registry prober for %+v, got %T", tt.candidate, coreProber)
+			}
+			if _, ok := wrapped.public.(corePublicProber); !ok {
+				t.Fatalf("expected unauthorized lookup for %+v to keep core-backed public wrapper", tt.candidate)
+			}
+			if _, ok := wrapped.core.(defaultAtomicCredentialLookup); ok {
+				t.Fatalf("expected unauthorized lookup for %+v to avoid credential shim", tt.candidate)
+			}
+		})
+	}
+}
+
 func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 	defaultRegistry := DefaultRegistry()
 	registeredRegistry := NewRegistry()
