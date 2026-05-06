@@ -57,6 +57,7 @@ func loginOnce(ctx context.Context, target strategy.Target, cred strategy.Creden
 	if err != nil {
 		return err
 	}
+	var lastRetryableErr error
 	for _, attempt := range attempts {
 		err = loginRDP(ctx, candidate, credential, opts, attempt)
 		if err == nil {
@@ -66,9 +67,13 @@ func loginOnce(ctx context.Context, target strategy.Target, cred strategy.Creden
 			return err
 		}
 		if shouldTryNextTransport(classifyRDPFailure(err)) {
+			lastRetryableErr = err
 			continue
 		}
 		return err
+	}
+	if lastRetryableErr != nil {
+		return lastRetryableErr
 	}
 	return context.DeadlineExceeded
 }

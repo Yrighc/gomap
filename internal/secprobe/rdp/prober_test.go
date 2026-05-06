@@ -212,6 +212,47 @@ func TestRDPProberFallsBackAcrossTransportAttempts(t *testing.T) {
 	}
 }
 
+func TestLoginOnceReturnsLastRetryableTransportError(t *testing.T) {
+	originalAttempts := transportAttempts
+	originalLogin := loginRDP
+	t.Cleanup(func() {
+		transportAttempts = originalAttempts
+		loginRDP = originalLogin
+	})
+
+	transportAttempts = func(context.Context, core.SecurityCandidate, core.CredentialProbeOptions) ([]transportAttempt, error) {
+		return []transportAttempt{
+			{mode: transportModeHybrid, protocol: x224.PROTOCOL_HYBRID},
+			{mode: transportModeTLS, protocol: x224.PROTOCOL_SSL},
+		}, nil
+	}
+
+	var modes []transportMode
+	firstErr := errors.New("connection reset by peer")
+	lastErr := errors.New("unexpected server response")
+	loginRDP = func(_ context.Context, _ core.SecurityCandidate, _ core.Credential, _ core.CredentialProbeOptions, attempt transportAttempt) error {
+		modes = append(modes, attempt.mode)
+		if attempt.mode == transportModeHybrid {
+			return firstErr
+		}
+		return lastErr
+	}
+
+	err := loginOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     3389,
+		Protocol: "rdp",
+	}, strategy.Credential{Username: "alice", Password: "secret"})
+
+	if err != lastErr {
+		t.Fatalf("expected last retryable error %v, got %v", lastErr, err)
+	}
+	if len(modes) != 2 || modes[0] != transportModeHybrid || modes[1] != transportModeTLS {
+		t.Fatalf("expected hybrid then tls fallback, got %v", modes)
+	}
+}
+
 func TestDefaultLoginRDPReturnsPromptlyWhenNegotiationCloses(t *testing.T) {
 	originalOpen := openRDPSession
 	t.Cleanup(func() {
