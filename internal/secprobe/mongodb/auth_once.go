@@ -67,8 +67,14 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 	if err != nil {
 		return registrybridge.Attempt{}, err
 	}
+	disconnectCtx := context.Background()
+	disconnectCancel := func() {}
+	if timeout > 0 {
+		disconnectCtx, disconnectCancel = context.WithTimeout(context.Background(), timeout)
+	}
+	defer disconnectCancel()
 	defer func() {
-		_ = client.Disconnect(context.Background())
+		_ = client.Disconnect(disconnectCtx)
 	}()
 
 	names, err := client.ListDatabaseNames(ctx, bson.D{})

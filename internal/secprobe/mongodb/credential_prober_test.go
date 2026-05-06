@@ -73,6 +73,77 @@ func TestMongoDBAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T
 	}
 }
 
+func TestMongoDBAuthenticatorAuthenticateOnceUsesRealPathAndBoundedDisconnect(t *testing.T) {
+	originalOpen := openMongoCredentialClient
+	t.Cleanup(func() {
+		openMongoCredentialClient = originalOpen
+	})
+
+	openCalled := false
+	disconnectCalled := false
+	openMongoCredentialClient = func(ctx context.Context, candidate core.SecurityCandidate, timeout time.Duration, cred core.Credential) (mongoCredentialClient, error) {
+		openCalled = true
+		if candidate.Target != "mongo.local" || candidate.ResolvedIP != "127.0.0.1" || candidate.Port != 27017 || candidate.Service != "mongodb" {
+			t.Fatalf("unexpected candidate: %+v", candidate)
+		}
+		if cred.Username != "alice" || cred.Password != "secret" {
+			t.Fatalf("unexpected credential: %+v", cred)
+		}
+		if timeout <= 0 {
+			t.Fatalf("expected positive timeout, got %v", timeout)
+		}
+
+		return fakeMongoCredentialClient{
+			listDatabaseNames: func(context.Context, any) ([]string, error) {
+				return []string{"admin"}, nil
+			},
+			disconnect: func(ctx context.Context) error {
+				disconnectCalled = true
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("expected disconnect context to carry a deadline")
+				}
+				if time.Until(deadline) <= 0 {
+					t.Fatalf("expected disconnect deadline in the future, got %v", deadline)
+				}
+				return nil
+			},
+		}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	out := NewAuthenticator(nil).AuthenticateOnce(ctx, strategy.Target{
+		Host:     "mongo.local",
+		IP:       "127.0.0.1",
+		Port:     27017,
+		Protocol: "mongodb",
+	}, strategy.Credential{
+		Username: "alice",
+		Password: "secret",
+	})
+
+	if !openCalled {
+		t.Fatal("expected real authenticateOnce path to open a MongoDB client")
+	}
+	if !disconnectCalled {
+		t.Fatal("expected real authenticateOnce path to disconnect the MongoDB client")
+	}
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
+	}
+	if out.Result.Evidence != "listDatabaseNames succeeded after authentication" {
+		t.Fatalf("expected deterministic evidence, got %+v", out)
+	}
+	if !out.Legacy.Success || len(out.Legacy.Capabilities) != 1 || out.Legacy.Capabilities[0] != core.CapabilityEnumerable {
+		t.Fatalf("expected enumerable capability preserved through legacy payload, got %+v", out)
+	}
+}
+
 func TestMongoDBAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
 	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) (registrybridge.Attempt, error) {
 		return registrybridge.Attempt{}, errors.New("Authentication failed")
