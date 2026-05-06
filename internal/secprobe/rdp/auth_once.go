@@ -2,6 +2,7 @@ package rdp
 
 import (
 	"context"
+	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
@@ -51,7 +52,7 @@ func loginOnce(ctx context.Context, target strategy.Target, cred strategy.Creden
 		Username: cred.Username,
 		Password: cred.Password,
 	}
-	opts := core.CredentialProbeOptions{}
+	opts := core.CredentialProbeOptions{Timeout: rdpAuthTimeout(ctx)}
 
 	attempts, err := transportAttempts(ctx, candidate, opts)
 	if err != nil {
@@ -76,4 +77,13 @@ func loginOnce(ctx context.Context, target strategy.Target, cred strategy.Creden
 		return lastRetryableErr
 	}
 	return context.DeadlineExceeded
+}
+
+func rdpAuthTimeout(ctx context.Context) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		if timeout := time.Until(deadline); timeout > 0 {
+			return timeout
+		}
+	}
+	return 0
 }

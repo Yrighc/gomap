@@ -253,6 +253,43 @@ func TestLoginOnceReturnsLastRetryableTransportError(t *testing.T) {
 	}
 }
 
+func TestLoginOncePropagatesContextDeadlineToProbeOptionsTimeout(t *testing.T) {
+	originalAttempts := transportAttempts
+	originalLogin := loginRDP
+	t.Cleanup(func() {
+		transportAttempts = originalAttempts
+		loginRDP = originalLogin
+	})
+
+	deadline := time.Now().Add(12 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+
+	var transportTimeout time.Duration
+	var loginTimeout time.Duration
+	transportAttempts = func(_ context.Context, _ core.SecurityCandidate, opts core.CredentialProbeOptions) ([]transportAttempt, error) {
+		transportTimeout = opts.Timeout
+		return []transportAttempt{{mode: transportModeTLS, protocol: x224.PROTOCOL_SSL}}, nil
+	}
+	loginRDP = func(_ context.Context, _ core.SecurityCandidate, _ core.Credential, opts core.CredentialProbeOptions, _ transportAttempt) error {
+		loginTimeout = opts.Timeout
+		return nil
+	}
+
+	err := loginOnce(ctx, strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     3389,
+		Protocol: "rdp",
+	}, strategy.Credential{Username: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	assertTimeoutNearDeadline(t, transportTimeout, time.Until(deadline))
+	assertTimeoutNearDeadline(t, loginTimeout, time.Until(deadline))
+}
+
 func TestDefaultLoginRDPReturnsPromptlyWhenNegotiationCloses(t *testing.T) {
 	originalOpen := openRDPSession
 	t.Cleanup(func() {
@@ -318,6 +355,20 @@ func (s *fakeRDPSession) Connect() error {
 }
 
 func (s *fakeRDPSession) Close() error { return nil }
+
+func assertTimeoutNearDeadline(t *testing.T, got time.Duration, want time.Duration) {
+	t.Helper()
+	if got <= 0 {
+		t.Fatalf("expected positive timeout, got %v", got)
+	}
+	if got <= 5*time.Second {
+		t.Fatalf("expected timeout larger than default 5s, got %v", got)
+	}
+	const tolerance = 2 * time.Second
+	if got < want-tolerance || got > want+tolerance {
+		t.Fatalf("expected timeout near %v, got %v", want, got)
+	}
+}
 
 func (s *fakeRDPSession) emitClose() {
 	if s.onClose != nil {
