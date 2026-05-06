@@ -95,6 +95,40 @@ func TestSNMPAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
 	}
 }
 
+func TestSNMPAuthenticatorAuthenticateOncePropagatesContextDeadlineAsTimeout(t *testing.T) {
+	originalOpen := openSNMP
+	t.Cleanup(func() { openSNMP = originalOpen })
+
+	var gotTimeout time.Duration
+	openSNMP = func(_ context.Context, _ core.SecurityCandidate, _ string, timeout time.Duration) (snmpClient, error) {
+		gotTimeout = timeout
+		return &fakeSNMPClient{}, nil
+	}
+
+	deadline := time.Now().Add(12 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+
+	out := NewAuthenticator(nil).AuthenticateOnce(ctx, strategy.Target{
+		Host:     "router.local",
+		IP:       "127.0.0.1",
+		Port:     161,
+		Protocol: "snmp",
+	}, strategy.Credential{
+		Password: "public",
+	})
+
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+	if gotTimeout <= 0 {
+		t.Fatalf("expected positive timeout derived from context deadline, got %v", gotTimeout)
+	}
+	if gotTimeout > 12*time.Second || gotTimeout < 10*time.Second {
+		t.Fatalf("expected timeout close to remaining deadline, got %v", gotTimeout)
+	}
+}
+
 func TestSNMPAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
 	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
 		return errors.New("authorizationError: community invalid")

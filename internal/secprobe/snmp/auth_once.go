@@ -2,6 +2,7 @@ package snmp
 
 import (
 	"context"
+	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
@@ -39,7 +40,13 @@ func (a Authenticator) AuthenticateOnce(ctx context.Context, target strategy.Tar
 
 func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) error {
 	candidate := coreCandidate(target)
-	client, err := openSNMP(ctx, candidate, cred.Password, 0)
+	timeout := time.Duration(0)
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			timeout = remaining
+		}
+	}
+	client, err := openSNMP(ctx, candidate, cred.Password, timeout)
 	if err != nil {
 		return err
 	}
