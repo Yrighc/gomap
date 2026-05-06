@@ -2,13 +2,50 @@ package telnet_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := telnetprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     23,
+		Protocol: "telnet",
+	}, strategy.Credential{Username: "admin", Password: "admin"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := telnetprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("authentication failed")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     23,
+		Protocol: "telnet",
+	}, strategy.Credential{Username: "admin", Password: "wrong"})
+
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out)
+	}
+}
 
 func TestTelnetProberStopsAfterSuccess(t *testing.T) {
 	server := testutil.StartFakeTelnet(t, "admin", "admin")

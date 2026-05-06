@@ -18,6 +18,7 @@ import (
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
 	zookeeperprobe "github.com/yrighc/gomap/internal/secprobe/zookeeper"
+	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
 )
 
 func RegisterDefaultProbers(r *Registry) {
@@ -26,7 +27,20 @@ func RegisterDefaultProbers(r *Registry) {
 	}
 
 	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("ftp", ftpprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("mssql", mssqlprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("mysql", mysqlprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("postgresql", postgresqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("redis", redisprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("smtp", smtpprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("telnet", telnetprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("oracle", registrybridge.LegacyCredentialAdapter{Prober: oracledbprobe.New()})
+	r.RegisterAtomicCredential("rdp", registrybridge.LegacyCredentialAdapter{Prober: rdpprobe.New()})
+	r.RegisterAtomicCredential("vnc", registrybridge.LegacyCredentialAdapter{Prober: vncprobe.New()})
+	r.RegisterAtomicCredential("smb", registrybridge.LegacyCredentialAdapter{Prober: smbprobe.New()})
+	r.RegisterAtomicCredential("snmp", registrybridge.LegacyCredentialAdapter{Prober: snmpprobe.New()})
+	r.RegisterAtomicCredential("mongodb", registrybridge.LegacyCredentialAdapter{Prober: mongodbprobe.New()})
 	r.RegisterAtomicUnauthorized("redis", redisprobe.NewUnauthorizedChecker(nil))
 
 	r.registerCoreProber(sshprobe.New())

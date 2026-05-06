@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeAMQPClient struct {
@@ -36,6 +38,23 @@ type fakeAMQPChannel struct {
 func (c *fakeAMQPChannel) Close() error {
 	c.closeCalls++
 	return c.closeErr
+}
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mq.internal",
+		IP:       "127.0.0.1",
+		Port:     5672,
+		Protocol: "amqp",
+	}, strategy.Credential{Username: "guest", Password: "guest"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
 }
 
 func TestAMQPProberFindsValidCredentialAfterChannelConfirmation(t *testing.T) {

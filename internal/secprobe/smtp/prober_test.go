@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeSMTPClient struct {
@@ -48,6 +50,23 @@ func (c *fakeSMTPClient) Close() error {
 func (c *fakeSMTPClient) Quit() error {
 	c.quitCalls++
 	return nil
+}
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mail.demo",
+		IP:       "127.0.0.1",
+		Port:     587,
+		Protocol: "smtp",
+	}, strategy.Credential{Username: "mailer", Password: "secret"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
 }
 
 func TestSMTPProberFindsValidCredentialWithPlainAuth(t *testing.T) {

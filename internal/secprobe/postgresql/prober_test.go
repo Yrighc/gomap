@@ -2,13 +2,64 @@ package postgresql_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := postgresqlprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     5432,
+		Protocol: "postgresql",
+	}, strategy.Credential{Username: "gomap", Password: "gomap-pass"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsFailuresToStandardCodes(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want result.ErrorCode
+	}{
+		{name: "authentication", err: errors.New("pq: password authentication failed for user \"gomap\""), want: result.ErrorCodeAuthentication},
+		{name: "timeout", err: context.DeadlineExceeded, want: result.ErrorCodeTimeout},
+		{name: "connection", err: errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"), want: result.ErrorCodeConnection},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth := postgresqlprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+				return tt.err
+			})
+
+			out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+				Host:     "demo",
+				IP:       "127.0.0.1",
+				Port:     5432,
+				Protocol: "postgresql",
+			}, strategy.Credential{Username: "gomap", Password: "wrong"})
+
+			if out.Result.ErrorCode != tt.want {
+				t.Fatalf("expected %q, got %+v", tt.want, out)
+			}
+		})
+	}
+}
 
 func TestPostgreSQLProberFindsValidCredential(t *testing.T) {
 	container := testutil.StartPostgreSQL(t, testutil.PostgreSQLConfig{

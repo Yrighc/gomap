@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeMSSQLDB struct {
@@ -46,6 +48,40 @@ func (row fakeMSSQLRow) Scan(dest ...any) error {
 		}
 	}
 	return nil
+}
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     1433,
+		Protocol: "mssql",
+	}, strategy.Credential{Username: "sa", Password: "secret"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("Login failed for user 'sa'")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     1433,
+		Protocol: "mssql",
+	}, strategy.Credential{Username: "sa", Password: "wrong"})
+
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out)
+	}
 }
 
 func TestMSSQLProberFindsValidCredential(t *testing.T) {

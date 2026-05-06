@@ -2,13 +2,64 @@ package mysql_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := mysqlprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     3306,
+		Protocol: "mysql",
+	}, strategy.Credential{Username: "gomap", Password: "gomap-pass"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsFailuresToStandardCodes(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want result.ErrorCode
+	}{
+		{name: "authentication", err: errors.New("Error 1045 (28000): Access denied for user 'gomap'"), want: result.ErrorCodeAuthentication},
+		{name: "timeout", err: context.DeadlineExceeded, want: result.ErrorCodeTimeout},
+		{name: "connection", err: errors.New("dial tcp 127.0.0.1:3306: connect: connection refused"), want: result.ErrorCodeConnection},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth := mysqlprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+				return tt.err
+			})
+
+			out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+				Host:     "demo",
+				IP:       "127.0.0.1",
+				Port:     3306,
+				Protocol: "mysql",
+			}, strategy.Credential{Username: "gomap", Password: "wrong"})
+
+			if out.Result.ErrorCode != tt.want {
+				t.Fatalf("expected %q, got %+v", tt.want, out)
+			}
+		})
+	}
+}
 
 func TestMySQLProberFindsValidCredential(t *testing.T) {
 	container := testutil.StartMySQL(t, testutil.MySQLConfig{
