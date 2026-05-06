@@ -8,6 +8,8 @@ import (
 
 	"github.com/gosnmp/gosnmp"
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeSNMPClient struct {
@@ -58,6 +60,63 @@ func TestSNMPProberFindsValidCommunity(t *testing.T) {
 	}
 	if result.FindingType != core.FindingTypeCredentialValid {
 		t.Fatalf("expected credential-valid finding type, got %+v", result)
+	}
+}
+
+func TestSNMPAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(_ context.Context, _ strategy.Target, cred strategy.Credential) error {
+		if cred.Password != "public" {
+			t.Fatalf("expected password field to carry community, got %+v", cred)
+		}
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "router.local",
+		IP:       "127.0.0.1",
+		Port:     161,
+		Protocol: "snmp",
+	}, strategy.Credential{
+		Username: "",
+		Password: "public",
+	})
+
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
+	}
+	if out.Result.Evidence != "SNMP v2c community succeeded" {
+		t.Fatalf("expected deterministic evidence, got %+v", out)
+	}
+	if out.Result.Password != "public" {
+		t.Fatalf("expected password recorded as winning community, got %+v", out)
+	}
+}
+
+func TestSNMPAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("authorizationError: community invalid")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "router.local",
+		IP:       "127.0.0.1",
+		Port:     161,
+		Protocol: "snmp",
+	}, strategy.Credential{
+		Password: "private",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected authentication failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication error code, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
 	}
 }
 

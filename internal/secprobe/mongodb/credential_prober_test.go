@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeMongoCredentialClient struct {
@@ -26,6 +29,77 @@ func (f fakeMongoCredentialClient) Disconnect(ctx context.Context) error {
 		return f.disconnect(ctx)
 	}
 	return nil
+}
+
+func TestMongoDBAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(_ context.Context, _ strategy.Target, cred strategy.Credential) (registrybridge.Attempt, error) {
+		if cred.Username != "alice" || cred.Password != "secret" {
+			t.Fatalf("unexpected credential: %+v", cred)
+		}
+		return registrybridge.Attempt{
+			Legacy: core.SecurityResult{
+				Success:      true,
+				Stage:        core.StageConfirmed,
+				FindingType:  core.FindingTypeCredentialValid,
+				Evidence:     "listDatabaseNames succeeded after authentication",
+				Username:     cred.Username,
+				Password:     cred.Password,
+				Capabilities: []core.Capability{core.CapabilityEnumerable},
+			},
+		}, nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mongo.local",
+		IP:       "127.0.0.1",
+		Port:     27017,
+		Protocol: "mongodb",
+	}, strategy.Credential{
+		Username: "alice",
+		Password: "secret",
+	})
+
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
+	}
+	if out.Result.Evidence != "listDatabaseNames succeeded after authentication" {
+		t.Fatalf("expected deterministic evidence, got %+v", out)
+	}
+	if !out.Legacy.Success || len(out.Legacy.Capabilities) != 1 || out.Legacy.Capabilities[0] != core.CapabilityEnumerable {
+		t.Fatalf("expected enumerable capability preserved through legacy payload, got %+v", out)
+	}
+}
+
+func TestMongoDBAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) (registrybridge.Attempt, error) {
+		return registrybridge.Attempt{}, errors.New("Authentication failed")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mongo.local",
+		IP:       "127.0.0.1",
+		Port:     27017,
+		Protocol: "mongodb",
+	}, strategy.Credential{
+		Username: "alice",
+		Password: "wrong",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected authentication failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication error code, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
+	}
+	if out.Legacy.Success || len(out.Legacy.Capabilities) != 0 {
+		t.Fatalf("expected no legacy success payload on failure, got %+v", out)
+	}
 }
 
 func TestMongoDBCredentialProberSucceedsAfterAuthenticatedListDatabaseNames(t *testing.T) {
