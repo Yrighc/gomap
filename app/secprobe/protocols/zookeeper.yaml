@@ -1,0 +1,19 @@
+name: zookeeper
+ports:
+  - 2181
+capabilities:
+  credential: false
+  unauthorized: true
+  enrichment: false
+policy_tags:
+  lockout_risk: low
+  auth_family: none
+  transport: tcp
+dictionary:
+  default_sources: []
+  allow_empty_username: false
+  allow_empty_password: false
+  expansion_profile: none
+results:
+  unauthorized_success_type: unauthorized_access
+  evidence_profile: zookeeper_basic
