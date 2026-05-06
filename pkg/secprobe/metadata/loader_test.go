@@ -58,3 +58,29 @@ func TestLoadSpecsIncludesAllBuiltinProtocolNamesAfterPhase2(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSpecsIncludesPhase2HistoricalContracts(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	ftp, ok := specs["ftp"]
+	if !ok {
+		t.Fatalf("expected ftp spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+	if ftp.Name != "ftp" || !slices.Equal(ftp.Ports, []int{21}) {
+		t.Fatalf("expected ftp metadata contract, got %+v", ftp)
+	}
+
+	mongodb, ok := specs["mongodb"]
+	if !ok {
+		t.Fatalf("expected mongodb spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+	if !slices.Equal(mongodb.Aliases, []string{"mongo"}) {
+		t.Fatalf("expected mongodb alias metadata, got %+v", mongodb)
+	}
+	if !mongodb.Capabilities.Unauthorized || !mongodb.Capabilities.Credential || !mongodb.Capabilities.Enrichment {
+		t.Fatalf("expected mongodb capabilities in metadata, got %+v", mongodb.Capabilities)
+	}
+}
