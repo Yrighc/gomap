@@ -123,6 +123,9 @@ func canonicalCandidateProtocol(candidate SecurityCandidate) string {
 	if spec, ok := LookupProtocolSpec(candidate.Service, candidate.Port); ok {
 		return canonicalProtocolToken(spec.Name)
 	}
+	if spec, ok := LookupProtocolSpec(candidate.Service, 0); ok && requiresStrictPortMatch(spec.Name) {
+		return ""
+	}
 	return canonicalProtocolToken(candidate.Service)
 }
 

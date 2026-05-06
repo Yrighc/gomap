@@ -238,6 +238,17 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryKeepsStrictPortSemanticsForAtomicSNMP(t *testing.T) {
+	r := DefaultRegistry()
+
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "snmp", Port: 161}); !ok {
+		t.Fatal("expected snmp atomic credential plugin on port 161")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "snmp", Port: 162}); ok {
+		t.Fatal("expected snmp atomic credential plugin to reject non-161 port")
+	}
+}
+
 func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialProtocols(t *testing.T) {
 	r := DefaultRegistry()
 

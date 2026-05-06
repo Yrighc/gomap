@@ -173,6 +173,47 @@ func TestMongoDBAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testin
 	}
 }
 
+func TestMongoDBAuthenticatorAuthenticateOnceMapsNoVisibleDatabasesToInsufficientConfirmation(t *testing.T) {
+	originalOpen := openMongoCredentialClient
+	t.Cleanup(func() {
+		openMongoCredentialClient = originalOpen
+	})
+
+	openMongoCredentialClient = func(context.Context, core.SecurityCandidate, time.Duration, core.Credential) (mongoCredentialClient, error) {
+		return fakeMongoCredentialClient{
+			listDatabaseNames: func(context.Context, any) ([]string, error) {
+				return []string{}, nil
+			},
+		}, nil
+	}
+
+	out := NewAuthenticator(nil).AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mongo.local",
+		IP:       "127.0.0.1",
+		Port:     27017,
+		Protocol: "mongodb",
+	}, strategy.Credential{
+		Username: "alice",
+		Password: "secret",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected insufficient confirmation failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeInsufficientConfirmation {
+		t.Fatalf("expected insufficient confirmation error code, got %+v", out)
+	}
+	if out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("expected credential-valid finding type, got %+v", out)
+	}
+	if out.Result.Error != errMongoNoVisibleDatabases.Error() {
+		t.Fatalf("expected no visible databases error, got %+v", out)
+	}
+	if out.Legacy.Success || len(out.Legacy.Capabilities) != 0 {
+		t.Fatalf("expected no legacy success payload on insufficient confirmation, got %+v", out)
+	}
+}
+
 func TestMongoDBCredentialProberSucceedsAfterAuthenticatedListDatabaseNames(t *testing.T) {
 	originalOpen := openMongoCredentialClient
 	t.Cleanup(func() {
