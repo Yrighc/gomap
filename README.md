@@ -219,6 +219,7 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - `Run` / `RunWithRegistry` 会先把协议元数据与运行时参数编译成 `Plan`，再交给统一 engine 执行
 - `redis` 与 `ssh` 已优先接入 atomic plugin 路径，由 engine 负责 capability 顺序、credential loop 与 stop-on-success
 - 其余历史协议仍通过 legacy adapter 保持兼容，后续会逐步迁移
+- phase 2 已将历史内置协议目录迁移到 `app/secprobe/protocols/*.yaml`，保持既有 public API 与结果契约
 
 ### 5.5 端口扫描后附加弱口令探测
 
