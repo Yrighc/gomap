@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeOracleDB struct {
@@ -51,6 +53,43 @@ func TestOracleProberFindsValidCredential(t *testing.T) {
 	}
 	if result.FindingType != core.FindingTypeCredentialValid {
 		t.Fatalf("expected credential-valid finding type, got %+v", result)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     1521,
+		Protocol: "oracle",
+	}, strategy.Credential{Username: "system", Password: "oracle"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("ORA-01017: invalid username/password; logon denied")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     1521,
+		Protocol: "oracle",
+	}, strategy.Credential{Username: "system", Password: "wrong"})
+
+	if out.Result.Success {
+		t.Fatalf("expected auth failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out.Result)
 	}
 }
 

@@ -37,10 +37,10 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))
 
 	// Temporary builtin bridge until phase 5 cleanup.
-	r.RegisterAtomicCredential("oracle", registrybridge.LegacyCredentialAdapter{Prober: oracledbprobe.New()})
-	r.RegisterAtomicCredential("rdp", registrybridge.LegacyCredentialAdapter{Prober: rdpprobe.New()})
-	r.RegisterAtomicCredential("vnc", registrybridge.LegacyCredentialAdapter{Prober: vncprobe.New()})
-	r.RegisterAtomicCredential("smb", registrybridge.LegacyCredentialAdapter{Prober: smbprobe.New()})
+	r.RegisterAtomicCredential("oracle", oracledbprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("rdp", rdpprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("vnc", vncprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("smb", smbprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("snmp", registrybridge.LegacyCredentialAdapter{Prober: snmpprobe.New()})
 	r.RegisterAtomicCredential("mongodb", registrybridge.LegacyCredentialAdapter{Prober: mongodbprobe.New()})
 	r.RegisterAtomicUnauthorized("redis", redisprobe.NewUnauthorizedChecker(nil))

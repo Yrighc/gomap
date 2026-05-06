@@ -8,6 +8,8 @@ import (
 
 	"github.com/hirochachacha/go-smb2"
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 type fakeSession struct {
@@ -25,6 +27,43 @@ func (s *fakeSession) Mount(share string) error {
 func (s *fakeSession) Logoff() error {
 	s.logoff = true
 	return nil
+}
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     445,
+		Protocol: "smb",
+	}, strategy.Credential{Username: "guest", Password: "guest"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestSMBAuthenticatorMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("STATUS_LOGON_FAILURE")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     445,
+		Protocol: "smb",
+	}, strategy.Credential{Username: "guest", Password: "guest"})
+
+	if out.Result.Success {
+		t.Fatalf("expected auth failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out.Result)
+	}
 }
 
 func TestSMBProberFindsValidCredentialAndConfirmsStage(t *testing.T) {

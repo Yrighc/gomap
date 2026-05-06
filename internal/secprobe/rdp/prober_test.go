@@ -9,7 +9,46 @@ import (
 
 	"github.com/sergei-bronnikov/grdp/protocol/x224"
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
+
+func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return nil
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     3389,
+		Protocol: "rdp",
+	}, strategy.Credential{Username: "alice", Password: "secret"})
+
+	if !out.Result.Success || out.Result.FindingType != result.FindingTypeCredentialValid {
+		t.Fatalf("unexpected attempt %+v", out)
+	}
+}
+
+func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("authentication failed")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     3389,
+		Protocol: "rdp",
+	}, strategy.Credential{Username: "alice", Password: "wrong"})
+
+	if out.Result.Success {
+		t.Fatalf("expected auth failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out.Result)
+	}
+}
 
 func TestRDPProberFindsValidCredentialAndConfirmsStage(t *testing.T) {
 	originalAttempts := transportAttempts
