@@ -441,6 +441,8 @@ func TestRunWithRegistryUsesAtomicCredentialPathForBuiltinFTP(t *testing.T) {
 			Evidence:    "FTP authentication succeeded",
 		}}
 	}))
+	coreProber := &observingCoreProber{name: "ftp", service: "ftp"}
+	registry.registerCoreProber(coreProber)
 
 	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
 		Target: "demo", ResolvedIP: "127.0.0.1", Port: 21, Service: "ftp",
@@ -454,6 +456,9 @@ func TestRunWithRegistryUsesAtomicCredentialPathForBuiltinFTP(t *testing.T) {
 	}
 	if atomic.LoadInt32(&calls) != 1 {
 		t.Fatalf("expected exactly one atomic attempt, got %d", calls)
+	}
+	if coreProber.calls != 0 {
+		t.Fatalf("expected legacy core prober to stay idle, got %d calls", coreProber.calls)
 	}
 }
 

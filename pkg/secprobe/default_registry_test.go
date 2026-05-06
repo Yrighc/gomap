@@ -243,9 +243,11 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
+		{Service: "ssh", Port: 22},
 		{Service: "mssql", Port: 1433},
 		{Service: "mysql", Port: 3306},
 		{Service: "postgresql", Port: 5432},
+		{Service: "redis", Port: 6379},
 		{Service: "smtp", Port: 25},
 		{Service: "telnet", Port: 23},
 		{Service: "amqp", Port: 5672},
