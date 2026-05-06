@@ -133,15 +133,19 @@ func runWithRegistryInternal(ctx context.Context, registry *Registry, candidates
 
 func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (core.SecurityResult, probeStatus) {
 	credentialProber, _ := registry.lookupCore(candidate, ProbeKindCredential)
-	unauthorizedProber, _ := registry.lookupCore(candidate, ProbeKindUnauthorized)
 	hasCredential := registry.hasCapability(candidate, ProbeKindCredential)
 	hasUnauthorized := registry.hasCapability(candidate, ProbeKindUnauthorized)
+	hasBuiltinCredential := registry.hasBuiltinProvider(candidate, ProbeKindCredential)
+	hasBuiltinUnauthorized := registry.hasBuiltinProvider(candidate, ProbeKindUnauthorized)
+	hasCompatibilityCredential := registry.hasCompatibilityProber(candidate, ProbeKindCredential)
+	hasCompatibilityUnauthorized := registry.hasCompatibilityProber(candidate, ProbeKindUnauthorized)
 
 	if !hasCredential && hasUnauthorized && !opts.EnableUnauthorized {
 		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
 		return markSkipped(result, core.SkipReasonProbeDisabled, "unsupported protocol"), probeSkipped
 	}
-	if usesLegacyPublicProber(credentialProber) {
+	if !hasBuiltinCredential && !hasBuiltinUnauthorized && hasCompatibilityCredential && usesCompatibilityPublicProber(credentialProber) {
+		unauthorizedProber, _ := registry.lookupCore(candidate, ProbeKindUnauthorized)
 		return probeCandidateLegacy(ctx, registry, candidate, opts, credentialProber, hasCredential, unauthorizedProber, hasUnauthorized)
 	}
 
@@ -152,8 +156,13 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 	}
 
 	runInput := engine.Input{
-		Authenticator:       credentialExecutor(registry, candidate, credentialProber, opts.Timeout),
-		UnauthorizedChecker: unauthorizedExecutor(registry, candidate, unauthorizedProber, opts.Timeout),
+		Authenticator:       credentialExecutor(registry, candidate, opts.Timeout),
+		UnauthorizedChecker: unauthorizedExecutor(registry, candidate, opts.Timeout),
+	}
+	if !hasBuiltinUnauthorized && hasCompatibilityUnauthorized {
+		if unauthorizedProber, ok := registry.lookupCore(candidate, ProbeKindUnauthorized); ok {
+			runInput.UnauthorizedChecker = compatibilityUnauthorizedExecutor(unauthorizedProber, opts.Timeout)
+		}
 	}
 	if hasCredential {
 		runInput.CredentialLoader = func() ([]strategy.Credential, error) {
@@ -411,7 +420,7 @@ func engineAttemptResult(candidate SecurityCandidate, kind ProbeKind, attempt re
 	return out
 }
 
-func usesLegacyPublicProber(prober core.Prober) bool {
+func usesCompatibilityPublicProber(prober core.Prober) bool {
 	wrapped, ok := prober.(*registryProber)
 	if !ok {
 		return false
@@ -420,31 +429,46 @@ func usesLegacyPublicProber(prober core.Prober) bool {
 	return !isCoreBacked
 }
 
-func credentialExecutor(registry *Registry, candidate SecurityCandidate, prober core.Prober, timeout time.Duration) registrybridge.CredentialAuthenticator {
+func credentialExecutor(registry *Registry, candidate SecurityCandidate, timeout time.Duration) registrybridge.CredentialAuthenticator {
 	if registry != nil {
 		if auth, ok := registry.lookupAtomicCredential(candidate); ok {
 			return timedCredentialAuthenticator{timeout: timeout, next: auth}
 		}
 	}
+	if registry == nil {
+		return nil
+	}
+	prober, ok := registry.lookupCore(candidate, ProbeKindCredential)
+	if !ok {
+		return nil
+	}
+	return compatibilityCredentialExecutor(prober, timeout)
+}
+
+func compatibilityCredentialExecutor(prober core.Prober, timeout time.Duration) registrybridge.CredentialAuthenticator {
 	if prober == nil {
 		return nil
 	}
-	return registrybridge.LegacyCredentialAdapter{
+	return registrybridge.PublicCredentialAdapter{
 		Prober:  prober,
 		Timeout: timeout,
 	}
 }
 
-func unauthorizedExecutor(registry *Registry, candidate SecurityCandidate, prober core.Prober, timeout time.Duration) registrybridge.UnauthorizedChecker {
+func unauthorizedExecutor(registry *Registry, candidate SecurityCandidate, timeout time.Duration) registrybridge.UnauthorizedChecker {
 	if registry != nil {
 		if checker, ok := registry.lookupAtomicUnauthorized(candidate); ok {
 			return timedUnauthorizedChecker{timeout: timeout, next: checker}
 		}
 	}
+	return nil
+}
+
+func compatibilityUnauthorizedExecutor(prober core.Prober, timeout time.Duration) registrybridge.UnauthorizedChecker {
 	if prober == nil {
 		return nil
 	}
-	return registrybridge.LegacyUnauthorizedAdapter{
+	return registrybridge.PublicUnauthorizedAdapter{
 		Prober:  prober,
 		Timeout: timeout,
 	}

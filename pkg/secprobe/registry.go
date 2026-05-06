@@ -141,16 +141,26 @@ func canonicalRegistryProtocol(protocol string) string {
 }
 
 func (r *Registry) hasCapability(candidate SecurityCandidate, kind ProbeKind) bool {
+	if r.hasBuiltinProvider(candidate, kind) {
+		return true
+	}
+	return r.hasCompatibilityProber(candidate, kind)
+}
+
+func (r *Registry) hasBuiltinProvider(candidate SecurityCandidate, kind ProbeKind) bool {
 	switch kind {
 	case ProbeKindCredential:
-		if _, ok := r.lookupAtomicCredential(candidate); ok {
-			return true
-		}
+		_, ok := r.lookupAtomicCredential(candidate)
+		return ok
 	case ProbeKindUnauthorized:
-		if _, ok := r.lookupAtomicUnauthorized(candidate); ok {
-			return true
-		}
+		_, ok := r.lookupAtomicUnauthorized(candidate)
+		return ok
+	default:
+		return false
 	}
+}
+
+func (r *Registry) hasCompatibilityProber(candidate SecurityCandidate, kind ProbeKind) bool {
 	_, ok := r.lookupCore(candidate, kind)
 	return ok
 }

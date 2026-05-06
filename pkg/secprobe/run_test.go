@@ -607,6 +607,28 @@ func TestRunWithRegistryPassesTimeoutToAtomicCredentialPlugin(t *testing.T) {
 	}
 }
 
+func TestRunWithRegistryBuiltinAtomicProtocolSkipsLegacyCompatibilityBranch(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterAtomicCredential("ftp", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+			FindingType: result.FindingTypeCredentialValid,
+		}}
+	}))
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target: "demo", ResolvedIP: "127.0.0.1", Port: 21, Service: "ftp",
+	}}, CredentialProbeOptions{
+		Credentials: []Credential{{Username: "admin", Password: "admin"}},
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected builtin atomic success, got %+v", out)
+	}
+}
+
 func TestRunUsesDefaultRegistryForRedisUnauthorized(t *testing.T) {
 	container := testutil.StartRedisNoAuth(t)
 

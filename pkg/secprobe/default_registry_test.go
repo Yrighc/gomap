@@ -252,3 +252,17 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 		}
 	}
 }
+
+func TestDefaultRegistryLeavesOnlyZookeeperOnBuiltinCoreUnauthorizedPath(t *testing.T) {
+	r := DefaultRegistry()
+
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "ftp", Port: 21}); !ok {
+		t.Fatal("expected ftp atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "memcached", Port: 11211}); !ok {
+		t.Fatal("expected memcached atomic unauthorized checker")
+	}
+	if _, ok := r.Lookup(SecurityCandidate{Service: "zookeeper", Port: 2181}, ProbeKindUnauthorized); !ok {
+		t.Fatal("expected zookeeper compatibility prober to remain")
+	}
+}

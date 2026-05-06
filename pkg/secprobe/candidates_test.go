@@ -245,6 +245,26 @@ func TestBuildCandidatesWithRegistryIncludesAtomicOnlyProtocol(t *testing.T) {
 	}
 }
 
+func TestBuildCandidatesWithRegistryIncludesBuiltinAtomicProtocolWithoutCoreFallback(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 21, Open: true, Service: "ftp"},
+		},
+	}
+
+	r := NewRegistry()
+	r.RegisterAtomicCredential("ftp", stubAtomicCandidateAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		return registrybridge.Attempt{Result: result.Attempt{Success: true, FindingType: result.FindingTypeCredentialValid}}
+	}))
+
+	candidates := buildCandidatesWithRegistry(res, CredentialProbeOptions{}, r)
+	if len(candidates) != 1 || candidates[0].Service != "ftp" {
+		t.Fatalf("expected ftp candidate through provider-first support detection, got %#v", candidates)
+	}
+}
+
 type stubProber struct{ name string }
 
 func (s stubProber) Name() string { return s.name }

@@ -10,36 +10,28 @@ import (
 	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
-type LegacyCredentialAdapter struct {
+type PublicCredentialAdapter struct {
 	Prober  core.Prober
 	Timeout time.Duration
 }
 
-func (a LegacyCredentialAdapter) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) Attempt {
-	return a.probeOnce(ctx, target, core.ProbeKindCredential, []core.Credential{{
+func (a PublicCredentialAdapter) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) Attempt {
+	return probePublicOnce(ctx, a.Prober, target, a.Timeout, core.ProbeKindCredential, []core.Credential{{
 		Username: cred.Username,
 		Password: cred.Password,
 	}})
 }
 
-type LegacyUnauthorizedAdapter struct {
+type PublicUnauthorizedAdapter struct {
 	Prober  core.Prober
 	Timeout time.Duration
 }
 
-func (a LegacyUnauthorizedAdapter) CheckUnauthorizedOnce(ctx context.Context, target strategy.Target) Attempt {
-	return a.probeOnce(ctx, target, core.ProbeKindUnauthorized, nil)
+func (a PublicUnauthorizedAdapter) CheckUnauthorizedOnce(ctx context.Context, target strategy.Target) Attempt {
+	return probePublicOnce(ctx, a.Prober, target, a.Timeout, core.ProbeKindUnauthorized, nil)
 }
 
-func (a LegacyCredentialAdapter) probeOnce(ctx context.Context, target strategy.Target, kind core.ProbeKind, creds []core.Credential) Attempt {
-	return probeLegacyOnce(ctx, a.Prober, target, a.Timeout, kind, creds)
-}
-
-func (a LegacyUnauthorizedAdapter) probeOnce(ctx context.Context, target strategy.Target, kind core.ProbeKind, creds []core.Credential) Attempt {
-	return probeLegacyOnce(ctx, a.Prober, target, a.Timeout, kind, creds)
-}
-
-func probeLegacyOnce(ctx context.Context, prober core.Prober, target strategy.Target, timeout time.Duration, kind core.ProbeKind, creds []core.Credential) Attempt {
+func probePublicOnce(ctx context.Context, prober core.Prober, target strategy.Target, timeout time.Duration, kind core.ProbeKind, creds []core.Credential) Attempt {
 	if prober == nil {
 		return Attempt{}
 	}
@@ -51,7 +43,7 @@ func probeLegacyOnce(ctx context.Context, prober core.Prober, target strategy.Ta
 	}
 	defer cancel()
 
-	legacy := normalizeLegacyResult(core.SecurityResult{
+	legacy := normalizePublicProbeResult(core.SecurityResult{
 		Target:      target.Host,
 		ResolvedIP:  target.IP,
 		Port:        target.Port,
@@ -75,14 +67,14 @@ func probeLegacyOnce(ctx context.Context, prober core.Prober, target strategy.Ta
 			Password:    legacy.Password,
 			Evidence:    legacy.Evidence,
 			Error:       legacy.Error,
-			ErrorCode:   legacyFailureReason(legacy),
-			FindingType: legacyFindingType(legacy, kind),
+			ErrorCode:   publicProbeFailureReason(legacy),
+			FindingType: publicProbeFindingType(legacy, kind),
 		},
 		Legacy: legacy,
 	}
 }
 
-func normalizeLegacyResult(base core.SecurityResult, out core.SecurityResult, kind core.ProbeKind) core.SecurityResult {
+func normalizePublicProbeResult(base core.SecurityResult, out core.SecurityResult, kind core.ProbeKind) core.SecurityResult {
 	if out.Target == "" {
 		out.Target = base.Target
 	}
@@ -102,12 +94,12 @@ func normalizeLegacyResult(base core.SecurityResult, out core.SecurityResult, ki
 		out.FindingType = defaultFindingTypeForKind(kind)
 	}
 	if out.FailureReason == "" && !out.Success {
-		out.FailureReason = inferFailureReason(out.Error)
+		out.FailureReason = inferPublicProbeFailure(out.Error)
 	}
 	return out
 }
 
-func legacyFindingType(out core.SecurityResult, kind core.ProbeKind) result.FindingType {
+func publicProbeFindingType(out core.SecurityResult, kind core.ProbeKind) result.FindingType {
 	if parsed, ok := result.ParseFindingType(out.FindingType); ok {
 		return parsed
 	}
@@ -117,11 +109,11 @@ func legacyFindingType(out core.SecurityResult, kind core.ProbeKind) result.Find
 	return result.FindingTypeCredentialValid
 }
 
-func legacyFailureReason(out core.SecurityResult) result.ErrorCode {
+func publicProbeFailureReason(out core.SecurityResult) result.ErrorCode {
 	if parsed, ok := result.ParseErrorCode(string(out.FailureReason)); ok {
 		return parsed
 	}
-	return inferFailureReason(out.Error)
+	return inferPublicProbeFailure(out.Error)
 }
 
 func defaultFindingTypeForKind(kind core.ProbeKind) string {
@@ -131,7 +123,7 @@ func defaultFindingTypeForKind(kind core.ProbeKind) string {
 	return core.FindingTypeCredentialValid
 }
 
-func inferFailureReason(message string) result.ErrorCode {
+func inferPublicProbeFailure(message string) result.ErrorCode {
 	text := strings.ToLower(message)
 	switch {
 	case text == "":
