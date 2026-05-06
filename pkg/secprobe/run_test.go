@@ -543,9 +543,9 @@ func TestRunWithRegistryPassesTimeoutToAtomicCredentialPlugin(t *testing.T) {
 		Port:       1234,
 		Service:    "atomicsvc",
 	}}, CredentialProbeOptions{
-		Timeout:         time.Second,
-		StopOnSuccess:   true,
-		Credentials:     []Credential{{Username: "root", Password: "password"}},
+		Timeout:       time.Second,
+		StopOnSuccess: true,
+		Credentials:   []Credential{{Username: "root", Password: "password"}},
 	})
 
 	if len(out.Results) != 1 || !out.Results[0].Success {
@@ -910,7 +910,7 @@ func TestRunRespectsWorkerPoolConcurrency(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
+func TestDefaultRegistryRegistersAtomicCredentialCapabilities(t *testing.T) {
 	r := DefaultRegistry()
 	for _, candidate := range []SecurityCandidate{
 		{Service: "ssh", Port: 22},
@@ -920,8 +920,14 @@ func TestDefaultRegistryRegistersProtocolProbers(t *testing.T) {
 		{Service: "redis", Port: 6379},
 		{Service: "telnet", Port: 23},
 	} {
-		if _, ok := r.Lookup(candidate, ProbeKindCredential); !ok {
-			t.Fatalf("expected prober for service %q", candidate.Service)
+		if !r.hasCapability(candidate, ProbeKindCredential) {
+			t.Fatalf("expected credential capability for service %q", candidate.Service)
+		}
+		if _, ok := r.lookupAtomicCredential(candidate); !ok {
+			t.Fatalf("expected atomic credential plugin for service %q", candidate.Service)
+		}
+		if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
+			t.Fatalf("expected credential lookup miss for service %q", candidate.Service)
 		}
 	}
 }

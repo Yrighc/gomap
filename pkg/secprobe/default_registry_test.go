@@ -2,217 +2,77 @@ package secprobe
 
 import "testing"
 
-func TestRegisterDefaultProbersRegistersBuiltinLookupTargets(t *testing.T) {
+func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	r := NewRegistry()
 	RegisterDefaultProbers(r)
 
-	tests := []struct {
-		name      string
-		candidate SecurityCandidate
-		kind      ProbeKind
-		want      string
-	}{
-		{
-			name:      "ssh credential",
-			candidate: SecurityCandidate{Service: "ssh", Port: 22},
-			kind:      ProbeKindCredential,
-			want:      "ssh",
-		},
-		{
-			name:      "redis credential",
-			candidate: SecurityCandidate{Service: "redis", Port: 6379},
-			kind:      ProbeKindCredential,
-			want:      "redis",
-		},
-		{
-			name:      "mssql credential",
-			candidate: SecurityCandidate{Service: "mssql", Port: 1433},
-			kind:      ProbeKindCredential,
-			want:      "mssql",
-		},
-		{
-			name:      "rdp credential",
-			candidate: SecurityCandidate{Service: "rdp", Port: 3389},
-			kind:      ProbeKindCredential,
-			want:      "rdp",
-		},
-		{
-			name:      "smtp credential",
-			candidate: SecurityCandidate{Service: "smtp", Port: 587},
-			kind:      ProbeKindCredential,
-			want:      "smtp",
-		},
-		{
-			name:      "oracle credential",
-			candidate: SecurityCandidate{Service: "oracle", Port: 1521},
-			kind:      ProbeKindCredential,
-			want:      "oracle",
-		},
-		{
-			name:      "snmp credential",
-			candidate: SecurityCandidate{Service: "snmp", Port: 161},
-			kind:      ProbeKindCredential,
-			want:      "snmp",
-		},
-		{
-			name:      "amqp credential",
-			candidate: SecurityCandidate{Service: "amqp", Port: 5672},
-			kind:      ProbeKindCredential,
-			want:      "amqp",
-		},
-		{
-			name:      "vnc credential",
-			candidate: SecurityCandidate{Service: "vnc", Port: 5900},
-			kind:      ProbeKindCredential,
-			want:      "vnc",
-		},
-		{
-			name:      "smb credential",
-			candidate: SecurityCandidate{Service: "smb", Port: 445},
-			kind:      ProbeKindCredential,
-			want:      "smb",
-		},
-		{
-			name:      "redis unauthorized",
-			candidate: SecurityCandidate{Service: "redis", Port: 6379},
-			kind:      ProbeKindUnauthorized,
-			want:      "redis-unauthorized",
-		},
-		{
-			name:      "mongodb unauthorized",
-			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
-			kind:      ProbeKindUnauthorized,
-			want:      "mongodb-unauthorized",
-		},
-		{
-			name:      "mongodb credential",
-			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
-			kind:      ProbeKindCredential,
-			want:      "mongodb",
-		},
-		{
-			name:      "memcached unauthorized",
-			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
-			kind:      ProbeKindUnauthorized,
-			want:      "memcached-unauthorized",
-		},
-		{
-			name:      "zookeeper unauthorized",
-			candidate: SecurityCandidate{Service: "zookeeper", Port: 2181},
-			kind:      ProbeKindUnauthorized,
-			want:      "zookeeper-unauthorized",
-		},
+	tests := []SecurityCandidate{
+		{Service: "ftp", Port: 21},
+		{Service: "ssh", Port: 22},
+		{Service: "telnet", Port: 23},
+		{Service: "mysql", Port: 3306},
+		{Service: "postgresql", Port: 5432},
+		{Service: "redis", Port: 6379},
+		{Service: "mssql", Port: 1433},
+		{Service: "smtp", Port: 587},
+		{Service: "oracle", Port: 1521},
+		{Service: "snmp", Port: 161},
+		{Service: "amqp", Port: 5672},
+		{Service: "rdp", Port: 3389},
+		{Service: "vnc", Port: 5900},
+		{Service: "smb", Port: 445},
+		{Service: "mongodb", Port: 27017},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			prober, ok := r.Lookup(tt.candidate, tt.kind)
-			if !ok {
-				t.Fatalf("expected built-in prober for %+v", tt.candidate)
+	for _, candidate := range tests {
+		t.Run(candidate.Service, func(t *testing.T) {
+			if _, ok := r.lookupAtomicCredential(candidate); !ok {
+				t.Fatalf("expected atomic credential plugin for %+v", candidate)
 			}
-			if got := prober.Name(); got != tt.want {
-				t.Fatalf("expected %q, got %q", tt.want, got)
+			if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential lookup miss for %+v", candidate)
+			}
+			if _, ok := r.lookupCore(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential core lookup miss for %+v", candidate)
 			}
 		})
 	}
 }
 
-func TestDefaultRegistryContainsBuiltinCredentialContract(t *testing.T) {
+func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 	r := DefaultRegistry()
 
-	tests := []struct {
-		name      string
-		candidate SecurityCandidate
-		kind      ProbeKind
-		wantOK    bool
-		wantName  string
-	}{
-		{name: "ftp credential", candidate: SecurityCandidate{Service: "ftp", Port: 21}, kind: ProbeKindCredential, wantOK: true, wantName: "ftp"},
-		{name: "ssh credential", candidate: SecurityCandidate{Service: "ssh", Port: 22}, kind: ProbeKindCredential, wantOK: true, wantName: "ssh"},
-		{name: "telnet credential", candidate: SecurityCandidate{Service: "telnet", Port: 23}, kind: ProbeKindCredential, wantOK: true, wantName: "telnet"},
-		{name: "mysql credential", candidate: SecurityCandidate{Service: "mysql", Port: 3306}, kind: ProbeKindCredential, wantOK: true, wantName: "mysql"},
-		{name: "postgresql credential", candidate: SecurityCandidate{Service: "postgresql", Port: 5432}, kind: ProbeKindCredential, wantOK: true, wantName: "postgresql"},
-		{name: "redis credential", candidate: SecurityCandidate{Service: "redis", Port: 6379}, kind: ProbeKindCredential, wantOK: true, wantName: "redis"},
-		{name: "mssql credential", candidate: SecurityCandidate{Service: "mssql", Port: 1433}, kind: ProbeKindCredential, wantOK: true, wantName: "mssql"},
-		{name: "smtp credential", candidate: SecurityCandidate{Service: "smtp", Port: 587}, kind: ProbeKindCredential, wantOK: true, wantName: "smtp"},
-		{name: "oracle credential", candidate: SecurityCandidate{Service: "oracle", Port: 1521}, kind: ProbeKindCredential, wantOK: true, wantName: "oracle"},
-		{name: "snmp credential", candidate: SecurityCandidate{Service: "snmp", Port: 161}, kind: ProbeKindCredential, wantOK: true, wantName: "snmp"},
-		{name: "amqp credential", candidate: SecurityCandidate{Service: "amqp", Port: 5672}, kind: ProbeKindCredential, wantOK: true, wantName: "amqp"},
-		{name: "rdp credential", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, kind: ProbeKindCredential, wantOK: true, wantName: "rdp"},
-		{name: "vnc credential", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, kind: ProbeKindCredential, wantOK: true, wantName: "vnc"},
-		{name: "smb credential", candidate: SecurityCandidate{Service: "smb", Port: 445}, kind: ProbeKindCredential, wantOK: true, wantName: "smb"},
-		{name: "memcached credential miss", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindCredential, wantOK: false},
-		{name: "memcached unauthorized hit", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "memcached-unauthorized"},
-		{name: "mongodb credential hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindCredential, wantOK: true, wantName: "mongodb"},
-		{name: "mongodb unauthorized hit", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "mongodb-unauthorized"},
-		{name: "zookeeper credential miss", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindCredential, wantOK: false},
-		{name: "zookeeper unauthorized hit", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, kind: ProbeKindUnauthorized, wantOK: true, wantName: "zookeeper-unauthorized"},
+	tests := []SecurityCandidate{
+		{Service: "ftp", Port: 21},
+		{Service: "ssh", Port: 22},
+		{Service: "telnet", Port: 23},
+		{Service: "mysql", Port: 3306},
+		{Service: "postgresql", Port: 5432},
+		{Service: "redis", Port: 6379},
+		{Service: "mssql", Port: 1433},
+		{Service: "smtp", Port: 587},
+		{Service: "oracle", Port: 1521},
+		{Service: "snmp", Port: 161},
+		{Service: "amqp", Port: 5672},
+		{Service: "rdp", Port: 3389},
+		{Service: "vnc", Port: 5900},
+		{Service: "smb", Port: 445},
+		{Service: "mongodb", Port: 27017},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			prober, ok := r.Lookup(tt.candidate, tt.kind)
-			if ok != tt.wantOK {
-				t.Fatalf("expected lookup result %t for %+v/%s, got %t", tt.wantOK, tt.candidate, tt.kind, ok)
+	for _, candidate := range tests {
+		t.Run(candidate.Service, func(t *testing.T) {
+			if !r.hasCapability(candidate, ProbeKindCredential) {
+				t.Fatalf("expected credential capability for %+v", candidate)
 			}
-			if !tt.wantOK {
-				return
+			if _, ok := r.lookupAtomicCredential(candidate); !ok {
+				t.Fatalf("expected atomic credential plugin for %+v", candidate)
 			}
-			if got := prober.Name(); got != tt.wantName {
-				t.Fatalf("expected default registry to resolve %q, got %q", tt.wantName, got)
+			if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential public lookup miss for %+v", candidate)
 			}
-		})
-	}
-}
-
-func TestDefaultRegistryBuiltinCredentialLookupUsesAtomicCredentialShim(t *testing.T) {
-	r := DefaultRegistry()
-
-	tests := []struct {
-		name      string
-		candidate SecurityCandidate
-		wantName  string
-	}{
-		{name: "ftp", candidate: SecurityCandidate{Service: "ftp", Port: 21}, wantName: "ftp"},
-		{name: "ssh", candidate: SecurityCandidate{Service: "ssh", Port: 22}, wantName: "ssh"},
-		{name: "telnet", candidate: SecurityCandidate{Service: "telnet", Port: 23}, wantName: "telnet"},
-		{name: "mysql", candidate: SecurityCandidate{Service: "mysql", Port: 3306}, wantName: "mysql"},
-		{name: "postgresql", candidate: SecurityCandidate{Service: "postgresql", Port: 5432}, wantName: "postgresql"},
-		{name: "redis", candidate: SecurityCandidate{Service: "redis", Port: 6379}, wantName: "redis"},
-		{name: "mssql", candidate: SecurityCandidate{Service: "mssql", Port: 1433}, wantName: "mssql"},
-		{name: "smtp", candidate: SecurityCandidate{Service: "smtp", Port: 587}, wantName: "smtp"},
-		{name: "oracle", candidate: SecurityCandidate{Service: "oracle", Port: 1521}, wantName: "oracle"},
-		{name: "snmp", candidate: SecurityCandidate{Service: "snmp", Port: 161}, wantName: "snmp"},
-		{name: "amqp", candidate: SecurityCandidate{Service: "amqp", Port: 5672}, wantName: "amqp"},
-		{name: "rdp", candidate: SecurityCandidate{Service: "rdp", Port: 3389}, wantName: "rdp"},
-		{name: "vnc", candidate: SecurityCandidate{Service: "vnc", Port: 5900}, wantName: "vnc"},
-		{name: "smb", candidate: SecurityCandidate{Service: "smb", Port: 445}, wantName: "smb"},
-		{name: "mongodb", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, wantName: "mongodb"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			prober, ok := r.Lookup(tt.candidate, ProbeKindCredential)
-			if !ok {
-				t.Fatalf("expected credential lookup hit for %+v", tt.candidate)
-			}
-			if got := prober.Name(); got != tt.wantName {
-				t.Fatalf("expected public credential prober %q, got %q", tt.wantName, got)
-			}
-
-			coreProber, ok := r.lookupCore(tt.candidate, ProbeKindCredential)
-			if !ok {
-				t.Fatalf("expected internal credential lookup hit for %+v", tt.candidate)
-			}
-			wrapped, ok := coreProber.(*registryProber)
-			if !ok {
-				t.Fatalf("expected wrapped registry prober for %+v, got %T", tt.candidate, coreProber)
-			}
-			if _, ok := wrapped.public.(corePublicProber); !ok {
-				t.Fatalf("expected builtin credential lookup for %+v to stay core-backed", tt.candidate)
-			}
-			if _, ok := wrapped.core.(defaultAtomicCredentialLookup); !ok {
-				t.Fatalf("expected builtin credential core shim for %+v, got %T", tt.candidate, wrapped.core)
+			if _, ok := r.lookupCore(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential core lookup miss for %+v", candidate)
 			}
 		})
 	}
@@ -252,9 +112,6 @@ func TestDefaultRegistryUnauthorizedLookupStillUsesLegacyCoreProbers(t *testing.
 			}
 			if _, ok := wrapped.public.(corePublicProber); !ok {
 				t.Fatalf("expected unauthorized lookup for %+v to keep core-backed public wrapper", tt.candidate)
-			}
-			if _, ok := wrapped.core.(defaultAtomicCredentialLookup); ok {
-				t.Fatalf("expected unauthorized lookup for %+v to avoid credential shim", tt.candidate)
 			}
 		})
 	}

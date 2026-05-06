@@ -218,6 +218,7 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - 协议元数据开始从硬编码 catalog 条目逐步收敛到 `app/secprobe/protocols/*.yaml`
 - `Run` / `RunWithRegistry` 会先把协议元数据与运行时参数编译成 `Plan`，再交给统一 engine 执行
 - 当前所有内置 `credential` 协议都已通过 atomic `AuthenticateOnce` 执行，默认 registry 不再直接依赖对应的 legacy credential core prober
+- builtin `credential` 能力仅通过 `lookupAtomicCredential(...)` / capability 路径表达，不再经由默认 registry 的 `Lookup(..., ProbeKindCredential)` 暴露成 batch prober
 - `credential` loop、`stop-on-success` 与 terminal-error 判定统一由 `pkg/secprobe/engine` 控制
 - legacy public-prober compatibility 仍暂时保留给 `unauthorized` 默认路径与外部扩展注册，后续只在完成替代路径后再继续收口
 - phase 2 已将历史内置协议目录迁移到 `app/secprobe/protocols/*.yaml`，保持既有 public API 与结果契约
