@@ -84,3 +84,19 @@ func TestLoadSpecsIncludesPhase2HistoricalContracts(t *testing.T) {
 		t.Fatalf("expected mongodb capabilities in metadata, got %+v", mongodb.Capabilities)
 	}
 }
+
+func TestLoadBuiltinKeepsUnauthorizedTemplateReferenceDeclarative(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	memcached, ok := specs["memcached"]
+	if !ok {
+		keys := slices.Sorted(maps.Keys(specs))
+		t.Fatalf("expected memcached spec, got keys %v", keys)
+	}
+	if memcached.Templates.Unauthorized != "memcached" {
+		t.Fatalf("expected memcached unauthorized template reference, got %+v", memcached.Templates)
+	}
+}

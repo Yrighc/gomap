@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mongodb.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt secprobe/protocols/*.yaml
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mongodb.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt secprobe/protocols/*.yaml secprobe/templates/unauthorized/*.yaml
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
@@ -73,4 +73,12 @@ func SecprobeProtocolFiles() ([]string, error) {
 
 func SecprobeProtocol(name string) ([]byte, error) {
 	return files.ReadFile("secprobe/protocols/" + name)
+}
+
+func SecprobeUnauthorizedTemplate(name string) ([]byte, error) {
+	return files.ReadFile("secprobe/templates/unauthorized/" + name)
+}
+
+func SecprobeUnauthorizedTemplateFiles() ([]string, error) {
+	return fs.Glob(files, "secprobe/templates/unauthorized/*.yaml")
 }

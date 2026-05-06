@@ -3,7 +3,6 @@ package secprobe
 import (
 	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
-	memcachedprobe "github.com/yrighc/gomap/internal/secprobe/memcached"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
@@ -18,6 +17,7 @@ import (
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
 	zookeeperprobe "github.com/yrighc/gomap/internal/secprobe/zookeeper"
+	"github.com/yrighc/gomap/pkg/secprobe/template"
 )
 
 func RegisterDefaultProbers(r *Registry) {
@@ -43,11 +43,15 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("snmp", snmpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mongodb", mongodbprobe.NewAuthenticator(nil))
 	r.RegisterAtomicUnauthorized("redis", redisprobe.NewUnauthorizedChecker(nil))
+	if templates, err := template.LoadBuiltinUnauthorized(); err == nil {
+		if tpl, ok := templates["memcached"]; ok {
+			r.RegisterAtomicUnauthorized("memcached", template.NewUnauthorizedChecker(tpl, nil))
+		}
+	}
 
 	r.registerCoreProber(mongodbprobe.NewUnauthorized())
 	r.registerCoreProber(zookeeperprobe.NewUnauthorized())
 	r.registerCoreProber(redisprobe.NewUnauthorized())
-	r.registerCoreProber(memcachedprobe.NewUnauthorized())
 }
 
 func DefaultRegistry() *Registry {

@@ -37,6 +37,7 @@ func normalizeSpec(spec Spec) Spec {
 	spec.Name = strings.ToLower(strings.TrimSpace(spec.Name))
 	spec.Aliases = normalizeStrings(spec.Aliases)
 	spec.Dictionary.DefaultSources = normalizeStrings(spec.Dictionary.DefaultSources)
+	spec.Templates.Unauthorized = strings.ToLower(strings.TrimSpace(spec.Templates.Unauthorized))
 	return spec
 }
 

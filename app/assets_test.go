@@ -1,6 +1,7 @@
 package appassets
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -96,5 +97,23 @@ func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSecprobeUnauthorizedTemplateResourcesLoad(t *testing.T) {
+	files, err := SecprobeUnauthorizedTemplateFiles()
+	if err != nil {
+		t.Fatalf("list unauthorized templates: %v", err)
+	}
+	if !slices.Contains(files, "secprobe/templates/unauthorized/memcached.yaml") {
+		t.Fatalf("expected memcached unauthorized template, got %v", files)
+	}
+
+	data, err := SecprobeUnauthorizedTemplate("memcached.yaml")
+	if err != nil {
+		t.Fatalf("load memcached unauthorized template: %v", err)
+	}
+	if !strings.Contains(string(data), "stats\\r\\n") {
+		t.Fatalf("expected memcached unauthorized template to contain stats request, got %q", string(data))
 	}
 }

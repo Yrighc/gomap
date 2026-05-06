@@ -17,3 +17,5 @@ dictionary:
 results:
   unauthorized_success_type: unauthorized_access
   evidence_profile: memcached_basic
+templates:
+  unauthorized: memcached

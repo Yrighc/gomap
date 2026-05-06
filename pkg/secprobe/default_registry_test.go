@@ -88,7 +88,6 @@ func TestDefaultRegistryUnauthorizedLookupStillUsesLegacyCoreProbers(t *testing.
 	}{
 		{name: "redis", candidate: SecurityCandidate{Service: "redis", Port: 6379}, wantName: "redis-unauthorized"},
 		{name: "mongodb", candidate: SecurityCandidate{Service: "mongodb", Port: 27017}, wantName: "mongodb-unauthorized"},
-		{name: "memcached", candidate: SecurityCandidate{Service: "memcached", Port: 11211}, wantName: "memcached-unauthorized"},
 		{name: "zookeeper", candidate: SecurityCandidate{Service: "zookeeper", Port: 2181}, wantName: "zookeeper-unauthorized"},
 	}
 
@@ -114,6 +113,24 @@ func TestDefaultRegistryUnauthorizedLookupStillUsesLegacyCoreProbers(t *testing.
 				t.Fatalf("expected unauthorized lookup for %+v to keep core-backed public wrapper", tt.candidate)
 			}
 		})
+	}
+}
+
+func TestDefaultRegistryRegistersMemcachedUnauthorizedAsAtomicOnly(t *testing.T) {
+	r := DefaultRegistry()
+	candidate := SecurityCandidate{Service: "memcached", Port: 11211}
+
+	if !r.hasCapability(candidate, ProbeKindUnauthorized) {
+		t.Fatalf("expected memcached unauthorized capability for %+v", candidate)
+	}
+	if _, ok := r.lookupAtomicUnauthorized(candidate); !ok {
+		t.Fatalf("expected memcached unauthorized atomic checker for %+v", candidate)
+	}
+	if _, ok := r.Lookup(candidate, ProbeKindUnauthorized); ok {
+		t.Fatalf("expected memcached unauthorized public lookup miss for %+v", candidate)
+	}
+	if _, ok := r.lookupCore(candidate, ProbeKindUnauthorized); ok {
+		t.Fatalf("expected memcached unauthorized core lookup miss for %+v", candidate)
 	}
 }
 
@@ -143,11 +160,6 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 			kind:      ProbeKindUnauthorized,
 		},
 		{
-			name:      "memcached unauthorized",
-			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
-			kind:      ProbeKindUnauthorized,
-		},
-		{
 			name:      "zookeeper unauthorized",
 			candidate: SecurityCandidate{Service: "zookeeper", Port: 2181},
 			kind:      ProbeKindUnauthorized,
@@ -167,6 +179,11 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 				t.Fatalf("expected lookup parity for %+v/%s, got default=%t registered=%t", tt.candidate, tt.kind, okDefault, okRegistered)
 			}
 			if !okDefault {
+				if tt.candidate.Service == "memcached" && tt.kind == ProbeKindUnauthorized {
+					if !defaultRegistry.hasCapability(tt.candidate, tt.kind) || !registeredRegistry.hasCapability(tt.candidate, tt.kind) {
+						t.Fatalf("expected memcached unauthorized capability parity for %+v/%s", tt.candidate, tt.kind)
+					}
+				}
 				return
 			}
 			if gotDefault.Name() != gotRegistered.Name() {
@@ -187,6 +204,13 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 	}
 	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
 		t.Fatal("expected redis atomic unauthorized plugin")
+	}
+}
+
+func TestDefaultRegistryRegistersMemcachedUnauthorizedTemplateChecker(t *testing.T) {
+	r := DefaultRegistry()
+	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "memcached", Port: 11211}); !ok {
+		t.Fatal("expected memcached unauthorized template checker")
 	}
 }
 

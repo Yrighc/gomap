@@ -1,0 +1,10 @@
+name: memcached
+transport: tcp
+request: "stats\r\n"
+matchers:
+  contains:
+    - "STAT version "
+    - "\r\nEND\r\n"
+success:
+  finding_type: unauthorized_access
+  evidence: stats returned version without authentication

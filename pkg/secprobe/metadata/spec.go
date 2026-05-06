@@ -8,6 +8,7 @@ type Spec struct {
 	PolicyTags   PolicyTags    `yaml:"policy_tags"`
 	Dictionary   Dictionary    `yaml:"dictionary"`
 	Results      ResultProfile `yaml:"results"`
+	Templates    TemplateRefs  `yaml:"templates"`
 }
 
 type Capabilities struct {
@@ -33,4 +34,8 @@ type ResultProfile struct {
 	CredentialSuccessType   string `yaml:"credential_success_type"`
 	UnauthorizedSuccessType string `yaml:"unauthorized_success_type"`
 	EvidenceProfile         string `yaml:"evidence_profile"`
+}
+
+type TemplateRefs struct {
+	Unauthorized string `yaml:"unauthorized"`
 }

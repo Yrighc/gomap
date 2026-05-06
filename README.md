@@ -223,6 +223,12 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - legacy public-prober compatibility 仍暂时保留给 `unauthorized` 默认路径与外部扩展注册，后续只在完成替代路径后再继续收口
 - phase 2 已将历史内置协议目录迁移到 `app/secprobe/protocols/*.yaml`，保持既有 public API 与结果契约
 
+### 5.4.3 secprobe engine phase 4
+
+- `memcached` unauthorized detection now uses a declarative simple-template executor
+- Templates remain bounded to one transport, one request, and matcher-based confirmation
+- `zookeeper` stays code-backed because it requires a real session client and is not a simple request/response protocol
+
 ### 5.5 端口扫描后附加弱口令探测
 
 ```bash
