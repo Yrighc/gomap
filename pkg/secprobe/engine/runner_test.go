@@ -177,7 +177,7 @@ func TestRunnerStopsCredentialLoopOnTimeout(t *testing.T) {
 	}
 }
 
-func TestRunnerStopsCredentialLoopOnCanceledCredentialAttempt(t *testing.T) {
+func TestRunnerStopsCredentialLoopOnCanceledAcrossAtomicPlugins(t *testing.T) {
 	var attempts atomic.Int32
 	auth := stubAuthenticator(func(context.Context, strategy.Target, strategy.Credential) atomregistry.Attempt {
 		attempts.Add(1)
