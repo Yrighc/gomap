@@ -57,6 +57,23 @@ func TestAuthenticatorAuthenticateOnceReturnsCredentialValid(t *testing.T) {
 	}
 }
 
+func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return errors.New("Exception (403) Reason: \"ACCESS_REFUSED - Login was refused using authentication mechanism PLAIN\"")
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "mq.internal",
+		IP:       "127.0.0.1",
+		Port:     5672,
+		Protocol: "amqp",
+	}, strategy.Credential{Username: "guest", Password: "wrong"})
+
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication code, got %+v", out)
+	}
+}
+
 func TestAMQPProberFindsValidCredentialAfterChannelConfirmation(t *testing.T) {
 	originalDial := dialAMQP
 	t.Cleanup(func() {

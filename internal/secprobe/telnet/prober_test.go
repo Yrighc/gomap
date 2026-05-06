@@ -47,6 +47,23 @@ func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
 	}
 }
 
+func TestAuthenticatorAuthenticateOnceMapsCanceledFailure(t *testing.T) {
+	auth := telnetprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return context.Canceled
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     23,
+		Protocol: "telnet",
+	}, strategy.Credential{Username: "admin", Password: "admin"})
+
+	if out.Result.ErrorCode != result.ErrorCodeCanceled {
+		t.Fatalf("expected canceled code, got %+v", out)
+	}
+}
+
 func TestTelnetProberStopsAfterSuccess(t *testing.T) {
 	server := testutil.StartFakeTelnet(t, "admin", "admin")
 

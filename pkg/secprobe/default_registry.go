@@ -35,6 +35,8 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("smtp", smtpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("telnet", telnetprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))
+
+	// Temporary builtin bridge until phase 5 cleanup.
 	r.RegisterAtomicCredential("oracle", registrybridge.LegacyCredentialAdapter{Prober: oracledbprobe.New()})
 	r.RegisterAtomicCredential("rdp", registrybridge.LegacyCredentialAdapter{Prober: rdpprobe.New()})
 	r.RegisterAtomicCredential("vnc", registrybridge.LegacyCredentialAdapter{Prober: vncprobe.New()})

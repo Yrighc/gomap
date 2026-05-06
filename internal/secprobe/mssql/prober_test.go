@@ -84,6 +84,23 @@ func TestAuthenticatorAuthenticateOnceMapsAuthenticationFailure(t *testing.T) {
 	}
 }
 
+func TestAuthenticatorAuthenticateOnceMapsCanceledFailure(t *testing.T) {
+	auth := NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+		return context.Canceled
+	})
+
+	out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "demo",
+		IP:       "127.0.0.1",
+		Port:     1433,
+		Protocol: "mssql",
+	}, strategy.Credential{Username: "sa", Password: "secret"})
+
+	if out.Result.ErrorCode != result.ErrorCodeCanceled {
+		t.Fatalf("expected canceled code, got %+v", out)
+	}
+}
+
 func TestMSSQLProberFindsValidCredential(t *testing.T) {
 	originalOpen := openMSSQL
 	t.Cleanup(func() {

@@ -36,6 +36,36 @@ func TestFTPAuthenticatorAuthenticateOnce(t *testing.T) {
 	}
 }
 
+func TestFTPAuthenticatorAuthenticateOnceMapsFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want result.ErrorCode
+	}{
+		{name: "authentication", err: errors.New("530 Login incorrect"), want: result.ErrorCodeAuthentication},
+		{name: "connection", err: errors.New("dial tcp 127.0.0.1:21: connect: connection refused"), want: result.ErrorCodeConnection},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth := ftpprobe.NewAuthenticator(func(context.Context, strategy.Target, strategy.Credential) error {
+				return tt.err
+			})
+
+			out := auth.AuthenticateOnce(context.Background(), strategy.Target{
+				Host:     "demo",
+				IP:       "127.0.0.1",
+				Port:     21,
+				Protocol: "ftp",
+			}, strategy.Credential{Username: "admin", Password: "wrong"})
+
+			if out.Result.ErrorCode != tt.want {
+				t.Fatalf("expected %q, got %+v", tt.want, out)
+			}
+		})
+	}
+}
+
 func TestFTPProberFindsValidCredential(t *testing.T) {
 	container := testutil.StartLinuxServer(t, testutil.LinuxServerConfig{
 		Username: "testftp",
