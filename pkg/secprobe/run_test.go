@@ -290,6 +290,60 @@ func TestRunWithRegistryFallsBackToCredentialAfterUnauthorizedFailure(t *testing
 	}
 }
 
+func TestRunWithRegistryFallsBackToAtomicCredentialAfterLegacyUnauthorizedFailure(t *testing.T) {
+	registry := NewRegistry()
+	var atomicCalls int32
+
+	registry.Register(&stubKindedProber{
+		name:    "redis-unauth",
+		kind:    ProbeKindUnauthorized,
+		service: "redis",
+		result: SecurityResult{
+			Service:     "redis",
+			ProbeKind:   ProbeKindUnauthorized,
+			FindingType: FindingTypeUnauthorizedAccess,
+			Error:       "authentication required",
+		},
+	})
+	registry.RegisterAtomicCredential("redis", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		atomic.AddInt32(&atomicCalls, 1)
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "atomic redis auth",
+		}}
+	}))
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		EnableUnauthorized: true,
+		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if !got.Success {
+		t.Fatalf("expected atomic credential fallback success after legacy unauthorized failure, got %+v", got)
+	}
+	if got.ProbeKind != ProbeKindCredential {
+		t.Fatalf("expected credential result after legacy unauthorized failure, got %+v", got)
+	}
+	if got.Evidence != "atomic redis auth" {
+		t.Fatalf("expected atomic credential evidence, got %+v", got)
+	}
+	if atomic.LoadInt32(&atomicCalls) != 1 {
+		t.Fatalf("expected exactly one atomic credential attempt, got %d", atomicCalls)
+	}
+}
+
 func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{

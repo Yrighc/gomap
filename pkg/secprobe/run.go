@@ -141,7 +141,7 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
 		return markSkipped(result, core.SkipReasonProbeDisabled, "unsupported protocol"), probeSkipped
 	}
-	if usesLegacyPublicProber(credentialProber) || usesLegacyPublicProber(unauthorizedProber) {
+	if usesLegacyPublicProber(credentialProber) {
 		return probeCandidateLegacy(ctx, registry, candidate, opts, credentialProber, hasCredential, unauthorizedProber, hasUnauthorized)
 	}
 
