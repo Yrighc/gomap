@@ -237,3 +237,29 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 		t.Fatal("expected redis atomic unauthorized plugin")
 	}
 }
+
+func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialProtocols(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []SecurityCandidate{
+		{Service: "ftp", Port: 21},
+		{Service: "mssql", Port: 1433},
+		{Service: "mysql", Port: 3306},
+		{Service: "postgresql", Port: 5432},
+		{Service: "smtp", Port: 25},
+		{Service: "telnet", Port: 23},
+		{Service: "amqp", Port: 5672},
+		{Service: "oracle", Port: 1521},
+		{Service: "rdp", Port: 3389},
+		{Service: "vnc", Port: 5900},
+		{Service: "smb", Port: 445},
+		{Service: "snmp", Port: 161},
+		{Service: "mongodb", Port: 27017},
+	}
+
+	for _, candidate := range tests {
+		if _, ok := r.lookupAtomicCredential(candidate); !ok {
+			t.Fatalf("expected atomic credential plugin for %+v", candidate)
+		}
+	}
+}

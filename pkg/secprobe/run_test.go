@@ -427,6 +427,36 @@ func TestRunWithRegistryPrefersAtomicCredentialPluginOverLegacyCoreProber(t *tes
 	}
 }
 
+func TestRunWithRegistryUsesAtomicCredentialPathForBuiltinFTP(t *testing.T) {
+	registry := NewRegistry()
+
+	var calls int32
+	registry.RegisterAtomicCredential("ftp", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		atomic.AddInt32(&calls, 1)
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "FTP authentication succeeded",
+		}}
+	}))
+
+	out := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target: "demo", ResolvedIP: "127.0.0.1", Port: 21, Service: "ftp",
+	}}, CredentialProbeOptions{
+		Credentials:   []Credential{{Username: "admin", Password: "admin"}},
+		StopOnSuccess: true,
+	})
+
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Fatalf("expected atomic success, got %+v", out)
+	}
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("expected exactly one atomic attempt, got %d", calls)
+	}
+}
+
 func TestRunWithRegistryPrefersAtomicUnauthorizedPluginOverLegacyCoreProber(t *testing.T) {
 	registry := NewRegistry()
 	registry.RegisterAtomicUnauthorized("redis", stubAtomicUnauthorizedChecker(func(context.Context, strategy.Target) registrybridge.Attempt {

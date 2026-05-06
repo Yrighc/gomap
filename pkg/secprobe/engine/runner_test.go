@@ -177,6 +177,36 @@ func TestRunnerStopsCredentialLoopOnTimeout(t *testing.T) {
 	}
 }
 
+func TestRunnerStopsCredentialLoopOnCanceledAcrossAtomicPlugins(t *testing.T) {
+	var attempts atomic.Int32
+	auth := stubAuthenticator(func(context.Context, strategy.Target, strategy.Credential) atomregistry.Attempt {
+		attempts.Add(1)
+		return atomregistry.Attempt{Result: result.Attempt{
+			Error:       "context canceled",
+			ErrorCode:   result.ErrorCodeCanceled,
+			FindingType: result.FindingTypeCredentialValid,
+		}}
+	})
+
+	out := Run(context.Background(), strategy.Plan{
+		Capabilities: []strategy.Capability{strategy.CapabilityCredential},
+		Execution:    strategy.ExecutionPolicy{StopOnFirstSuccess: false},
+	}, Input{
+		Credentials: []strategy.Credential{
+			{Username: "a", Password: "1"},
+			{Username: "a", Password: "2"},
+		},
+		Authenticator: auth,
+	})
+
+	if out.Success {
+		t.Fatalf("expected canceled failure, got %+v", out)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("expected terminal cancellation after one attempt, got %d", got)
+	}
+}
+
 type stubAuthenticator func(context.Context, strategy.Target, strategy.Credential) atomregistry.Attempt
 
 func (f stubAuthenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) atomregistry.Attempt {
