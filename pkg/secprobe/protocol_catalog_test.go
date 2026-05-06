@@ -124,6 +124,29 @@ func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing
 	}
 }
 
+func TestLookupProtocolSpecRejectsSNMPMetadataTokenMatchOnWrongPort(t *testing.T) {
+	restore := swapMetadataSpecLoaderForTest(func() (map[string]metadata.Spec, error) {
+		return map[string]metadata.Spec{
+			"snmp": {
+				Name:  "snmp",
+				Ports: []int{161},
+				Dictionary: metadata.Dictionary{
+					DefaultSources: []string{"snmp"},
+				},
+				Capabilities: metadata.Capabilities{
+					Credential: true,
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	spec, ok := LookupProtocolSpec("snmp", 162)
+	if ok {
+		t.Fatalf("expected strict snmp metadata token match to reject wrong port, got %+v", spec)
+	}
+}
+
 func TestLookupProtocolSpecPhase2MetadataMatchesHistoricalLegacyContracts(t *testing.T) {
 	tests := []struct {
 		service string

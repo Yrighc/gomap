@@ -229,6 +229,129 @@ func TestCompileCredentialSourceSelection(t *testing.T) {
 	}
 }
 
+func TestCompileConsumesSNMPMetadataFields(t *testing.T) {
+	t.Parallel()
+
+	spec := metadata.Spec{
+		Name: "snmp",
+		Capabilities: metadata.Capabilities{
+			Credential: true,
+		},
+		PolicyTags: metadata.PolicyTags{
+			LockoutRisk: "low",
+			AuthFamily:  "community",
+			Transport:   "udp",
+		},
+		Dictionary: metadata.Dictionary{
+			DefaultSources:     []string{"snmp"},
+			AllowEmptyUsername: true,
+			AllowEmptyPassword: false,
+			ExpansionProfile:   "static_basic",
+		},
+		Results: metadata.ResultProfile{
+			CredentialSuccessType: "credential_valid",
+			EvidenceProfile:       "snmp_basic",
+		},
+	}
+
+	plan := Compile(spec, CompileInput{
+		Target:  "demo",
+		IP:      "127.0.0.1",
+		Port:    161,
+		Timeout: 1500 * time.Millisecond,
+	})
+
+	if !reflect.DeepEqual(plan.Capabilities, []Capability{CapabilityCredential}) {
+		t.Fatalf("Capabilities = %v, want %v", plan.Capabilities, []Capability{CapabilityCredential})
+	}
+	if plan.Credentials.Source != CredentialSourceBuiltin {
+		t.Fatalf("Source = %q, want %q", plan.Credentials.Source, CredentialSourceBuiltin)
+	}
+	if !reflect.DeepEqual(plan.Credentials.Dictionaries, []string{"snmp"}) {
+		t.Fatalf("Dictionaries = %v, want %v", plan.Credentials.Dictionaries, []string{"snmp"})
+	}
+	if !plan.Credentials.AllowEmptyUser {
+		t.Fatalf("AllowEmptyUser = %v, want true", plan.Credentials.AllowEmptyUser)
+	}
+	if plan.Credentials.AllowEmptyPass {
+		t.Fatalf("AllowEmptyPass = %v, want false", plan.Credentials.AllowEmptyPass)
+	}
+	if plan.Credentials.ExpansionProfile != "static_basic" {
+		t.Fatalf("ExpansionProfile = %q, want %q", plan.Credentials.ExpansionProfile, "static_basic")
+	}
+	if plan.Execution.ConcurrencyValue != 10 {
+		t.Fatalf("ConcurrencyValue = %d, want %d", plan.Execution.ConcurrencyValue, 10)
+	}
+	if plan.Execution.TimeoutSeconds != 2 {
+		t.Fatalf("TimeoutSeconds = %d, want %d", plan.Execution.TimeoutSeconds, 2)
+	}
+	if plan.Results.CredentialSuccessType != "credential_valid" {
+		t.Fatalf("CredentialSuccessType = %q, want %q", plan.Results.CredentialSuccessType, "credential_valid")
+	}
+	if plan.Results.EvidenceProfile != "snmp_basic" {
+		t.Fatalf("EvidenceProfile = %q, want %q", plan.Results.EvidenceProfile, "snmp_basic")
+	}
+}
+
+func TestCompileConsumesUnauthorizedOnlyMetadataFields(t *testing.T) {
+	t.Parallel()
+
+	spec := metadata.Spec{
+		Name: "memcached",
+		Capabilities: metadata.Capabilities{
+			Credential:   false,
+			Unauthorized: true,
+		},
+		PolicyTags: metadata.PolicyTags{
+			LockoutRisk: "low",
+			AuthFamily:  "none",
+			Transport:   "tcp",
+		},
+		Dictionary: metadata.Dictionary{
+			DefaultSources:     []string{},
+			AllowEmptyUsername: false,
+			AllowEmptyPassword: false,
+			ExpansionProfile:   "none",
+		},
+		Results: metadata.ResultProfile{
+			UnauthorizedSuccessType: "unauthorized_access",
+			EvidenceProfile:         "memcached_basic",
+		},
+	}
+
+	plan := Compile(spec, CompileInput{
+		Target:             "demo",
+		IP:                 "127.0.0.1",
+		Port:               11211,
+		EnableUnauthorized: true,
+	})
+
+	if !reflect.DeepEqual(plan.Capabilities, []Capability{CapabilityUnauthorized}) {
+		t.Fatalf("Capabilities = %v, want %v", plan.Capabilities, []Capability{CapabilityUnauthorized})
+	}
+	if plan.Credentials.Source != CredentialSourceBuiltin {
+		t.Fatalf("Source = %q, want %q", plan.Credentials.Source, CredentialSourceBuiltin)
+	}
+	if len(plan.Credentials.Dictionaries) != 0 {
+		t.Fatalf("Dictionaries = %v, want empty", plan.Credentials.Dictionaries)
+	}
+	if plan.Credentials.AllowEmptyUser {
+		t.Fatalf("AllowEmptyUser = %v, want false", plan.Credentials.AllowEmptyUser)
+	}
+	if plan.Credentials.AllowEmptyPass {
+		t.Fatalf("AllowEmptyPass = %v, want false", plan.Credentials.AllowEmptyPass)
+	}
+	if plan.Credentials.ExpansionProfile != "none" {
+		t.Fatalf("ExpansionProfile = %q, want %q", plan.Credentials.ExpansionProfile, "none")
+	}
+	if plan.Results.UnauthorizedSuccessType != "unauthorized_access" {
+		t.Fatalf("UnauthorizedSuccessType = %q, want %q", plan.Results.UnauthorizedSuccessType, "unauthorized_access")
+	}
+	if plan.Results.EvidenceProfile != "memcached_basic" {
+		t.Fatalf("EvidenceProfile = %q, want %q", plan.Results.EvidenceProfile, "memcached_basic")
+	}
+}
+
 func testSpec() metadata.Spec {
 	return metadata.Spec{
 		Name: "redis",
