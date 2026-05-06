@@ -1,0 +1,20 @@
+name: rdp
+ports:
+  - 3389
+capabilities:
+  credential: true
+  unauthorized: false
+  enrichment: false
+policy_tags:
+  lockout_risk: medium
+  auth_family: password
+  transport: tcp
+dictionary:
+  default_sources:
+    - rdp
+  allow_empty_username: false
+  allow_empty_password: false
+  expansion_profile: static_basic
+results:
+  credential_success_type: credential_valid
+  evidence_profile: rdp_basic

@@ -1,0 +1,20 @@
+name: vnc
+ports:
+  - 5900
+capabilities:
+  credential: true
+  unauthorized: false
+  enrichment: false
+policy_tags:
+  lockout_risk: low
+  auth_family: password
+  transport: tcp
+dictionary:
+  default_sources:
+    - vnc
+  allow_empty_username: true
+  allow_empty_password: false
+  expansion_profile: static_basic
+results:
+  credential_success_type: credential_valid
+  evidence_profile: vnc_basic

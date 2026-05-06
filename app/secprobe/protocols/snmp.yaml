@@ -1,0 +1,20 @@
+name: snmp
+ports:
+  - 161
+capabilities:
+  credential: true
+  unauthorized: false
+  enrichment: false
+policy_tags:
+  lockout_risk: low
+  auth_family: community
+  transport: udp
+dictionary:
+  default_sources:
+    - snmp
+  allow_empty_username: true
+  allow_empty_password: false
+  expansion_profile: static_basic
+results:
+  credential_success_type: credential_valid
+  evidence_profile: snmp_basic
