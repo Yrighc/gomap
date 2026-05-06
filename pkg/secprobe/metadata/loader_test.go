@@ -39,3 +39,22 @@ func TestLoadSpecsIncludesRedisAndSSHAliases(t *testing.T) {
 		t.Fatalf("expected ssh aliases empty, got %+v", ssh.Aliases)
 	}
 }
+
+func TestLoadSpecsIncludesAllBuiltinProtocolNamesAfterPhase2(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	want := []string{
+		"amqp", "ftp", "memcached", "mongodb", "mssql", "mysql",
+		"oracle", "postgresql", "rdp", "redis", "smb", "smtp",
+		"snmp", "ssh", "telnet", "vnc", "zookeeper",
+	}
+
+	for _, name := range want {
+		if _, ok := specs[name]; !ok {
+			t.Fatalf("expected %s spec, got keys %v", name, slices.Sorted(maps.Keys(specs)))
+		}
+	}
+}

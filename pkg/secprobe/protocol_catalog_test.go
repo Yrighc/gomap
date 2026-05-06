@@ -124,6 +124,108 @@ func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing
 	}
 }
 
+func TestLookupProtocolSpecPhase2MetadataMatchesHistoricalLegacyContracts(t *testing.T) {
+	tests := []struct {
+		service string
+		port    int
+		want    ProtocolSpec
+	}{
+		{
+			service: "ftp",
+			want: ProtocolSpec{
+				Name:       "ftp",
+				Ports:      []int{21},
+				DictNames:  []string{"ftp"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			service: "memcached",
+			want: ProtocolSpec{
+				Name:       "memcached",
+				Ports:      []int{11211},
+				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
+			},
+		},
+		{
+			service: "mongo",
+			want: ProtocolSpec{
+				Name:               "mongodb",
+				Aliases:            []string{"mongo"},
+				Ports:              []int{27017},
+				DictNames:          []string{"mongodb", "mongo"},
+				ProbeKinds:         []ProbeKind{ProbeKindCredential, ProbeKindUnauthorized},
+				SupportsEnrichment: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		spec, ok := LookupProtocolSpec(tt.service, tt.port)
+		if !ok {
+			t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
+		}
+		if !reflect.DeepEqual(spec, tt.want) {
+			t.Fatalf("expected %#v, got %#v", tt.want, spec)
+		}
+	}
+}
+
+func TestLookupProtocolSpecPhase2BatchAMetadataProtocols(t *testing.T) {
+	tests := []struct {
+		service string
+		port    int
+		want    ProtocolSpec
+	}{
+		{
+			service: "ftp",
+			want: ProtocolSpec{
+				Name:       "ftp",
+				Ports:      []int{21},
+				DictNames:  []string{"ftp"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			service: "mssql",
+			want: ProtocolSpec{
+				Name:       "mssql",
+				Ports:      []int{1433},
+				DictNames:  []string{"mssql"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			port: 3306,
+			want: ProtocolSpec{
+				Name:       "mysql",
+				Ports:      []int{3306},
+				DictNames:  []string{"mysql"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+		{
+			service: "telnet",
+			want: ProtocolSpec{
+				Name:       "telnet",
+				Ports:      []int{23},
+				DictNames:  []string{"telnet"},
+				ProbeKinds: []ProbeKind{ProbeKindCredential},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		spec, ok := LookupProtocolSpec(tt.service, tt.port)
+		if !ok {
+			t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
+		}
+		if !reflect.DeepEqual(spec, tt.want) {
+			t.Fatalf("expected %#v, got %#v", tt.want, spec)
+		}
+	}
+}
+
 func TestLookupProtocolSpecIncludesPhaseOneCredentialProtocols(t *testing.T) {
 	tests := []struct {
 		name    string
