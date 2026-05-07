@@ -153,3 +153,50 @@ func TestNormalizeSpecNormalizesDictionaryDefaultTiers(t *testing.T) {
 		t.Fatalf("expected normalized default tiers, got %v", spec.Dictionary.DefaultTiers)
 	}
 }
+
+func TestNormalizeSpecNormalizesDictionaryDefaultsAndAliases(t *testing.T) {
+	spec := normalizeSpec(Spec{
+		Name:    " Redis ",
+		Aliases: []string{" Redis/TLS ", "", "REDIS/SSL"},
+		Dictionary: Dictionary{
+			DefaultSources: []string{" Builtin ", "", "USER"},
+			DefaultTiers:   []string{" Top ", "", "COMMON "},
+		},
+		Templates: TemplateRefs{
+			Unauthorized: " Redis ",
+		},
+	})
+
+	if spec.Name != "redis" {
+		t.Fatalf("expected normalized name redis, got %q", spec.Name)
+	}
+	if !slices.Equal(spec.Aliases, []string{"redis/tls", "redis/ssl"}) {
+		t.Fatalf("expected normalized aliases, got %v", spec.Aliases)
+	}
+	if !slices.Equal(spec.Dictionary.DefaultSources, []string{"builtin", "user"}) {
+		t.Fatalf("expected normalized default sources, got %v", spec.Dictionary.DefaultSources)
+	}
+	if !slices.Equal(spec.Dictionary.DefaultTiers, []string{"top", "common"}) {
+		t.Fatalf("expected normalized default tiers, got %v", spec.Dictionary.DefaultTiers)
+	}
+	if spec.Templates.Unauthorized != "redis" {
+		t.Fatalf("expected normalized unauthorized template ref, got %q", spec.Templates.Unauthorized)
+	}
+}
+
+func TestNormalizeSpecDropsEmptyDictionaryDefaults(t *testing.T) {
+	spec := normalizeSpec(Spec{
+		Name: "ssh",
+		Dictionary: Dictionary{
+			DefaultSources: []string{"", " ", "\t"},
+			DefaultTiers:   []string{"", " ", "\n"},
+		},
+	})
+
+	if spec.Dictionary.DefaultSources != nil {
+		t.Fatalf("expected empty default sources to normalize to nil, got %v", spec.Dictionary.DefaultSources)
+	}
+	if spec.Dictionary.DefaultTiers != nil {
+		t.Fatalf("expected empty default tiers to normalize to nil, got %v", spec.Dictionary.DefaultTiers)
+	}
+}

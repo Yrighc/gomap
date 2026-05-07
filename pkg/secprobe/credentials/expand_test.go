@@ -95,3 +95,37 @@ func TestExpandWithoutStaticBasicOnlyDedupes(t *testing.T) {
 		t.Fatalf("Expand() = %+v, want %+v", got, want)
 	}
 }
+
+func TestExpandEmptyBaseReturnsNil(t *testing.T) {
+	got := Expand(nil, Options{Profile: "static_basic"})
+	if got != nil {
+		t.Fatalf("Expand() = %+v, want nil", got)
+	}
+}
+
+func TestExpandStaticBasicSkipsUsernameDerivedVariantsForEmptyUsername(t *testing.T) {
+	base := []strategy.Credential{
+		{Username: "", Password: "nopass"},
+		{Username: "admin", Password: "secret"},
+	}
+
+	got := Expand(base, Options{
+		Profile:        " static_basic ",
+		AllowEmptyUser: true,
+		AllowEmptyPass: true,
+	})
+	want := []strategy.Credential{
+		{Username: "", Password: "nopass"},
+		{Username: "admin", Password: "secret"},
+		{Username: "", Password: ""},
+		{Username: "admin", Password: "admin"},
+		{Username: "admin", Password: "admin123"},
+		{Username: "admin", Password: "admin@123"},
+		{Username: "", Password: "secret"},
+		{Username: "admin", Password: ""},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Expand() = %+v, want %+v", got, want)
+	}
+}

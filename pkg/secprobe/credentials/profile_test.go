@@ -55,3 +55,28 @@ func TestProfileFromMetadataFallsBackToTopCommonDefaultTiers(t *testing.T) {
 		t.Fatalf("ProfileFromMetadata() = %#v, want %#v", got, want)
 	}
 }
+
+func TestProfileFromMetadataFallsBackWhenDefaultTiersNormalizeToEmpty(t *testing.T) {
+	dict := metadata.Dictionary{
+		DefaultSources:     []string{"mqtt"},
+		DefaultTiers:       []string{" ", "\t", ""},
+		AllowEmptyUsername: false,
+		AllowEmptyPassword: false,
+		ExpansionProfile:   "static_basic",
+	}
+
+	got := ProfileFromMetadata(" MQTT ", dict)
+	want := CredentialProfile{
+		Protocol:           "mqtt",
+		DefaultSources:     []string{"mqtt"},
+		DefaultTiers:       []Tier{TierTop, TierCommon},
+		ScanProfile:        ScanProfileDefault,
+		AllowEmptyUsername: false,
+		AllowEmptyPassword: false,
+		ExpansionProfile:   "static_basic",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProfileFromMetadata() = %#v, want %#v", got, want)
+	}
+}
