@@ -131,39 +131,57 @@ func runWithRegistryInternal(ctx context.Context, registry *Registry, candidates
 	return result
 }
 
+// probeCandidate 检查安全候选人的凭证和未授权访问情况
+// 参数:
+//   - ctx: 上下文信息，用于控制请求的超时和取消
+//   - registry: 注册表，包含各种安全检查器
+//   - candidate: 安全候选人，需要进行检查的目标
+//   - opts: 凭证检查选项，包含超时等配置
+//
+// 返回值:
+//   - core.SecurityResult: 安全检查结果
+//   - probeStatus: 探查状态，表示检查是否成功、失败或跳过
 func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions) (core.SecurityResult, probeStatus) {
-	credentialProber, _ := registry.lookupCore(candidate, ProbeKindCredential)
-	hasCredential := registry.hasCapability(candidate, ProbeKindCredential)
-	hasUnauthorized := registry.hasCapability(candidate, ProbeKindUnauthorized)
-	hasBuiltinCredential := registry.hasBuiltinProvider(candidate, ProbeKindCredential)
-	hasBuiltinUnauthorized := registry.hasBuiltinProvider(candidate, ProbeKindUnauthorized)
-	hasCompatibilityCredential := registry.hasCompatibilityProber(candidate, ProbeKindCredential)
-	hasCompatibilityUnauthorized := registry.hasCompatibilityProber(candidate, ProbeKindUnauthorized)
 
+	// 查找凭证检查器，并检查是否具有各种能力
+	credentialProber, _ := registry.lookupCore(candidate, ProbeKindCredential)                        // 查找核心凭证检查器
+	hasCredential := registry.hasCapability(candidate, ProbeKindCredential)                           // 是否具有凭证能力
+	hasUnauthorized := registry.hasCapability(candidate, ProbeKindUnauthorized)                       // 是否具有未授权访问能力
+	hasBuiltinCredential := registry.hasBuiltinProvider(candidate, ProbeKindCredential)               // 是否具有内置凭证提供者
+	hasBuiltinUnauthorized := registry.hasBuiltinProvider(candidate, ProbeKindUnauthorized)           // 是否具有内置未授权访问提供者
+	hasCompatibilityCredential := registry.hasCompatibilityProber(candidate, ProbeKindCredential)     // 是否具有兼容性凭证检查器
+	hasCompatibilityUnauthorized := registry.hasCompatibilityProber(candidate, ProbeKindUnauthorized) // 是否具有兼容性未授权访问检查器
+
+	// 如果没有凭证能力但有未授权访问能力，且未启用未授权访问，则跳过检查
 	if !hasCredential && hasUnauthorized && !opts.EnableUnauthorized {
 		result := markMatched(defaultResultForCandidateKind(candidate, ProbeKindUnauthorized))
 		return markSkipped(result, core.SkipReasonProbeDisabled, "unsupported protocol"), probeSkipped
 	}
+	// 如果没有内置凭证和未授权访问能力，但有兼容性凭证检查器，并且使用兼容性公共检查器，则使用传统方式检查
 	if !hasBuiltinCredential && !hasBuiltinUnauthorized && hasCompatibilityCredential && usesCompatibilityPublicProber(credentialProber) {
 		unauthorizedProber, _ := registry.lookupCore(candidate, ProbeKindUnauthorized)
 		return probeCandidateLegacy(ctx, registry, candidate, opts, credentialProber, hasCredential, unauthorizedProber, hasUnauthorized)
 	}
 
+	// 为候选人编译检查计划
 	plan, ok := compilePlanForCandidate(candidate, opts, hasCredential, hasUnauthorized)
 	if !ok {
 		result := defaultResultForCandidate(registry, candidate, opts)
 		return markSkipped(result, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
 	}
 
+	// 准备运行输入，包括认证器和未授权访问检查器
 	runInput := engine.Input{
 		Authenticator:       credentialExecutor(registry, candidate, opts.Timeout),
 		UnauthorizedChecker: unauthorizedExecutor(registry, candidate, opts.Timeout),
 	}
+	// 如果没有内置未授权访问能力但有兼容性未授权访问检查器，则使用兼容性未授权访问执行器
 	if !hasBuiltinUnauthorized && hasCompatibilityUnauthorized {
 		if unauthorizedProber, ok := registry.lookupCore(candidate, ProbeKindUnauthorized); ok {
 			runInput.UnauthorizedChecker = compatibilityUnauthorizedExecutor(unauthorizedProber, opts.Timeout)
 		}
 	}
+	// 如果有凭证能力，则设置凭证加载器
 	if hasCredential {
 		runInput.CredentialLoader = func() ([]strategy.Credential, error) {
 			creds, err := credentialsForCandidate(candidate.Service, opts)
@@ -174,7 +192,9 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 		}
 	}
 
+	// 运行引擎执行检查计划
 	engineOut := engine.Run(ctx, plan, runInput)
+	// 处理凭证错误
 	if engineOut.CredentialError != nil {
 		base := markSkipped(
 			markMatched(defaultResultForCandidateKind(candidate, ProbeKindCredential)),
@@ -187,16 +207,19 @@ func probeCandidate(ctx context.Context, registry *Registry, candidate SecurityC
 		return markFailedBeforeAttempt(base), probeFailedBeforeAttempt
 	}
 
+	// 处理检查成功的情况
 	if engineOut.Success {
 		kind := probeKindForCapability(engineOut.Capability)
 		return markConfirmed(engineAttemptResult(candidate, kind, engineOut.Attempt)), probeAttemptSucceeded
 	}
 
+	// 处理检查失败但已尝试的情况
 	if engineOut.Attempted {
 		kind := probeKindForCapability(engineOut.Capability)
 		return markAttemptFailure(engineAttemptResult(candidate, kind, engineOut.Attempt)), probeAttemptFailed
 	}
 
+	// 默认情况：跳过检查，因为不支持协议
 	result := defaultResultForCandidate(registry, candidate, opts)
 	return markSkipped(result, core.SkipReasonUnsupportedProtocol, "unsupported protocol"), probeSkipped
 }
@@ -479,15 +502,24 @@ type timedCredentialAuthenticator struct {
 	next    registrybridge.CredentialAuthenticator
 }
 
+// AuthenticateOnce
+// timedCredentialAuthenticator 是一个带超时功能的认证器结构体
+// 它实现了认证逻辑，并可以在指定超时时间内完成认证
 func (t timedCredentialAuthenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) registrybridge.Attempt {
+	// 检查下一个认证器是否存在
 	if t.next == nil {
 		return registrybridge.Attempt{}
 	}
+	// 检查超时时间是否设置有效
 	if t.timeout <= 0 {
+		// 如果未设置超时时间或超时时间无效，直接调用下一个认证器的认证方法
 		return t.next.AuthenticateOnce(ctx, target, cred)
 	}
+	// 创建带有超时时间的上下文
 	attemptCtx, cancel := context.WithTimeout(ctx, t.timeout)
+	// 确保在函数返回时取消上下文，避免资源泄漏
 	defer cancel()
+	// 使用带超时的上下文调用下一个认证器的认证方法
 	return t.next.AuthenticateOnce(attemptCtx, target, cred)
 }
 

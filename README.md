@@ -207,11 +207,13 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 
 ### 5.4.1 secprobe v1.4 扩展模式说明
 
-- `secprobe` 在 `v1.4` 之后采用“代码驱动协议实现 + 配置驱动协议元数据”的扩展模式：协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中，协议名、别名、默认端口、字典名、能力声明等元数据集中收敛。
-- 新增协议不建议只改配置文件；仅补 catalog / 字典等配置并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的协议实现代码，并完成默认 registry 注册；若协议支持 enrichment，还需要接到 `enrichment_router.go`。
+- `secprobe` 当前采用“代码驱动协议执行 + metadata 驱动静态声明”的扩展模式，主链路为 `metadata -> planner -> engine -> provider`。
+- 协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中；协议名、别名、默认端口、能力、默认字典与模板引用等静态信息集中收敛在 `app/secprobe/protocols/*.yaml`。
+- 新增协议不建议只改配置文件；仅补 metadata / 字典 / 模板并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的 atomic provider，并完成默认 registry 注册。
 - `memcached` 与 `zookeeper` 第一版按 `unauthorized` 协议接入，使用只读确认动作，不依赖凭证字典。
 - `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
-- 扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
+- 协议扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
+- 三方库调用与历史扩展升级方式请参考 [docs/secprobe-third-party-migration-guide.md](docs/secprobe-third-party-migration-guide.md)。
 
 ### 5.4.2 secprobe engine phase 1
 
@@ -225,15 +227,15 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 
 ### 5.4.3 secprobe engine phase 4
 
-- `memcached` unauthorized detection now uses a declarative simple-template executor
-- Templates remain bounded to one transport, one request, and matcher-based confirmation
-- `zookeeper` stays code-backed because it requires a real session client and is not a simple request/response protocol
+- `memcached` 的未授权确认已改为 declarative simple-template executor 执行
+- 当前模板执行器严格收边为：一个 transport、一次请求、一次响应读取、基于 matcher 的确认
+- `zookeeper` 仍保持 code-backed 路径，因为它依赖真实 session client，不属于简单 request/response 协议
 
 ### 5.4.4 secprobe engine phase 5
 
-- Built-in protocols are resolved through metadata + provider registration, not implicit legacy core-prober presence
-- Public `Registry.Register(...)` compatibility remains available through explicit public-prober adapters
-- The builtin hot path is now planner -> engine -> provider, with compatibility isolated off the default execution path
+- 内置协议当前通过 metadata + provider registration 决定是否可执行，而不是依赖隐式 legacy core-prober 存在性
+- public `Registry.Register(...)` 兼容能力仍然保留，但已经被显式收口到 public-prober adapter 路径
+- builtin 默认热路径已经稳定为 `planner -> engine -> provider`，兼容逻辑不再混在默认执行主链路中
 
 ### 5.5 端口扫描后附加弱口令探测
 

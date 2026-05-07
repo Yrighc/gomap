@@ -6,3 +6,4 @@ admin : 123456
 admin : password
 test : test
 guest : guest
+root : root

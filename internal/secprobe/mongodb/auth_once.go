@@ -12,12 +12,21 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// errMongoNoVisibleDatabases 是一个自定义错误，表示没有找到可见的数据库
 var errMongoNoVisibleDatabases = errors.New("listDatabaseNames returned no visible databases")
 
+// Authenticator 结构体用于MongoDB认证，包含一个认证函数
 type Authenticator struct {
+	// auth 是一个认证函数，接受上下文、目标和凭据，返回尝试结果和可能的错误
 	auth func(context.Context, strategy.Target, strategy.Credential) (registrybridge.Attempt, error)
 }
 
+// NewAuthenticator 创建一个新的Authenticator实例
+// 参数:
+//   - auth: 认证函数，如果为nil则使用默认的authenticateOnce函数
+//
+// 返回值:
+//   - Authenticator: 新创建的认证器实例
 func NewAuthenticator(auth func(context.Context, strategy.Target, strategy.Credential) (registrybridge.Attempt, error)) Authenticator {
 	if auth == nil {
 		auth = authenticateOnce
@@ -25,6 +34,14 @@ func NewAuthenticator(auth func(context.Context, strategy.Target, strategy.Crede
 	return Authenticator{auth: auth}
 }
 
+// AuthenticateOnce 执行一次认证尝试
+// 参数:
+//   - ctx: 上下文，用于控制请求的超时和取消
+//   - target: 目标信息，包含主机、IP、端口和协议
+//   - cred: 凭据信息，包含用户名和密码
+//
+// 返回值:
+//   - registrybridge.Attempt: 认证尝试的结果
 func (a Authenticator) AuthenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) registrybridge.Attempt {
 	attempt, err := a.auth(ctx, target, cred)
 	if err != nil {
@@ -35,6 +52,7 @@ func (a Authenticator) AuthenticateOnce(ctx context.Context, target strategy.Tar
 		}}
 	}
 
+	// 处理旧版结果
 	if attempt.Result == (result.Attempt{}) && legacyPopulated(attempt.Legacy) {
 		attempt.Result = result.Attempt{
 			Success:     attempt.Legacy.Success,
@@ -58,8 +76,19 @@ func (a Authenticator) AuthenticateOnce(ctx context.Context, target strategy.Tar
 	return attempt
 }
 
+// authenticateOnce 执行一次MongoDB认证
+// 参数:
+//   - ctx: 上下文，用于控制请求的超时和取消
+//   - target: 目标信息，包含主机、IP、端口和协议
+//   - cred: 凭据信息，包含用户名和密码
+//
+// 返回值:
+//   - registrybridge.Attempt: 认证尝试的结果
+//   - error: 可能发生的错误
 func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy.Credential) (registrybridge.Attempt, error) {
+	// 从上下文中获取超时时间
 	timeout := authTimeoutFromContext(ctx)
+	// 打开MongoDB客户端
 	client, err := openMongoCredentialClient(ctx, coreCandidate(target), timeout, core.Credential{
 		Username: cred.Username,
 		Password: cred.Password,
@@ -67,6 +96,7 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 	if err != nil {
 		return registrybridge.Attempt{}, err
 	}
+	// 设置断开连接的上下文和取消函数
 	disconnectCtx := context.Background()
 	disconnectCancel := func() {}
 	if timeout > 0 {
@@ -77,6 +107,7 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 		_ = client.Disconnect(disconnectCtx)
 	}()
 
+	// 列出数据库名称
 	names, err := client.ListDatabaseNames(ctx, bson.D{})
 	if err != nil {
 		return registrybridge.Attempt{}, err
@@ -85,6 +116,7 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 		return registrybridge.Attempt{}, errMongoNoVisibleDatabases
 	}
 
+	// 构建旧版安全结果
 	legacy := core.SecurityResult{
 		Target:       target.Host,
 		ResolvedIP:   target.IP,
@@ -100,6 +132,7 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 		Capabilities: []core.Capability{core.CapabilityEnumerable},
 	}
 
+	// 返回认证结果
 	return registrybridge.Attempt{
 		Result: result.Attempt{
 			Success:     true,
@@ -112,6 +145,12 @@ func authenticateOnce(ctx context.Context, target strategy.Target, cred strategy
 	}, nil
 }
 
+// coreCandidate 将策略目标转换为安全候选者
+// 参数:
+//   - target: 策略目标
+//
+// 返回值:
+//   - core.SecurityCandidate: 转换后的安全候选者
 func coreCandidate(target strategy.Target) core.SecurityCandidate {
 	return core.SecurityCandidate{
 		Target:     target.Host,
@@ -121,6 +160,12 @@ func coreCandidate(target strategy.Target) core.SecurityCandidate {
 	}
 }
 
+// authTimeoutFromContext 从上下文中获取认证超时时间
+// 参数:
+//   - ctx: 上下文
+//
+// 返回值:
+//   - time.Duration: 超时时间
 func authTimeoutFromContext(ctx context.Context) time.Duration {
 	if deadline, ok := ctx.Deadline(); ok {
 		if timeout := time.Until(deadline); timeout > 0 {
@@ -130,6 +175,12 @@ func authTimeoutFromContext(ctx context.Context) time.Duration {
 	return 0
 }
 
+// legacyPopulated 检查旧版结果是否已填充
+// 参数:
+//   - out: 安全结果
+//
+// 返回值:
+//   - bool: 如果结果已填充则返回true，否则返回false
 func legacyPopulated(out core.SecurityResult) bool {
 	return out.Target != "" || out.ResolvedIP != "" || out.Port != 0 || out.Service != "" || out.Success || out.Error != "" || out.FailureReason != ""
 }

@@ -1,0 +1,311 @@
+<mxfile host="app.diagrams.net" modified="2026-05-07T12:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="secprobe-weak-flow" name="secprobe weak flow">
+    <mxGraphModel dx="2200" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3600" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="&lt;b&gt;secprobe 弱口令 / 未授权执行流程图&lt;/b&gt;&lt;div&gt;上半区：协议归类与扫描类型判断　　下半区：实际执行链&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="3320" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="topbg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#cccccc;" vertex="1" parent="1">
+          <mxGeometry x="20" y="70" width="3340" height="590" as="geometry" />
+        </mxCell>
+        <mxCell id="topheader" value="&lt;b&gt;A. 协议归类与扫描类型判断&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="310" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a1" value="&lt;b&gt;assetprobe 开放端口&lt;/b&gt;&lt;div&gt;service / port / banner&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="70" y="190" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="&lt;b&gt;BuildCandidates&lt;/b&gt;&lt;div&gt;NormalizeServiceName&lt;/div&gt;&lt;div&gt;LookupProtocolSpec(service, port)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="320" y="180" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="命中&lt;br&gt;metadata？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="650" y="195" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="&lt;b&gt;不是 secprobe 支持协议&lt;/b&gt;&lt;div&gt;不会进入弱口令流程&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="840" y="165" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="&lt;b&gt;读取协议 metadata&lt;/b&gt;&lt;div&gt;capabilities.credential&lt;/div&gt;&lt;div&gt;capabilities.unauthorized&lt;/div&gt;&lt;div&gt;dictionary / templates / results&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="840" y="280" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" value="&lt;b&gt;registry.hasCapability(candidate, kind)&lt;/b&gt;&lt;div&gt;builtin provider&lt;/div&gt;&lt;div&gt;OR compatibility prober&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="285" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" value="至少一种&lt;br&gt;capability&lt;br&gt;已接线？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="295" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a8" value="&lt;b&gt;候选会被过滤&lt;/b&gt;&lt;div&gt;metadata 有声明&lt;/div&gt;&lt;div&gt;但 provider / compatibility 未接上&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1750" y="285" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="a9" value="&lt;b&gt;静态协议归类&lt;/b&gt;&lt;div&gt;按 metadata capability 组合划分&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1750" y="420" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="a10" value="&lt;b&gt;弱口令协议&lt;/b&gt;&lt;div&gt;credential=true&lt;/div&gt;&lt;div&gt;unauthorized=false&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2050" y="355" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a11" value="&lt;b&gt;未授权协议&lt;/b&gt;&lt;div&gt;credential=false&lt;/div&gt;&lt;div&gt;unauthorized=true&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2050" y="460" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a12" value="&lt;b&gt;双能力协议&lt;/b&gt;&lt;div&gt;credential=true&lt;/div&gt;&lt;div&gt;unauthorized=true&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2050" y="565" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="a13" value="&lt;b&gt;判断规则说明&lt;/b&gt;&lt;div&gt;1. “弱口令 / 未授权” 不是按端口名或 banner 直接判定。&lt;/div&gt;&lt;div&gt;2. 首先看 metadata 的 capability 声明。&lt;/div&gt;&lt;div&gt;3. 然后看 registry 是否真的存在对应 provider / compatibility。&lt;/div&gt;&lt;div&gt;4. runtime 的 EnableUnauthorized 只影响&lt;b&gt;是否执行未授权分支&lt;/b&gt;，不改变静态归类。&lt;/div&gt;&lt;div&gt;5. 所以：metadata 声明能力 ≠ 运行时一定可执行，还要看 provider 是否接上。&lt;/div&gt;" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2390" y="180" width="900" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="a14" value="&lt;b&gt;运行期开关特例&lt;/b&gt;&lt;div&gt;如果协议只有 unauthorized 能力，且 runtime `EnableUnauthorized=false`，候选仍可能被 BuildCandidates 保留下来。&lt;/div&gt;&lt;div&gt;但执行阶段会在 `probeCandidate` 中被标记为 `probe-disabled`，不会真正做未授权确认。&lt;/div&gt;" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2390" y="400" width="900" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bgbottom" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#cccccc;" vertex="1" parent="1">
+          <mxGeometry x="20" y="690" width="3340" height="980" as="geometry" />
+        </mxCell>
+        <mxCell id="bottomheader" value="&lt;b&gt;B. 实际执行链&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="710" width="220" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b1" value="&lt;b&gt;候选 SecurityCandidate&lt;/b&gt;&lt;div&gt;来自 BuildCandidates&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="70" y="840" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" value="&lt;b&gt;Run / RunWithRegistry&lt;/b&gt;&lt;div&gt;并发调度 candidate&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="350" y="840" width="210" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" value="&lt;b&gt;probeCandidate&lt;/b&gt;&lt;div&gt;判断 builtin / compatibility capability&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="620" y="830" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" value="如果 `!hasCredential &amp;&amp; hasUnauthorized &amp;&amp; !EnableUnauthorized`，直接标记 `probe-disabled`，不会真正执行未授权确认。" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="750" width="450" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b5" value="纯 legacy&lt;br&gt;public prober&lt;br&gt;扩展？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="960" y="845" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b6" value="&lt;b&gt;probeCandidateLegacy&lt;/b&gt;&lt;div&gt;compatibility path&lt;/div&gt;&lt;div&gt;可选 unauthorized -&amp;gt; credential&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="800" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b7" value="&lt;b&gt;compilePlanForCandidate&lt;/b&gt;&lt;div&gt;runtime metadata&lt;/div&gt;&lt;div&gt;+ strategy.Compile&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="935" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b8" value="&lt;b&gt;Plan.Capabilities 顺序&lt;/b&gt;&lt;div&gt;EnableUnauthorized &amp;&amp; supported&lt;/div&gt;&lt;div&gt;=&gt; unauthorized 先于 credential&lt;/div&gt;&lt;div&gt;否则只保留 credential&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="935" width="290" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b9" value="&lt;b&gt;engine.Run&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1860" y="950" width="150" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b10" value="plan 含&lt;br&gt;unauthorized？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2060" y="840" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b11" value="&lt;b&gt;UnauthorizedChecker.CheckUnauthorizedOnce&lt;/b&gt;&lt;div&gt;可能是 atomic checker&lt;/div&gt;&lt;div&gt;也可能是 simple-template executor&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2260" y="790" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b12" value="未授权&lt;br&gt;确认成功？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2550" y="805" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b13" value="&lt;b&gt;Success=true&lt;/b&gt;&lt;div&gt;FindingType=unauthorized-access&lt;/div&gt;&lt;div&gt;Stage=confirmed&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2760" y="760" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b14" value="plan 含&lt;br&gt;credential？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2060" y="980" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b15" value="&lt;b&gt;加载凭证&lt;/b&gt;&lt;div&gt;优先级：inline &amp;gt; dict_dir &amp;gt; builtin&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2260" y="975" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b16" value="加载失败？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2550" y="980" width="150" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b17" value="&lt;b&gt;SkipReason=no-credentials&lt;/b&gt;&lt;div&gt;没有有效凭证源&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2760" y="955" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b18" value="&lt;b&gt;逐条 AuthenticateOnce&lt;/b&gt;&lt;div&gt;循环发生在 engine&lt;/div&gt;&lt;div&gt;不是 provider 自己循环&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2260" y="1110" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b19" value="认证成功？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2550" y="1125" width="150" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="b20" value="&lt;b&gt;Success=true&lt;/b&gt;&lt;div&gt;FindingType=credential-valid&lt;/div&gt;&lt;div&gt;Stage=confirmed&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2760" y="1090" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b21" value="terminal error？&lt;br&gt;canceled / timeout" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2550" y="1255" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b22" value="&lt;b&gt;attempted-failed&lt;/b&gt;&lt;div&gt;FailureReason=timeout / canceled&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="2760" y="1250" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b23" value="还有更多&lt;br&gt;凭证？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="2260" y="1255" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="b24" value="&lt;b&gt;attempted-failed&lt;/b&gt;&lt;div&gt;常见：authentication / insufficient-confirmation&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1980" y="1380" width="280" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="b25" value="&lt;b&gt;是否补采 enrichment？&lt;/b&gt;&lt;div&gt;EnableEnrichment=true&lt;/div&gt;&lt;div&gt;&amp;&amp; metadata supports enrichment&lt;/div&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="3010" y="900" width="170" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b26" value="&lt;b&gt;applyEnrichment&lt;/b&gt;&lt;div&gt;只有成功 finding 才会补采&lt;/div&gt;&lt;div&gt;有新增数据时 Stage=enriched&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="3220" y="885" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b27" value="&lt;b&gt;最终结果输出&lt;/b&gt;&lt;div&gt;success / attempted-failed / skipped&lt;/div&gt;&lt;div&gt;并更新 RunResult.Meta&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="3220" y="1045" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="b28" value="&lt;b&gt;未授权 provider 说明&lt;/b&gt;&lt;div&gt;简单协议：可走 simple-template executor&lt;/div&gt;&lt;div&gt;复杂协议：仍走 code-backed provider&lt;/div&gt;&lt;div&gt;示例：memcached 用模板；zookeeper 用代码&lt;/div&gt;" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="3010" y="745" width="430" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a1" target="a2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a2" target="a3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a3" target="a4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a3" target="a5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a5" target="a6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a6" target="a7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a7" target="a8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a7" target="a9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="cred only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a9" target="a10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="unauth only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a9" target="a11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="both" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="a9" target="a12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b1" target="b2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b2" target="b3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b3" target="b5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b5" target="b6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b5" target="b7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b7" target="b8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b8" target="b9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b9" target="b10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b10" target="b11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b11" target="b12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e22" value="成功" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b12" target="b13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e23" value="失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b12" target="b14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e24" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b10" target="b14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e25" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b14" target="b15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e26" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b15" target="b16">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e27" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b16" target="b17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e28" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b16" target="b18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e29" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b18" target="b19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e30" value="成功" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b19" target="b20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e31" value="失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b19" target="b21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e32" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b21" target="b22">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e33" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b21" target="b23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e34" value="有" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b23" target="b18">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2190" y="1180" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e35" value="没有" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b23" target="b24">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e36" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b13" target="b25">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e37" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b20" target="b25">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e38" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b25" target="b26">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e39" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b25" target="b27">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e40" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b26" target="b27">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e41" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b6" target="b27">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1300" y="1160" />
+              <mxPoint x="3080" y="1160" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e42" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b17" target="b27">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="3080" y="1000" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e43" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b22" target="b27">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="3080" y="1295" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e44" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;" edge="1" parent="1" source="b24" target="b27">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="3080" y="1425" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
