@@ -165,3 +165,33 @@ func TestGeneratorReturnsSourceErrorWhenBuiltinFallbackFails(t *testing.T) {
 		t.Fatal("expected Generate() error")
 	}
 }
+
+func TestGeneratorReturnsMissingDictDirErrorWithoutBuiltinFallback(t *testing.T) {
+	builtinCalled := false
+	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
+		builtinCalled = true
+		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	_, _, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "redis",
+			DefaultSources:   []string{"redis"},
+			DefaultTiers:     []Tier{TierTop, TierCommon},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+		DictDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected Generate() error when explicit dict_dir has no matching dictionary")
+	}
+	if !IsMissingSource(err) {
+		t.Fatalf("expected missing source error, got %v", err)
+	}
+	if builtinCalled {
+		t.Fatal("expected builtin loader to stay unused when explicit dict_dir misses")
+	}
+}

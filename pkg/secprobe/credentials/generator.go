@@ -86,9 +86,7 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 				AllowEmptyPass: in.Profile.AllowEmptyPassword,
 			}), meta, nil
 		}
-		if !IsMissingSource(err) {
-			return nil, GenerateMeta{}, err
-		}
+		return nil, GenerateMeta{}, err
 	}
 
 	creds, source, err := LoadBuiltinSource(in.Profile.Protocol)
