@@ -4,17 +4,17 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
 func TestExpandStaticBasic(t *testing.T) {
-	base := []core.Credential{
+	base := []strategy.Credential{
 		{Username: "admin", Password: "secret"},
 		{Username: "guest", Password: "guest"},
 	}
 
 	got := Expand(base, Options{Profile: "static_basic"})
-	want := []core.Credential{
+	want := []strategy.Credential{
 		{Username: "admin", Password: "secret"},
 		{Username: "guest", Password: "guest"},
 		{Username: "admin", Password: "admin"},
@@ -30,7 +30,7 @@ func TestExpandStaticBasic(t *testing.T) {
 }
 
 func TestExpandAllowsEmptyUserAndPassword(t *testing.T) {
-	base := []core.Credential{
+	base := []strategy.Credential{
 		{Username: "redis", Password: "redis"},
 	}
 
@@ -39,7 +39,7 @@ func TestExpandAllowsEmptyUserAndPassword(t *testing.T) {
 		AllowEmptyUser: true,
 		AllowEmptyPass: true,
 	})
-	want := []core.Credential{
+	want := []strategy.Credential{
 		{Username: "redis", Password: "redis"},
 		{Username: "redis", Password: "redis123"},
 		{Username: "redis", Password: "redis@123"},
@@ -53,7 +53,7 @@ func TestExpandAllowsEmptyUserAndPassword(t *testing.T) {
 }
 
 func TestExpandDedupesStably(t *testing.T) {
-	base := []core.Credential{
+	base := []strategy.Credential{
 		{Username: "root", Password: "root"},
 		{Username: "root", Password: "root"},
 		{Username: "root", Password: "root123"},
@@ -64,7 +64,7 @@ func TestExpandDedupesStably(t *testing.T) {
 		Profile:        "static_basic",
 		AllowEmptyPass: true,
 	})
-	want := []core.Credential{
+	want := []strategy.Credential{
 		{Username: "root", Password: "root"},
 		{Username: "root", Password: "root123"},
 		{Username: "root", Password: ""},
@@ -76,16 +76,19 @@ func TestExpandDedupesStably(t *testing.T) {
 	}
 }
 
-func TestExpandWithoutProfileOnlyDedupesAndAppliesEmptyVariants(t *testing.T) {
-	base := []core.Credential{
+func TestExpandWithoutStaticBasicOnlyDedupes(t *testing.T) {
+	base := []strategy.Credential{
 		{Username: "snmp", Password: "public"},
 		{Username: "snmp", Password: "public"},
 	}
 
-	got := Expand(base, Options{AllowEmptyUser: true})
-	want := []core.Credential{
+	got := Expand(base, Options{
+		Profile:        "none",
+		AllowEmptyUser: true,
+		AllowEmptyPass: true,
+	})
+	want := []strategy.Credential{
 		{Username: "snmp", Password: "public"},
-		{Username: "", Password: "public"},
 	}
 
 	if !reflect.DeepEqual(got, want) {
