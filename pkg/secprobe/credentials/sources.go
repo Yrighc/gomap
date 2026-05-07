@@ -1,0 +1,228 @@
+package credentials
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	appassets "github.com/yrighc/gomap/app"
+	"github.com/yrighc/gomap/pkg/secprobe/metadata"
+	"github.com/yrighc/gomap/pkg/secprobe/strategy"
+)
+
+type SourceKind string
+
+const (
+	SourceInline  SourceKind = "inline"
+	SourceDictDir SourceKind = "dict_dir"
+	SourceBuiltin SourceKind = "builtin"
+)
+
+type SourceDescriptor struct {
+	Kind SourceKind
+	Name string
+	Path string
+}
+
+type missingSourceError struct {
+	kind   SourceKind
+	target string
+	err    error
+}
+
+func (e *missingSourceError) Error() string {
+	if e.err == nil {
+		return fmt.Sprintf("%s source %q not found", e.kind, e.target)
+	}
+	return fmt.Sprintf("%s source %q not found: %v", e.kind, e.target, e.err)
+}
+
+func (e *missingSourceError) Unwrap() error {
+	return e.err
+}
+
+func IsMissingSource(err error) bool {
+	var target *missingSourceError
+	return errors.As(err, &target)
+}
+
+var builtinLoader = func(protocol string) ([]strategy.Credential, error) {
+	data, err := appassets.SecprobeDict(protocol)
+	if err != nil {
+		return nil, err
+	}
+	return parseStrategyCredentialLines(string(data))
+}
+
+func stubBuiltinLoader(fn func(string) ([]strategy.Credential, error)) func() {
+	previous := builtinLoader
+	builtinLoader = fn
+	return func() {
+		builtinLoader = previous
+	}
+}
+
+func LoadDirectorySource(protocol, dictDir string) ([]strategy.Credential, SourceDescriptor, error) {
+	if strings.TrimSpace(dictDir) == "" {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceDictDir,
+			target: protocol,
+			err:    os.ErrNotExist,
+		}
+	}
+
+	for _, path := range dictionaryCandidatePaths(protocol, dictDir) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, SourceDescriptor{}, err
+		}
+
+		creds, err := parseStrategyCredentialLines(string(data))
+		if err != nil {
+			return nil, SourceDescriptor{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		return creds, SourceDescriptor{
+			Kind: SourceDictDir,
+			Name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			Path: path,
+		}, nil
+	}
+
+	return nil, SourceDescriptor{}, &missingSourceError{
+		kind:   SourceDictDir,
+		target: protocol,
+		err:    os.ErrNotExist,
+	}
+}
+
+func LoadBuiltinSource(protocol string) ([]strategy.Credential, SourceDescriptor, error) {
+	names := builtinSourceCandidates(protocol)
+	var lastErr error
+	for _, name := range names {
+		creds, err := builtinLoader(name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return creds, SourceDescriptor{
+			Kind: SourceBuiltin,
+			Name: name,
+		}, nil
+	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
+	return nil, SourceDescriptor{}, lastErr
+}
+
+func dictionaryCandidatePaths(protocol, dictDir string) []string {
+	names := builtinSourceCandidates(protocol)
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		path := filepath.Join(dictDir, name+".txt")
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func builtinSourceCandidates(protocol string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(protocol))
+	if normalized == "" {
+		return nil
+	}
+
+	profile := protocolDictionaryProfile(normalized)
+	out := make([]string, 0, len(profile.DefaultSources)+1)
+	seen := make(map[string]struct{}, len(profile.DefaultSources)+1)
+	for _, source := range profile.DefaultSources {
+		source = strings.ToLower(strings.TrimSpace(source))
+		if source == "" {
+			continue
+		}
+		if _, ok := seen[source]; ok {
+			continue
+		}
+		seen[source] = struct{}{}
+		out = append(out, source)
+	}
+	if _, ok := seen[normalized]; !ok {
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func protocolDictionaryProfile(protocol string) CredentialProfile {
+	if spec, ok := lookupProtocolDictionarySpec(protocol); ok {
+		return ProfileFromDictionary(spec.Name, DictionaryProfileInput{
+			DefaultSources:     spec.Dictionary.DefaultSources,
+			DefaultTiers:       spec.Dictionary.DefaultTiers,
+			AllowEmptyUsername: spec.Dictionary.AllowEmptyUsername,
+			AllowEmptyPassword: spec.Dictionary.AllowEmptyPassword,
+			ExpansionProfile:   spec.Dictionary.ExpansionProfile,
+		})
+	}
+
+	return CredentialProfile{
+		Protocol:       protocol,
+		DefaultSources: []string{protocol},
+		DefaultTiers:   []Tier{TierTop, TierCommon},
+		ScanProfile:    ScanProfileDefault,
+	}
+}
+
+func parseStrategyCredentialLines(raw string) ([]strategy.Credential, error) {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	out := make([]strategy.Credential, 0, len(lines))
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, " : ", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid credential line %d: %q", idx+1, line)
+		}
+		out = append(out, strategy.Credential{
+			Username: strings.TrimSpace(parts[0]),
+			Password: strings.TrimSpace(parts[1]),
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no valid credentials found")
+	}
+	return out, nil
+}
+
+func lookupProtocolDictionarySpec(protocol string) (metadata.Spec, bool) {
+	specs, err := metadata.LoadBuiltin()
+	if err != nil {
+		return metadata.Spec{}, false
+	}
+
+	token := strings.ToLower(strings.TrimSpace(protocol))
+	for _, spec := range specs {
+		if spec.Name == token {
+			return spec, true
+		}
+		for _, alias := range spec.Aliases {
+			if alias == token {
+				return spec, true
+			}
+		}
+	}
+	return metadata.Spec{}, false
+}
