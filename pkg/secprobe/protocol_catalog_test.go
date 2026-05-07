@@ -462,6 +462,26 @@ func TestLookupProtocolSpecSupportsMongoDBCredentialAndUnauthorized(t *testing.T
 	}
 }
 
+func TestLookupProtocolSpecSupportsElasticsearchCredentialOnly(t *testing.T) {
+	spec, ok := LookupProtocolSpec("elasticsearch", 9200)
+	if !ok {
+		t.Fatal("expected elasticsearch protocol spec")
+	}
+	wantKinds := []ProbeKind{ProbeKindCredential}
+	if !reflect.DeepEqual(spec.ProbeKinds, wantKinds) {
+		t.Fatalf("expected elasticsearch probe kinds %v, got %v", wantKinds, spec.ProbeKinds)
+	}
+	if !reflect.DeepEqual(spec.DictNames, []string{"elasticsearch"}) {
+		t.Fatalf("expected elasticsearch dict names, got %v", spec.DictNames)
+	}
+	if !ProtocolSupportsKind("elasticsearch", ProbeKindCredential) {
+		t.Fatal("expected elasticsearch credential probing to be declared")
+	}
+	if ProtocolSupportsKind("elasticsearch", ProbeKindUnauthorized) {
+		t.Fatal("expected elasticsearch unauthorized probing to stay unsupported")
+	}
+}
+
 func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	if !ProtocolSupportsKind("redis", ProbeKindCredential) {
 		t.Fatal("expected redis to support credential probing")
@@ -474,6 +494,12 @@ func TestProtocolSupportsKindUsesCatalogDeclaration(t *testing.T) {
 	}
 	if !ProtocolSupportsKind("mongodb", ProbeKindUnauthorized) {
 		t.Fatal("expected mongodb unauthorized probing to be declared")
+	}
+	if !ProtocolSupportsKind("elasticsearch", ProbeKindCredential) {
+		t.Fatal("expected elasticsearch credential probing to be declared")
+	}
+	if ProtocolSupportsKind("elasticsearch", ProbeKindUnauthorized) {
+		t.Fatal("expected elasticsearch unauthorized probing to stay unsupported")
 	}
 	if !ProtocolSupportsKind("memcached", ProbeKindUnauthorized) {
 		t.Fatal("expected memcached unauthorized probing to be declared")

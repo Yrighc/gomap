@@ -2,6 +2,7 @@ package secprobe
 
 import (
 	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
+	elasticsearchprobe "github.com/yrighc/gomap/internal/secprobe/elasticsearch"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
@@ -31,6 +32,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("mysql", mysqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("postgresql", postgresqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("redis", redisprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("elasticsearch", elasticsearchprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("smtp", smtpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("telnet", telnetprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))

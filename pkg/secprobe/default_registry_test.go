@@ -13,6 +13,7 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 		{Service: "mysql", Port: 3306},
 		{Service: "postgresql", Port: 5432},
 		{Service: "redis", Port: 6379},
+		{Service: "elasticsearch", Port: 9200},
 		{Service: "mssql", Port: 1433},
 		{Service: "smtp", Port: 587},
 		{Service: "oracle", Port: 1521},
@@ -49,6 +50,7 @@ func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 		{Service: "mysql", Port: 3306},
 		{Service: "postgresql", Port: 5432},
 		{Service: "redis", Port: 6379},
+		{Service: "elasticsearch", Port: 9200},
 		{Service: "mssql", Port: 1433},
 		{Service: "smtp", Port: 587},
 		{Service: "oracle", Port: 1521},
@@ -58,6 +60,7 @@ func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 		{Service: "vnc", Port: 5900},
 		{Service: "smb", Port: 445},
 		{Service: "mongodb", Port: 27017},
+		{Service: "elasticsearch", Port: 9200},
 	}
 
 	for _, candidate := range tests {
@@ -201,6 +204,9 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 	}
 	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
 		t.Fatal("expected redis atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "elasticsearch", Port: 9200}); !ok {
+		t.Fatal("expected elasticsearch atomic credential plugin")
 	}
 	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
 		t.Fatal("expected redis atomic unauthorized plugin")
