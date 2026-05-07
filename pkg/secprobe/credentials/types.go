@@ -3,19 +3,25 @@ package credentials
 type Tier string
 
 const (
-	TierTop    Tier = "top"
-	TierCommon Tier = "common"
+	TierTop      Tier = "top"
+	TierCommon   Tier = "common"
+	TierExtended Tier = "extended"
 )
 
-type ScanProfile struct {
-	Sources        []string
-	Tiers          []Tier
-	Expansion      string
-	AllowEmptyUser bool
-	AllowEmptyPass bool
-}
+type ScanProfile string
+
+const (
+	ScanProfileFast    ScanProfile = "fast"
+	ScanProfileDefault ScanProfile = "default"
+	ScanProfileFull    ScanProfile = "full"
+)
 
 type CredentialProfile struct {
-	Protocol string
-	Scan     ScanProfile
+	Protocol           string
+	DefaultSources     []string
+	DefaultTiers       []Tier
+	ScanProfile        ScanProfile
+	AllowEmptyUsername bool
+	AllowEmptyPassword bool
+	ExpansionProfile   string
 }

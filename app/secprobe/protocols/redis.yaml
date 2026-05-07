@@ -15,6 +15,9 @@ policy_tags:
 dictionary:
   default_sources:
     - redis
+  default_tiers:
+    - top
+    - common
   allow_empty_username: true
   allow_empty_password: true
   expansion_profile: static_basic

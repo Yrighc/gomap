@@ -8,27 +8,23 @@ import (
 )
 
 func TestProfileFromMetadataUsesExplicitDefaultTiers(t *testing.T) {
-	spec := metadata.Spec{
-		Name: "ssh",
-		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"ssh"},
-			DefaultTiers:       []string{" Top ", "COMMON", "top", ""},
-			AllowEmptyUsername: false,
-			AllowEmptyPassword: true,
-			ExpansionProfile:   "user_password_basic",
-		},
+	dict := metadata.Dictionary{
+		DefaultSources:     []string{"ssh"},
+		DefaultTiers:       []string{" Top ", "COMMON", "top", "extended", ""},
+		AllowEmptyUsername: false,
+		AllowEmptyPassword: true,
+		ExpansionProfile:   "user_password_basic",
 	}
 
-	got := ProfileFromMetadata(spec)
+	got := ProfileFromMetadata("ssh", dict)
 	want := CredentialProfile{
-		Protocol: "ssh",
-		Scan: ScanProfile{
-			Sources:        []string{"ssh"},
-			Tiers:          []Tier{TierTop, TierCommon},
-			Expansion:      "user_password_basic",
-			AllowEmptyUser: false,
-			AllowEmptyPass: true,
-		},
+		Protocol:           "ssh",
+		DefaultSources:     []string{"ssh"},
+		DefaultTiers:       []Tier{TierTop, TierCommon, TierExtended},
+		ScanProfile:        ScanProfileDefault,
+		AllowEmptyUsername: false,
+		AllowEmptyPassword: true,
+		ExpansionProfile:   "user_password_basic",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -37,19 +33,25 @@ func TestProfileFromMetadataUsesExplicitDefaultTiers(t *testing.T) {
 }
 
 func TestProfileFromMetadataFallsBackToTopCommonDefaultTiers(t *testing.T) {
-	spec := metadata.Spec{
-		Name: "redis",
-		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"redis"},
-			AllowEmptyUsername: true,
-			AllowEmptyPassword: true,
-			ExpansionProfile:   "static_basic",
-		},
+	dict := metadata.Dictionary{
+		DefaultSources:     []string{"redis"},
+		AllowEmptyUsername: true,
+		AllowEmptyPassword: true,
+		ExpansionProfile:   "static_basic",
 	}
 
-	got := ProfileFromMetadata(spec)
-	wantTiers := []Tier{TierTop, TierCommon}
-	if !reflect.DeepEqual(got.Scan.Tiers, wantTiers) {
-		t.Fatalf("ProfileFromMetadata() tiers = %v, want %v", got.Scan.Tiers, wantTiers)
+	got := ProfileFromMetadata("redis", dict)
+	want := CredentialProfile{
+		Protocol:           "redis",
+		DefaultSources:     []string{"redis"},
+		DefaultTiers:       []Tier{TierTop, TierCommon},
+		ScanProfile:        ScanProfileDefault,
+		AllowEmptyUsername: true,
+		AllowEmptyPassword: true,
+		ExpansionProfile:   "static_basic",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProfileFromMetadata() = %#v, want %#v", got, want)
 	}
 }

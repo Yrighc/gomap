@@ -115,6 +115,30 @@ func TestLoadBuiltinNormalizesDictionaryDefaultTiers(t *testing.T) {
 	if !slices.Equal(ssh.Dictionary.DefaultTiers, []string{"top", "common"}) {
 		t.Fatalf("expected ssh default tiers [top common], got %v", ssh.Dictionary.DefaultTiers)
 	}
+
+	mysql, ok := specs["mysql"]
+	if !ok {
+		t.Fatalf("expected mysql spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+	if !slices.Equal(mysql.Dictionary.DefaultTiers, []string{"top", "common"}) {
+		t.Fatalf("expected mysql default tiers [top common], got %v", mysql.Dictionary.DefaultTiers)
+	}
+
+	redis, ok := specs["redis"]
+	if !ok {
+		t.Fatalf("expected redis spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+	if !slices.Equal(redis.Dictionary.DefaultTiers, []string{"top", "common"}) {
+		t.Fatalf("expected redis default tiers [top common], got %v", redis.Dictionary.DefaultTiers)
+	}
+
+	telnet, ok := specs["telnet"]
+	if !ok {
+		t.Fatalf("expected telnet spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+	if !slices.Equal(telnet.Dictionary.DefaultTiers, []string{"top", "common"}) {
+		t.Fatalf("expected telnet default tiers [top common], got %v", telnet.Dictionary.DefaultTiers)
+	}
 }
 
 func TestNormalizeSpecNormalizesDictionaryDefaultTiers(t *testing.T) {

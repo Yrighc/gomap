@@ -6,16 +6,15 @@ import (
 	"github.com/yrighc/gomap/pkg/secprobe/metadata"
 )
 
-func ProfileFromMetadata(spec metadata.Spec) CredentialProfile {
+func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialProfile {
 	return CredentialProfile{
-		Protocol: spec.Name,
-		Scan: ScanProfile{
-			Sources:        append([]string(nil), spec.Dictionary.DefaultSources...),
-			Tiers:          normalizeTiers(spec.Dictionary.DefaultTiers),
-			Expansion:      spec.Dictionary.ExpansionProfile,
-			AllowEmptyUser: spec.Dictionary.AllowEmptyUsername,
-			AllowEmptyPass: spec.Dictionary.AllowEmptyPassword,
-		},
+		Protocol:           strings.ToLower(strings.TrimSpace(protocol)),
+		DefaultSources:     append([]string(nil), dict.DefaultSources...),
+		DefaultTiers:       normalizeTiers(dict.DefaultTiers),
+		ScanProfile:        ScanProfileDefault,
+		AllowEmptyUsername: dict.AllowEmptyUsername,
+		AllowEmptyPassword: dict.AllowEmptyPassword,
+		ExpansionProfile:   dict.ExpansionProfile,
 	}
 }
 
