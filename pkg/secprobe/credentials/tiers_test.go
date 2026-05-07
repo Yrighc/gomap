@@ -29,12 +29,24 @@ func TestResolveTiersKeepsDefaultOrderWithinIntersection(t *testing.T) {
 	}
 }
 
-func TestResolveTiersFallsBackWhenIntersectionIsEmpty(t *testing.T) {
+func TestResolveTiersReturnsEmptyWhenFastAndExtendedOnlyDoNotIntersect(t *testing.T) {
 	got := ResolveTiers(CredentialProfile{
 		DefaultTiers: []Tier{TierExtended},
 		ScanProfile:  ScanProfileFast,
 	})
-	want := []Tier{TierExtended}
+	want := []Tier{}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResolveTiers() = %v, want %v", got, want)
+	}
+}
+
+func TestResolveTiersReturnsEmptyWhenDefaultAndExtendedOnlyDoNotIntersect(t *testing.T) {
+	got := ResolveTiers(CredentialProfile{
+		DefaultTiers: []Tier{TierExtended},
+		ScanProfile:  ScanProfileDefault,
+	})
+	want := []Tier{}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ResolveTiers() = %v, want %v", got, want)

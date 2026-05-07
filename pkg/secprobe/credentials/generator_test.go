@@ -125,10 +125,15 @@ func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
 
 	wantCreds := []strategy.Credential{
 		{Username: "redis", Password: "redis"},
+		{Username: "admin", Password: "admin"},
 		{Username: "redis", Password: "redis123"},
 		{Username: "redis", Password: "redis@123"},
 		{Username: "", Password: "redis"},
 		{Username: "redis", Password: ""},
+		{Username: "admin", Password: "admin123"},
+		{Username: "admin", Password: "admin@123"},
+		{Username: "", Password: "admin"},
+		{Username: "admin", Password: ""},
 	}
 	if !reflect.DeepEqual(got, wantCreds) {
 		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)

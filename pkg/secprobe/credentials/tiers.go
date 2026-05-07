@@ -29,10 +29,7 @@ func ResolveTiers(profile CredentialProfile) []Tier {
 			out = append(out, tier)
 		}
 	}
-	if len(out) > 0 {
-		return out
-	}
-	return defaultTiers
+	return out
 }
 
 func normalizeResolvedTiers(values []Tier) []Tier {

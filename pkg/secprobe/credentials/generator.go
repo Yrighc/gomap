@@ -96,42 +96,11 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		return nil, GenerateMeta{}, err
 	}
 	meta.Source = source
-	return Expand(limitCredentialsByTiers(creds, selectedTiers), Options{
+	return Expand(creds, Options{
 		Profile:        in.Profile.ExpansionProfile,
 		AllowEmptyUser: in.Profile.AllowEmptyUsername,
 		AllowEmptyPass: in.Profile.AllowEmptyPassword,
 	}), meta, nil
-}
-
-func limitCredentialsByTiers(creds []strategy.Credential, tiers []Tier) []strategy.Credential {
-	if len(creds) == 0 {
-		return nil
-	}
-
-	maxItems := maxCredentialsForTiers(tiers)
-	if maxItems <= 0 || len(creds) <= maxItems {
-		return append([]strategy.Credential(nil), creds...)
-	}
-	return append([]strategy.Credential(nil), creds[:maxItems]...)
-}
-
-func maxCredentialsForTiers(tiers []Tier) int {
-	limit := 0
-	for _, tier := range tiers {
-		switch normalizeTier(tier) {
-		case TierTop:
-			if limit < 1 {
-				limit = 1
-			}
-		case TierCommon:
-			if limit < 3 {
-				limit = 3
-			}
-		case TierExtended:
-			return 0
-		}
-	}
-	return limit
 }
 
 func dedupeStrategyCredentials(in []strategy.Credential) []strategy.Credential {
