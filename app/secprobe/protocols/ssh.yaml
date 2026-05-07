@@ -12,6 +12,9 @@ policy_tags:
 dictionary:
   default_sources:
     - ssh
+  default_tiers:
+    - top
+    - common
   allow_empty_username: false
   allow_empty_password: true
   expansion_profile: user_password_basic

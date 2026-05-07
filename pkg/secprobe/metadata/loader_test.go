@@ -100,3 +100,32 @@ func TestLoadBuiltinKeepsUnauthorizedTemplateReferenceDeclarative(t *testing.T) 
 		t.Fatalf("expected memcached unauthorized template reference, got %+v", memcached.Templates)
 	}
 }
+
+func TestLoadBuiltinNormalizesDictionaryDefaultTiers(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	ssh, ok := specs["ssh"]
+	if !ok {
+		t.Fatalf("expected ssh spec, got keys %v", slices.Sorted(maps.Keys(specs)))
+	}
+
+	if !slices.Equal(ssh.Dictionary.DefaultTiers, []string{"top", "common"}) {
+		t.Fatalf("expected ssh default tiers [top common], got %v", ssh.Dictionary.DefaultTiers)
+	}
+}
+
+func TestNormalizeSpecNormalizesDictionaryDefaultTiers(t *testing.T) {
+	spec := normalizeSpec(Spec{
+		Name: "ssh",
+		Dictionary: Dictionary{
+			DefaultTiers: []string{" Top ", "COMMON", "", "common"},
+		},
+	})
+
+	if !slices.Equal(spec.Dictionary.DefaultTiers, []string{"top", "common", "common"}) {
+		t.Fatalf("expected normalized default tiers, got %v", spec.Dictionary.DefaultTiers)
+	}
+}

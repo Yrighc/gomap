@@ -25,6 +25,7 @@ type PolicyTags struct {
 
 type Dictionary struct {
 	DefaultSources     []string `yaml:"default_sources"`
+	DefaultTiers       []string `yaml:"default_tiers"`
 	AllowEmptyUsername bool     `yaml:"allow_empty_username"`
 	AllowEmptyPassword bool     `yaml:"allow_empty_password"`
 	ExpansionProfile   string   `yaml:"expansion_profile"`
