@@ -1,9 +1,0 @@
-sa : sa
-sa : 123456
-sa : password
-sa : P@ssw0rd
-admin : admin
-admin : 123456
-admin : password
-administrator : administrator
-administrator : 123456

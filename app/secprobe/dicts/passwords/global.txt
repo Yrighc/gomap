@@ -1,0 +1,8 @@
+123456
+admin
+password
+{user}
+{user}123
+[common] {user}@123
+[common] {user}_123
+[extended] Passw0rd

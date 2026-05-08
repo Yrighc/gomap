@@ -1,9 +1,0 @@
-admin : admin
-admin : 123456
-admin : password
-root : root
-root : 123456
-root : password
-mongodb : mongodb
-guest : guest
-test : test

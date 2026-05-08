@@ -1,9 +1,0 @@
-postgres : postgres
-postgres : 123456
-postgres : password
-admin : admin
-admin : 123456
-admin : password
-test : test
-guest : guest
-root : root

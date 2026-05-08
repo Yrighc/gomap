@@ -1,8 +1,0 @@
-system : oracle
-sys : oracle
-scott : tiger
-oracle : oracle
-admin : admin
-admin : 123456
-admin : password
-test : test

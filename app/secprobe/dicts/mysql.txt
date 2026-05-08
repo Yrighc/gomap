@@ -1,9 +1,0 @@
-root : root
-root : 123456
-root : password
-admin : admin
-admin : 123456
-admin : password
-mysql : mysql
-test : test
-guest : guest

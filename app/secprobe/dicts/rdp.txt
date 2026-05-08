@@ -1,9 +1,0 @@
-administrator : administrator
-administrator : 123456
-administrator : password
-admin : admin
-admin : 123456
-admin : password
-guest : guest
-user : user
-test : test

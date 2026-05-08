@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/amqp.txt secprobe/dicts/ftp.txt secprobe/dicts/mongodb.txt secprobe/dicts/mssql.txt secprobe/dicts/mysql.txt secprobe/dicts/oracle.txt secprobe/dicts/postgresql.txt secprobe/dicts/rdp.txt secprobe/dicts/redis.txt secprobe/dicts/smb.txt secprobe/dicts/smtp.txt secprobe/dicts/snmp.txt secprobe/dicts/ssh.txt secprobe/dicts/telnet.txt secprobe/dicts/vnc.txt secprobe/protocols/*.yaml secprobe/templates/unauthorized/*.yaml
+//go:embed assetprobe/probes/gomap-service-probes assetprobe/services/gomap-services assetprobe/dicts/simple.txt assetprobe/dicts/normal.txt assetprobe/dicts/diff.txt secprobe/dicts/passwords/global.txt secprobe/protocols/*.yaml secprobe/templates/unauthorized/*.yaml
 var files embed.FS
 
 func ServiceProbes() ([]byte, error) {
@@ -30,40 +30,12 @@ func Dict(level string) ([]byte, error) {
 	}
 }
 
-func SecprobeDict(protocol string) ([]byte, error) {
-	switch protocol {
-	case "amqp":
-		return files.ReadFile("secprobe/dicts/amqp.txt")
-	case "ftp":
-		return files.ReadFile("secprobe/dicts/ftp.txt")
-	case "mongodb":
-		return files.ReadFile("secprobe/dicts/mongodb.txt")
-	case "mssql":
-		return files.ReadFile("secprobe/dicts/mssql.txt")
-	case "mysql":
-		return files.ReadFile("secprobe/dicts/mysql.txt")
-	case "oracle":
-		return files.ReadFile("secprobe/dicts/oracle.txt")
-	case "postgresql":
-		return files.ReadFile("secprobe/dicts/postgresql.txt")
-	case "rdp":
-		return files.ReadFile("secprobe/dicts/rdp.txt")
-	case "redis":
-		return files.ReadFile("secprobe/dicts/redis.txt")
-	case "smb":
-		return files.ReadFile("secprobe/dicts/smb.txt")
-	case "smtp":
-		return files.ReadFile("secprobe/dicts/smtp.txt")
-	case "snmp":
-		return files.ReadFile("secprobe/dicts/snmp.txt")
-	case "ssh":
-		return files.ReadFile("secprobe/dicts/ssh.txt")
-	case "telnet":
-		return files.ReadFile("secprobe/dicts/telnet.txt")
-	case "vnc":
-		return files.ReadFile("secprobe/dicts/vnc.txt")
+func SecprobePasswordSource(source string) ([]byte, error) {
+	switch source {
+	case "builtin:passwords/global":
+		return files.ReadFile("secprobe/dicts/passwords/global.txt")
 	default:
-		return nil, fmt.Errorf("unsupported secprobe dict protocol: %s", protocol)
+		return nil, fmt.Errorf("unsupported secprobe password source: %s", source)
 	}
 }
 
