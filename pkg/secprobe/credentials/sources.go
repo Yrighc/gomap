@@ -26,6 +26,11 @@ type SourceDescriptor struct {
 	Path string
 }
 
+type credentialEntry struct {
+	Tier       Tier
+	Credential strategy.Credential
+}
+
 type missingSourceError struct {
 	kind   SourceKind
 	target string
@@ -56,11 +61,28 @@ var builtinLoader = func(protocol string) ([]strategy.Credential, error) {
 	return parseStrategyCredentialLines(string(data))
 }
 
+var builtinEntryLoader = func(protocol string) ([]credentialEntry, error) {
+	data, err := appassets.SecprobeDict(protocol)
+	if err != nil {
+		return nil, err
+	}
+	return parseStrategyCredentialEntries(string(data))
+}
+
 func stubBuiltinLoader(fn func(string) ([]strategy.Credential, error)) func() {
 	previous := builtinLoader
+	previousEntries := builtinEntryLoader
 	builtinLoader = fn
+	builtinEntryLoader = func(protocol string) ([]credentialEntry, error) {
+		creds, err := fn(protocol)
+		if err != nil {
+			return nil, err
+		}
+		return wrapCredentialsAsTierEntries(creds, TierTop), nil
+	}
 	return func() {
 		builtinLoader = previous
+		builtinEntryLoader = previousEntries
 	}
 }
 
@@ -110,6 +132,62 @@ func LoadBuiltinSource(protocol string) ([]strategy.Credential, SourceDescriptor
 			continue
 		}
 		return creds, SourceDescriptor{
+			Kind: SourceBuiltin,
+			Name: name,
+		}, nil
+	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
+	return nil, SourceDescriptor{}, lastErr
+}
+
+func LoadDirectorySourceByTiers(protocol, dictDir string, tiers []Tier) ([]strategy.Credential, SourceDescriptor, error) {
+	if strings.TrimSpace(dictDir) == "" {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceDictDir,
+			target: protocol,
+			err:    os.ErrNotExist,
+		}
+	}
+
+	for _, path := range dictionaryCandidatePaths(protocol, dictDir) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, SourceDescriptor{}, err
+		}
+
+		entries, err := parseStrategyCredentialEntries(string(data))
+		if err != nil {
+			return nil, SourceDescriptor{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		return flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers)), SourceDescriptor{
+			Kind: SourceDictDir,
+			Name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			Path: path,
+		}, nil
+	}
+
+	return nil, SourceDescriptor{}, &missingSourceError{
+		kind:   SourceDictDir,
+		target: protocol,
+		err:    os.ErrNotExist,
+	}
+}
+
+func LoadBuiltinSourceByTiers(protocol string, tiers []Tier) ([]strategy.Credential, SourceDescriptor, error) {
+	names := builtinSourceCandidates(protocol)
+	var lastErr error
+	for _, name := range names {
+		entries, err := builtinEntryLoader(name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers)), SourceDescriptor{
 			Kind: SourceBuiltin,
 			Name: name,
 		}, nil
@@ -184,27 +262,82 @@ func protocolDictionaryProfile(protocol string) CredentialProfile {
 }
 
 func parseStrategyCredentialLines(raw string) ([]strategy.Credential, error) {
+	entries, err := parseStrategyCredentialEntries(raw)
+	if err != nil {
+		return nil, err
+	}
+	return flattenCredentialEntries(entries), nil
+}
+
+func parseStrategyCredentialEntries(raw string) ([]credentialEntry, error) {
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	out := make([]strategy.Credential, 0, len(lines))
+	out := make([]credentialEntry, 0, len(lines))
 	for idx, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
-		parts := strings.SplitN(line, " : ", 2)
+		tier := TierTop
+		content := line
+		if strings.HasPrefix(trimmed, "[") {
+			end := strings.Index(trimmed, "]")
+			if end <= 1 {
+				return nil, fmt.Errorf("invalid credential tier line %d: %q", idx+1, line)
+			}
+			tier = normalizeTier(Tier(trimmed[1:end]))
+			if tier == "" {
+				return nil, fmt.Errorf("invalid credential tier line %d: %q", idx+1, line)
+			}
+			content = strings.TrimSpace(trimmed[end+1:])
+		}
+
+		parts := strings.SplitN(content, " : ", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid credential line %d: %q", idx+1, line)
 		}
-		out = append(out, strategy.Credential{
-			Username: strings.TrimSpace(parts[0]),
-			Password: strings.TrimSpace(parts[1]),
+		out = append(out, credentialEntry{
+			Tier: tier,
+			Credential: strategy.Credential{
+				Username: strings.TrimSpace(parts[0]),
+				Password: strings.TrimSpace(parts[1]),
+			},
 		})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no valid credentials found")
 	}
 	return out, nil
+}
+
+func wrapCredentialsAsTierEntries(creds []strategy.Credential, tier Tier) []credentialEntry {
+	out := make([]credentialEntry, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, credentialEntry{Tier: tier, Credential: cred})
+	}
+	return out
+}
+
+func filterCredentialEntriesByTiers(entries []credentialEntry, tiers []Tier) []credentialEntry {
+	if len(tiers) == 0 {
+		return nil
+	}
+
+	out := make([]credentialEntry, 0, len(entries))
+	for _, entry := range entries {
+		if containsTier(tiers, entry.Tier) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func flattenCredentialEntries(entries []credentialEntry) []strategy.Credential {
+	out := make([]strategy.Credential, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.Credential)
+	}
+	return out
 }
 
 func lookupProtocolDictionarySpec(protocol string) (metadata.Spec, bool) {

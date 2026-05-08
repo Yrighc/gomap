@@ -95,6 +95,70 @@ func TestGeneratorUsesDirectoryBeforeBuiltin(t *testing.T) {
 	}
 }
 
+func TestGeneratorTreatsWhitespaceDictDirAsExplicitDirectoryInput(t *testing.T) {
+	builtinCalled := false
+	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
+		builtinCalled = true
+		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	_, _, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "redis",
+			DefaultSources:   []string{"redis"},
+			DefaultTiers:     []Tier{TierTop, TierCommon},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+		DictDir: "   ",
+	})
+	if err == nil {
+		t.Fatal("expected Generate() error when whitespace dict_dir is explicitly provided")
+	}
+	if !IsMissingSource(err) {
+		t.Fatalf("expected missing source error, got %v", err)
+	}
+	if builtinCalled {
+		t.Fatal("expected builtin loader to stay unused when whitespace dict_dir is explicit")
+	}
+}
+
+func TestGeneratorFiltersTierTaggedEntriesByScanProfile(t *testing.T) {
+	dir := t.TempDir()
+	data := "[top] root : root\n[common] admin : admin\n[extended] guest : guest\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte(data), 0o600); err != nil {
+		t.Fatalf("write dict: %v", err)
+	}
+
+	gen := Generator{}
+	got, meta, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "ssh",
+			DefaultSources:   []string{"ssh"},
+			DefaultTiers:     []Tier{TierTop, TierCommon, TierExtended},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+		DictDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	wantCreds := []strategy.Credential{
+		{Username: "root", Password: "root"},
+		{Username: "admin", Password: "admin"},
+	}
+	if !reflect.DeepEqual(got, wantCreds) {
+		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	}
+	if !reflect.DeepEqual(meta.SelectedTiers, []Tier{TierTop, TierCommon}) {
+		t.Fatalf("Generate() selected tiers = %v, want [top common]", meta.SelectedTiers)
+	}
+}
+
 func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
 	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
 		if protocol != "redis" {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/credentials"
 	"github.com/yrighc/gomap/pkg/secprobe/engine"
 	"github.com/yrighc/gomap/pkg/secprobe/metadata"
 	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
@@ -300,6 +301,33 @@ func probeCandidateLegacy(
 }
 
 func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
+	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(protocol), 0)
+	if err != nil {
+		return nil, fmt.Errorf("load secprobe metadata: %w", err)
+	}
+	if !ok {
+		if legacy, ok := lookupLegacyProtocolSpec(normalizeProtocolToken(protocol), 0); ok {
+			spec = metadataSpecFromProtocolSpec(legacy)
+		} else {
+			return legacyCredentialsForCandidate(protocol, opts)
+		}
+	}
+
+	profile := credentials.ProfileFromMetadata(spec.Name, spec.Dictionary)
+	profile = profile.WithScanProfile(string(credentials.ScanProfileDefault))
+
+	generated, _, err := (credentials.Generator{}).Generate(credentials.GenerateInput{
+		Profile: profile,
+		DictDir: opts.DictDir,
+		Inline:  strategyCredentials(opts.Credentials),
+	})
+	if err != nil {
+		return nil, translateCredentialGenerationError(protocol, opts.DictDir, err)
+	}
+	return coreCredentials(generated), nil
+}
+
+func legacyCredentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
 	if len(opts.Credentials) > 0 {
 		return dedupeCredentials(opts.Credentials), nil
 	}
@@ -307,6 +335,16 @@ func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Cr
 		return loadCredentialsFromDir(protocol, opts.DictDir)
 	}
 	return CredentialsFor(protocol, opts)
+}
+
+func translateCredentialGenerationError(protocol, dictDir string, err error) error {
+	if !credentials.IsMissingSource(err) {
+		return err
+	}
+	if dictDir != "" {
+		return fmt.Errorf("credential dictionary not found for protocol %s in %s", protocol, dictDir)
+	}
+	return fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
 func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
@@ -547,6 +585,20 @@ func strategyCredentials(creds []Credential) []strategy.Credential {
 	out := make([]strategy.Credential, 0, len(creds))
 	for _, cred := range creds {
 		out = append(out, strategy.Credential{
+			Username: cred.Username,
+			Password: cred.Password,
+		})
+	}
+	return out
+}
+
+func coreCredentials(creds []strategy.Credential) []Credential {
+	if len(creds) == 0 {
+		return nil
+	}
+	out := make([]Credential, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, Credential{
 			Username: cred.Username,
 			Password: cred.Password,
 		})

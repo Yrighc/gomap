@@ -75,9 +75,8 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		}), meta, nil
 	}
 
-	trimmedDir := strings.TrimSpace(in.DictDir)
-	if trimmedDir != "" {
-		creds, source, err := LoadDirectorySource(in.Profile.Protocol, trimmedDir)
+	if in.DictDir != "" {
+		creds, source, err := LoadDirectorySourceByTiers(in.Profile.Protocol, in.DictDir, selectedTiers)
 		if err == nil {
 			meta.Source = source
 			return Expand(creds, Options{
@@ -89,7 +88,7 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		return nil, GenerateMeta{}, err
 	}
 
-	creds, source, err := LoadBuiltinSource(in.Profile.Protocol)
+	creds, source, err := LoadBuiltinSourceByTiers(in.Profile.Protocol, selectedTiers)
 	if err != nil {
 		return nil, GenerateMeta{}, err
 	}

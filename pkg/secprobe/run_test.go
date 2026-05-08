@@ -272,6 +272,7 @@ func TestRunWithRegistryFallsBackToCredentialAfterUnauthorizedFailure(t *testing
 		Service:    "redis",
 	}}, CredentialProbeOptions{
 		EnableUnauthorized: true,
+		StopOnSuccess:      true,
 		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
 	})
 
@@ -323,6 +324,7 @@ func TestRunWithRegistryFallsBackToAtomicCredentialAfterLegacyUnauthorizedFailur
 		Service:    "redis",
 	}}, CredentialProbeOptions{
 		EnableUnauthorized: true,
+		StopOnSuccess:      true,
 		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
 	})
 
@@ -925,6 +927,38 @@ func TestRunUsesDictDirBeforeBuiltinCredentials(t *testing.T) {
 	}
 	if result.Results[0].Username != "custom" || result.Results[0].Password != "secret" {
 		t.Fatalf("expected dict-dir credentials, got %+v", result.Results[0])
+	}
+}
+
+func TestRunUsesGeneratorTierFilteringForDictDir(t *testing.T) {
+	dir := t.TempDir()
+	data := "[top] root : root\n[common] admin : admin\n[extended] guest : guest\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte(data), 0o600); err != nil {
+		t.Fatalf("write dict file: %v", err)
+	}
+
+	registry := NewRegistry()
+	prober := &stubSuccessProber{name: "ssh"}
+	registry.Register(prober)
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       22,
+		Service:    "ssh",
+	}}, CredentialProbeOptions{
+		Timeout: time.Second,
+		DictDir: dir,
+	})
+
+	if !result.Results[0].Success {
+		t.Fatalf("expected dict-dir credentials to succeed, got %+v", result.Results[0])
+	}
+	if prober.credCount != 2 {
+		t.Fatalf("expected default scan profile to filter extended tier, got %d credentials", prober.credCount)
+	}
+	if result.Results[0].Username != "root" || result.Results[0].Password != "root" {
+		t.Fatalf("expected top-tier credential to stay first, got %+v", result.Results[0])
 	}
 }
 
