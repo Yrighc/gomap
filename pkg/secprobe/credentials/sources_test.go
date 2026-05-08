@@ -138,3 +138,18 @@ func TestLoadBuiltinSourceSupportsAliasCandidates(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadDirectorySourceByTiersReturnsMissingWhenEntriesAreFilteredOut(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte("[extended] guest : guest\n"), 0o600); err != nil {
+		t.Fatalf("write dict: %v", err)
+	}
+
+	_, _, err := LoadDirectorySourceByTiers("ssh", dir, []Tier{TierTop, TierCommon})
+	if err == nil {
+		t.Fatal("expected missing source error when all entries are filtered out")
+	}
+	if !IsMissingSource(err) {
+		t.Fatalf("expected missing source error, got %v", err)
+	}
+}

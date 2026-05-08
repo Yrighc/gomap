@@ -164,7 +164,15 @@ func LoadDirectorySourceByTiers(protocol, dictDir string, tiers []Tier) ([]strat
 		if err != nil {
 			return nil, SourceDescriptor{}, fmt.Errorf("parse %s: %w", path, err)
 		}
-		return flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers)), SourceDescriptor{
+		filtered := flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers))
+		if len(filtered) == 0 {
+			return nil, SourceDescriptor{}, &missingSourceError{
+				kind:   SourceDictDir,
+				target: protocol,
+				err:    os.ErrNotExist,
+			}
+		}
+		return filtered, SourceDescriptor{
 			Kind: SourceDictDir,
 			Name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
 			Path: path,
@@ -187,7 +195,16 @@ func LoadBuiltinSourceByTiers(protocol string, tiers []Tier) ([]strategy.Credent
 			lastErr = err
 			continue
 		}
-		return flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers)), SourceDescriptor{
+		filtered := flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers))
+		if len(filtered) == 0 {
+			lastErr = &missingSourceError{
+				kind:   SourceBuiltin,
+				target: protocol,
+				err:    os.ErrNotExist,
+			}
+			continue
+		}
+		return filtered, SourceDescriptor{
 			Kind: SourceBuiltin,
 			Name: name,
 		}, nil

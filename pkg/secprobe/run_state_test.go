@@ -3,6 +3,7 @@ package secprobe
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -78,6 +79,40 @@ func TestRunWithRegistryMarksMissingCredentialsAsNoCredentials(t *testing.T) {
 		Service:    "customsvc",
 	}}, CredentialProbeOptions{
 		DictDir: filepath.Join(t.TempDir(), "missing"),
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if got.Stage != core.StageMatched {
+		t.Fatalf("expected matched stage before credential load skip, got %+v", got)
+	}
+	if got.SkipReason != core.SkipReasonNoCredentials {
+		t.Fatalf("expected no-credentials skip reason, got %+v", got)
+	}
+}
+
+func TestRunWithRegistryMarksFilteredCredentialsAsNoCredentials(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(&stubKindedProber{
+		name:    "ssh-credential",
+		kind:    ProbeKindCredential,
+		service: "ssh",
+	})
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte("[extended] guest : guest\n"), 0o600); err != nil {
+		t.Fatalf("write dict: %v", err)
+	}
+
+	result := runWithRegistryInternal(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       22,
+		Service:    "ssh",
+	}}, CredentialProbeOptions{
+		DictDir: dir,
 	})
 
 	if len(result.Results) != 1 {
