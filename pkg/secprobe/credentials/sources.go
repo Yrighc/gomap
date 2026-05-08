@@ -186,6 +186,56 @@ func LoadDirectorySourceByTiers(protocol, dictDir string, tiers []Tier) ([]strat
 	}
 }
 
+func loadDirectorySourceNameByTiers(name, dictDir string, tiers []Tier) ([]strategy.Credential, SourceDescriptor, error) {
+	if strings.TrimSpace(dictDir) == "" {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceDictDir,
+			target: name,
+			err:    os.ErrNotExist,
+		}
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceDictDir,
+			target: name,
+			err:    os.ErrNotExist,
+		}
+	}
+
+	path := filepath.Join(dictDir, name+".txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, SourceDescriptor{}, &missingSourceError{
+				kind:   SourceDictDir,
+				target: name,
+				err:    os.ErrNotExist,
+			}
+		}
+		return nil, SourceDescriptor{}, err
+	}
+
+	entries, err := parseStrategyCredentialEntries(string(data))
+	if err != nil {
+		return nil, SourceDescriptor{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	filtered := flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers))
+	if len(filtered) == 0 {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceDictDir,
+			target: name,
+			err:    os.ErrNotExist,
+		}
+	}
+	return filtered, SourceDescriptor{
+		Kind: SourceDictDir,
+		Name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Path: path,
+	}, nil
+}
+
 func LoadBuiltinSourceByTiers(protocol string, tiers []Tier) ([]strategy.Credential, SourceDescriptor, error) {
 	names := builtinSourceCandidates(protocol)
 	var lastErr error
@@ -213,6 +263,30 @@ func LoadBuiltinSourceByTiers(protocol string, tiers []Tier) ([]strategy.Credent
 		lastErr = os.ErrNotExist
 	}
 	return nil, SourceDescriptor{}, lastErr
+}
+
+func loadBuiltinSourceNameByTiers(name string, tiers []Tier) ([]strategy.Credential, SourceDescriptor, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, SourceDescriptor{}, os.ErrNotExist
+	}
+
+	entries, err := builtinEntryLoader(name)
+	if err != nil {
+		return nil, SourceDescriptor{}, err
+	}
+	filtered := flattenCredentialEntries(filterCredentialEntriesByTiers(entries, tiers))
+	if len(filtered) == 0 {
+		return nil, SourceDescriptor{}, &missingSourceError{
+			kind:   SourceBuiltin,
+			target: name,
+			err:    os.ErrNotExist,
+		}
+	}
+	return filtered, SourceDescriptor{
+		Kind: SourceBuiltin,
+		Name: name,
+	}, nil
 }
 
 func dictionaryCandidatePaths(protocol, dictDir string) []string {

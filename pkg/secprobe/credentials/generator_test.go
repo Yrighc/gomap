@@ -125,6 +125,100 @@ func TestGeneratorUsesDirectoryBeforeBuiltin(t *testing.T) {
 	}
 }
 
+func TestGeneratorUsesPasswordSourceForDirectoryLookup(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "postgres.txt"), []byte("pg : secret\n"), 0o600); err != nil {
+		t.Fatalf("write dict: %v", err)
+	}
+
+	gen := Generator{}
+	got, meta, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "postgresql",
+			PasswordSource:   " postgres ",
+			DefaultTiers:     []Tier{TierTop, TierCommon},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+		DictDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
+	if !reflect.DeepEqual(got, wantCreds) {
+		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	}
+	if meta.Source.Kind != SourceDictDir || meta.Source.Name != "postgres" {
+		t.Fatalf("Generate() source = %+v, want postgres dict dir", meta.Source)
+	}
+}
+
+func TestGeneratorFallsBackToProtocolWhenPasswordSourceBlank(t *testing.T) {
+	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
+		if protocol != "postgresql" {
+			t.Fatalf("protocol = %q, want %q", protocol, "postgresql")
+		}
+		return []strategy.Credential{{Username: "pg", Password: "secret"}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	got, meta, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "postgresql",
+			PasswordSource:   " ",
+			DefaultTiers:     []Tier{TierTop},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
+	if !reflect.DeepEqual(got, wantCreds) {
+		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	}
+	if meta.Source.Kind != SourceBuiltin || meta.Source.Name != "postgresql" {
+		t.Fatalf("Generate() source = %+v, want postgresql builtin", meta.Source)
+	}
+}
+
+func TestGeneratorUsesPasswordSourceForBuiltinLookup(t *testing.T) {
+	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
+		if protocol != "postgres" {
+			t.Fatalf("protocol = %q, want %q", protocol, "postgres")
+		}
+		return []strategy.Credential{{Username: "pg", Password: "secret"}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	got, meta, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:         "postgresql",
+			PasswordSource:   " postgres ",
+			DefaultTiers:     []Tier{TierTop},
+			ScanProfile:      ScanProfileDefault,
+			ExpansionProfile: "none",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
+	if !reflect.DeepEqual(got, wantCreds) {
+		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	}
+	if meta.Source.Kind != SourceBuiltin || meta.Source.Name != "postgres" {
+		t.Fatalf("Generate() source = %+v, want postgres builtin", meta.Source)
+	}
+}
+
 func TestGeneratorTreatsWhitespaceDictDirAsExplicitDirectoryInput(t *testing.T) {
 	builtinCalled := false
 	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {

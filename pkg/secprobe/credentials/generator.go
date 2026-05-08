@@ -71,8 +71,9 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		return creds, meta, nil
 	}
 
+	sourceName := sourceNameForProfile(in.Profile)
 	if in.DictDir != "" {
-		creds, source, err := LoadDirectorySourceByTiers(in.Profile.Protocol, in.DictDir, selectedTiers)
+		creds, source, err := loadDirectorySourceNameByTiers(sourceName, in.DictDir, selectedTiers)
 		if err == nil {
 			meta.Source = source
 			return Expand(creds, Options{
@@ -84,7 +85,7 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		return nil, GenerateMeta{}, err
 	}
 
-	creds, source, err := LoadBuiltinSourceByTiers(in.Profile.Protocol, selectedTiers)
+	creds, source, err := loadBuiltinSourceNameByTiers(sourceName, selectedTiers)
 	if err != nil {
 		return nil, GenerateMeta{}, err
 	}
@@ -94,6 +95,13 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		AllowEmptyUser: in.Profile.AllowEmptyUsername,
 		AllowEmptyPass: in.Profile.AllowEmptyPassword,
 	}), meta, nil
+}
+
+func sourceNameForProfile(profile CredentialProfile) string {
+	if source := strings.TrimSpace(profile.PasswordSource); source != "" {
+		return source
+	}
+	return profile.Protocol
 }
 
 func dedupeStrategyCredentials(in []strategy.Credential) []strategy.Credential {
