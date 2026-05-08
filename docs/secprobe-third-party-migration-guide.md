@@ -1,6 +1,6 @@
 # secprobe 三方接入升级迁移指南
 
-日期：2026-05-07
+日期：2026-05-08
 
 ## 1. 文档目的
 
@@ -29,10 +29,15 @@
 - `provider`
   - 负责单次原子协议动作，例如“一次认证尝试”或“一次未授权确认”
 
+同时弱口令候选侧已经进一步收口成：
+
+`metadata.dictionary -> credential profile -> generator -> engine`
+
 这意味着当前默认内置路径已经不再以“是否存在一个 legacy batch prober”作为主心智模型，而是以：
 
 - 是否有协议元数据
 - 是否注册了对应 capability 的 provider
+- 候选是否能由 generator 成功生成
 
 来决定协议是否真正可执行。
 
@@ -42,6 +47,7 @@
 
 - 内置 `credential` 协议收口为 atomic provider 执行路径
 - `Run` / `RunWithRegistry` 统一走 planner + engine 主链路
+- `credential` 候选加载已统一走 generator，而不是各协议零散直读 txt
 - `memcached unauthorized` 改为 simple template executor 执行
 - public `Registry.Register(...)` 兼容路径继续保留，但被隔离为显式 compatibility adapter
 - builtin 协议能力判断不再等价于 `Lookup(..., ProbeKindXxx)` 是否命中
@@ -295,6 +301,7 @@ r.RegisterAtomicUnauthorized("myproto", myUnauthorizedChecker)
 - `EnableUnauthorized` 开关是否仍符合预期
 - `StopOnSuccess` 是否仍符合预期
 - 命中结果的 `FindingType`、`Evidence`、`Username`、`Password` 是否符合预期
+- 显式 `dict_dir` 缺失时是否按 `no-credentials` 处理，而不是静默回退 builtin
 
 ### 7.2 你维护私有协议扩展
 
@@ -322,6 +329,16 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 }
 ```
 
+如果你的私有协议也需要默认弱口令候选生成能力，当前建议同步维护：
+
+- 一份协议 metadata
+- 一份默认字典
+- 一个 atomic provider
+
+也就是让私有协议尽量和内置协议保持同一条链路：
+
+`metadata -> generator -> engine -> provider`
+
 ### 7.3 你维护历史 legacy prober 扩展
 
 建议分两步走：
@@ -340,6 +357,7 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 当前弱口令引擎建议按下面方式维护：
 
 - 协议静态信息放在 metadata
+- 候选生成策略放在 dictionary metadata + generator
 - 执行计划由 planner 统一生成
 - 执行控制由 engine 统一负责
 - 协议单次动作由 provider 负责
@@ -359,6 +377,17 @@ func RegisterMySecprobe(r *secprobe.Registry) {
   - 已接到 simple template executor
 - `zookeeper unauthorized`
   - 仍保留 code-backed 路径
+
+字典侧当前也可以这样理解：
+
+- `inline`
+  - 仍然最高优先级
+- `dict_dir`
+  - 仍然覆盖 builtin
+- `builtin`
+  - 仍然作为默认回退
+
+但这三者现在已经不是三套分散逻辑，而是统一进入 generator。
 
 ## 9. 当前 simple unauthorized template 的边界
 
@@ -384,9 +413,36 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 
 那么应继续使用代码实现，不应强行塞进模板。
 
-## 10. 常见坑
+## 10. 当前 scan profile 与字典分层边界
 
-### 10.1 把 `Lookup(...)` 当成 builtin capability 判断依据
+当前 credentials 层内部已经具备：
+
+- `fast`
+- `default`
+- `full`
+
+三种 scan profile，以及：
+
+- `top`
+- `common`
+- `extended`
+
+三层 tier 语义。
+
+但对三方调用方需要特别说明两点：
+
+1. 当前公开 `Run` / `RunWithRegistry` / `Scan` 主链路仍固定使用 `default`
+2. 当前只有显式写出 `[common]` / `[extended]` 的字典行，tier 过滤才会真正区分层级
+
+这意味着：
+
+- 你现在升级到这版后，不需要额外传 scan profile 参数
+- 但如果你维护自己的默认字典，已经可以开始按 tier 写数据
+- 不应再用“取前 N 条”这种隐藏截断方式模拟 `fast/default/full`
+
+## 11. 常见坑
+
+### 11.1 把 `Lookup(...)` 当成 builtin capability 判断依据
 
 这是升级后最常见的误判来源。
 
@@ -397,7 +453,7 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 
 在当前模型里，builtin credential 很多是 atomic/provider-first，不必经由 legacy lookup 暴露。
 
-### 10.2 在 provider 里重新实现 loop
+### 11.2 在 provider 里重新实现 loop
 
 atomic provider 的职责是单次动作，不应重新承担：
 
@@ -408,17 +464,26 @@ atomic provider 的职责是单次动作，不应重新承担：
 
 这些都应该交给 engine。
 
-### 10.3 试图把复杂未授权逻辑下沉到模板
+### 11.3 试图把复杂未授权逻辑下沉到模板
 
 simple template executor 是受限执行器，不是通用协议 DSL。
 
 如果协议需要多阶段交互，就继续写代码，不要为了“看起来统一”而把逻辑塞进模板。
 
-### 10.4 混淆“兼容可用”和“推荐模式”
+### 11.4 混淆“兼容可用”和“推荐模式”
 
 `Registry.Register(...)` 现在的语义是“兼容仍可用”，不是“推荐新扩展继续这么写”。
 
-## 11. 建议的回归测试基线
+### 11.5 以为显式 `dict_dir` 缺失会自动回退 builtin
+
+当前 generator 已收紧这个语义：
+
+- 如果调用方显式传了 `dict_dir`
+- 但该目录下没有对应协议字典
+
+那么运行时应按 `no-credentials` 处理，而不是静默改用 builtin。
+
+## 12. 建议的回归测试基线
 
 三方升级后，至少建议覆盖下面几类回归：
 
@@ -428,8 +493,10 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 4. `StopOnSuccess=true` 时的停止行为
 5. `EnableUnauthorized=true/false` 的分支行为
 6. 缺少字典时的 `no-credentials` 行为
-7. 自定义 provider 注册后的 capability 命中行为
-8. legacy public prober 兼容路径行为
+7. `inline / dict_dir / builtin` 优先级行为
+8. 如使用 tier-tagged 字典，默认档位过滤行为
+9. 自定义 provider 注册后的 capability 命中行为
+10. legacy public prober 兼容路径行为
 
 如果你有私有协议扩展，建议额外覆盖：
 
@@ -438,7 +505,7 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 3. 超时与取消传播
 4. 与 engine 停止条件联动
 
-## 12. 升级 checklist
+## 13. 升级 checklist
 
 建议三方升级时按下面顺序核对：
 
@@ -447,10 +514,11 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 3. 如果是扩展方，优先评估能否迁移到 atomic provider
 4. 检查是否有代码依赖 `Lookup(..., kind)` 作为 capability 判断
 5. 检查是否把 loop、重试、停止条件写死在协议实现里
-6. 检查未授权确认是否适合模板化，还是应继续 code-backed
-7. 补齐回归测试后再升级生产调用
+6. 检查是否误以为显式 `dict_dir` 缺失会自动回退 builtin
+7. 检查未授权确认是否适合模板化，还是应继续 code-backed
+8. 补齐回归测试后再升级生产调用
 
-## 13. 总结
+## 14. 总结
 
 这轮升级对三方最重要的变化，不是“API 变了”，而是“推荐扩展模型变了”。
 

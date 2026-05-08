@@ -1,6 +1,6 @@
 # secprobe 协议扩展开发指南
 
-日期：2026-05-07
+日期：2026-05-08
 
 本文用于说明当前版本 GoMap `secprobe` 的协议扩展方式。重点不是把协议扩展改造成纯配置驱动，而是把当前已经落地的扩展模型、职责边界和接入步骤讲清楚，避免后续新增协议时再次回到“在运行主链路里临时拼协议”的模式。
 
@@ -24,6 +24,10 @@
   - 负责单次原子协议动作
   - 例如“一次认证尝试”或“一次未授权确认”
 
+当前弱口令候选生成则进一步收口为：
+
+`metadata.dictionary -> credential profile -> generator -> engine`
+
 这意味着当前协议扩展的核心已经不是：
 
 - 在某处塞一个批量 prober
@@ -34,6 +38,7 @@
 - 用 metadata 描述协议静态属性
 - 用 provider 提供单次原子能力
 - 由 planner 和 engine 负责执行控制
+- 由 generator 负责弱口令候选生成
 
 ## 2. 当前推荐扩展路径
 
@@ -139,6 +144,29 @@
 
 适用前提不是“这个协议有未授权能力”，而是“这个未授权确认动作足够简单，能被受限模板准确表达”。
 
+### 3.5 字典与候选生成层
+
+当前弱口令字典相关实现集中在：
+
+`pkg/secprobe/credentials/`
+
+这一层负责：
+
+- 把 metadata 中的 `dictionary` 编译成运行时 profile
+- 统一处理 `inline > dict_dir > builtin` 来源优先级
+- 执行基础去重
+- 执行基础变异
+- 按 tier 选择最终候选
+
+这一层不负责：
+
+- 网络交互
+- 协议握手
+- stop / retry / timeout
+- 成功判定
+
+因此后续如果要调整“默认用哪些口令”“是否允许空用户名”“是否启用基础变异”，优先应修改 metadata 或 `pkg/secprobe/credentials/*`，不要把这些逻辑塞回 provider。
+
 ## 4. 哪些内容适合 metadata
 
 当前适合沉淀为 metadata 的内容包括：
@@ -147,6 +175,7 @@
 - 协议别名
 - 默认端口
 - 默认字典来源
+- 默认字典层级
 - 是否支持 `credential`
 - 是否支持 `unauthorized`
 - 是否支持 `enrichment`
@@ -164,6 +193,40 @@
 - 优先在 `app/secprobe/protocols/*.yaml` 维护
 - 让候选构建、协议归一化和字典选择尽量消费同一份 metadata
 - 把“支持哪些能力”视为静态契约，而不是到处手写 `switch`
+
+当前 `dictionary` 节点建议至少维护下面这些字段：
+
+```yaml
+dictionary:
+  default_sources:
+    - ssh
+  default_tiers:
+    - top
+    - common
+  allow_empty_username: false
+  allow_empty_password: false
+  expansion_profile: static_basic
+```
+
+字段语义：
+
+- `default_sources`
+  - 默认字典名列表
+- `default_tiers`
+  - 该协议默认允许使用哪些层
+- `allow_empty_username`
+  - 是否允许生成空用户名候选
+- `allow_empty_password`
+  - 是否允许生成空密码候选
+- `expansion_profile`
+  - 基础变异策略组
+
+边界要求：
+
+- YAML 只做策略声明
+- YAML 不做循环
+- YAML 不做网络操作
+- YAML 不做状态机
 
 ## 5. 哪些内容必须代码实现
 
@@ -243,7 +306,68 @@
 
 而不必每次都重新实现一套批量执行控制。
 
-## 7. legacy public prober 的位置
+## 7. 当前弱口令引擎的维护方式
+
+当前建议把弱口令相关维护拆成三层：
+
+### 7.1 策略层：metadata
+
+放在：
+
+- `app/secprobe/protocols/*.yaml`
+
+这里维护：
+
+- 默认字典名
+- 默认层级
+- 空用户名/空密码开关
+- 基础变异策略
+
+### 7.2 数据层：字典文件
+
+放在：
+
+- `app/secprobe/dicts/*.txt`
+
+当前支持两种行格式：
+
+```text
+root : root
+[common] admin : admin
+```
+
+说明：
+
+- 不带 tier 前缀的旧格式仍然有效
+- 旧 flat txt 会被视为 `top`
+- 只有显式写出 `[common]` / `[extended]`，分层过滤才会真实区分
+
+这意味着当前版本不会再用“前 N 条”来伪装 `fast/default/full`。
+
+### 7.3 执行层：generator
+
+放在：
+
+- `pkg/secprobe/credentials/sources.go`
+- `pkg/secprobe/credentials/expand.go`
+- `pkg/secprobe/credentials/tiers.go`
+- `pkg/secprobe/credentials/generator.go`
+
+这里负责：
+
+- 来源优先级
+- 候选去重
+- 基础变异
+- 层级过滤
+
+维护原则：
+
+- 想改来源顺序，改 generator
+- 想改基础变异，改 `expand.go`
+- 想改层级交集，改 `tiers.go`
+- 不要把这些逻辑塞回 provider
+
+## 8. legacy public prober 的位置
 
 public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 
@@ -267,7 +391,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 
 - legacy core/public prober 暴露
 
-## 8. simple unauthorized template 的使用边界
+## 9. simple unauthorized template 的使用边界
 
 当前 simple unauthorized template executor 是刻意收边的受限执行器，不是通用协议 DSL。
 
@@ -305,7 +429,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 
 这类协议应继续走 code-backed provider，而不是为了“统一成 YAML”硬塞进模板。
 
-## 9. 新协议接入 Checklist
+## 10. 新协议接入 Checklist
 
 新增一个协议时，建议至少按下面顺序检查：
 
@@ -313,29 +437,32 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 2. 在 `app/secprobe/protocols/*.yaml` 增加 metadata
 3. 确认支持哪些能力：`credential`、`unauthorized`、`enrichment`
 4. 如果支持凭证探测，确定默认字典来源
-5. 在 `internal/secprobe/<protocol>/` 新建协议目录
-6. 实现 atomic `authenticator`
-7. 如支持未授权，实现 atomic `unauthorized checker`
-8. 如命中后需补采，实现 `enrichment`
-9. 在 `pkg/secprobe/default_registry.go` 注册 provider
-10. 如果该协议是简单未授权协议，评估是否改走 template executor
-11. 如果使用模板化未授权，补 `app/secprobe/templates/unauthorized/*.yaml`
-12. 如果支持默认内置字典，补齐 `app/secprobe/dicts/*.txt`
-13. 补对应测试
-14. 复查不会破坏 `Run` / `RunWithRegistry` 的对外契约
+5. 如果支持凭证探测，明确 `default_tiers`
+6. 如果需要基础变异，明确 `expansion_profile`
+7. 在 `internal/secprobe/<protocol>/` 新建协议目录
+8. 实现 atomic `authenticator`
+9. 如支持未授权，实现 atomic `unauthorized checker`
+10. 如命中后需补采，实现 `enrichment`
+11. 在 `pkg/secprobe/default_registry.go` 注册 provider
+12. 如果该协议是简单未授权协议，评估是否改走 template executor
+13. 如果使用模板化未授权，补 `app/secprobe/templates/unauthorized/*.yaml`
+14. 如果支持默认内置字典，补齐 `app/secprobe/dicts/*.txt`
+15. 如需分层，优先在字典行里显式标注 tier
+16. 补对应测试
+17. 复查不会破坏 `Run` / `RunWithRegistry` 的对外契约
 
-## 10. 结果语义要求
+## 11. 结果语义要求
 
 协议扩展必须遵守统一结果语义。即使 CLI / JSON 当前没有把所有内部字段都直接对外暴露，扩展实现仍应保持内部语义稳定、可推断、可测试。
 
-### 10.1 Success 语义
+### 11.1 Success 语义
 
 - `Success=true` 只用于已经真实确认命中的结果
 - `credential` 命中应落到 `credential-valid`
 - `unauthorized` 命中应落到 `unauthorized-access`
 - 不能把“端口开着”“像这个协议”“握手通了”直接算命中
 
-### 10.2 Stage 语义
+### 11.2 Stage 语义
 
 - `matched`
   - 命中协议路由，但还没形成有效尝试
@@ -351,7 +478,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - 不支持协议时可以直接跳过
 - enrichment 没有产生新数据时，不应强行改成 `enriched`
 
-### 10.3 SkipReason 语义
+### 11.3 SkipReason 语义
 
 跳过原因应尽量落在统一分类：
 
@@ -364,7 +491,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - `SkipReason` 用于没有进入有效探测或前置条件不足的场景
 - 已经做了真实协议交互后失败，不要再写成 skip
 
-### 10.4 FailureReason 语义
+### 11.4 FailureReason 语义
 
 探测失败时，尽量归入统一失败分类：
 
@@ -380,7 +507,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - 不要因为错误分类不确定就误报成功
 - 成功结果不应残留失败原因
 
-### 10.5 Evidence 语义
+### 11.5 Evidence 语义
 
 - `Evidence` 应说明为什么可以确认该结果
 - 证据应来自真实交互
@@ -392,13 +519,13 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - `INFO returned redis_version without authentication`
 - `listDatabaseNames succeeded without authentication`
 
-### 10.6 Enrichment 语义
+### 11.6 Enrichment 语义
 
 - enrichment 只能发生在成功结果上
 - enrichment 负责补上下文，不负责篡改主 finding 结论
 - 不能把失败结果“补采成成功”
 
-## 11. 推荐的测试基线
+## 12. 推荐的测试基线
 
 新增协议时，至少建议覆盖下面几类测试：
 
@@ -411,11 +538,33 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 7. 成功结果的 `FindingType` 是否正确
 8. `RunWithRegistry` 下能否被正确调度
 9. 如支持 credential，字典链路是否可用
-10. 如支持 unauthorized，credential / unauthorized 顺序与回退是否符合预期
-11. 如支持 enrichment，补采失败是否不影响主 finding
-12. 如使用 template executor，模板匹配成功与失败是否都可覆盖
+10. 如支持 credential，`inline / dict_dir / builtin` 优先级是否符合预期
+11. 如支持 credential，显式 tier 行是否能被正确过滤
+12. 如支持 credential，缺失 `dict_dir` 是否按 `no-credentials` 处理而不是静默回退
+13. 如支持 unauthorized，credential / unauthorized 顺序与回退是否符合预期
+14. 如支持 enrichment，补采失败是否不影响主 finding
+15. 如使用 template executor，模板匹配成功与失败是否都可覆盖
 
-## 12. 不建议的做法
+## 13. 当前 scan profile 边界
+
+当前 credentials 层已经具备：
+
+- `fast`
+- `default`
+- `full`
+
+三种 scan profile 语义，但需要特别说明：
+
+- 当前公开 `Run` / `RunWithRegistry` / `Scan` 主链路仍固定使用 `default`
+- 也就是当前外部调用方还不能通过 public API 直接切换到 `fast` 或 `full`
+
+因此文档中提到 `fast/default/full` 时，当前含义是：
+
+- 内部字典与候选生成模型已经按这个抽象设计
+- 后续可以平滑开放
+- 当前默认运行语义等价于 `default`
+
+## 14. 不建议的做法
 
 - 为了少写代码，把协议扩展强行改成纯 YAML 执行
 - 在 `pkg/secprobe/run.go` 里继续追加协议特判
@@ -424,8 +573,10 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - 只根据 banner、端口或弱特征直接判定未授权成功
 - 把复杂会话协议硬塞进 simple template executor
 - 让 enrichment 改写主 finding 的确认语义
+- 把旧 flat txt 的前几条硬解释成 `top/common/extended`
+- 用隐藏截断冒充 `fast/default/full`
 
-## 13. 结论
+## 15. 结论
 
 当前 `secprobe` 的协议扩展方式，核心已经从“批量 prober 驱动”切换到“metadata + planner + engine + provider”驱动。
 

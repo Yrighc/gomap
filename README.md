@@ -208,10 +208,13 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 ### 5.4.1 secprobe v1.4 扩展模式说明
 
 - `secprobe` 当前采用“代码驱动协议执行 + metadata 驱动静态声明”的扩展模式，主链路为 `metadata -> planner -> engine -> provider`。
+- 弱口令候选生成已进一步收口为 `metadata.dictionary -> credential profile -> generator -> engine`，默认不再把“前 N 条口令”当成隐藏扫描档位。
 - 协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中；协议名、别名、默认端口、能力、默认字典与模板引用等静态信息集中收敛在 `app/secprobe/protocols/*.yaml`。
 - 新增协议不建议只改配置文件；仅补 metadata / 字典 / 模板并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的 atomic provider，并完成默认 registry 注册。
 - `memcached` 与 `zookeeper` 第一版按 `unauthorized` 协议接入，使用只读确认动作，不依赖凭证字典。
 - `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
+- 当前公开 `Run` / `RunWithRegistry` / `Scan` 主链路固定使用 `default` 档位；内部虽然已有 `fast/default/full` 抽象，但尚未作为 public 参数开放。
+- `dict_dir` 现在是显式覆盖语义：如果你传了 `-weak-dict-dir` / `DictDir`，但目录里没有对应协议字典，将按 `no-credentials` 处理，而不是静默回退 builtin。
 - 协议扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 - 三方库调用与历史扩展升级方式请参考 [docs/secprobe-third-party-migration-guide.md](docs/secprobe-third-party-migration-guide.md)。
 
