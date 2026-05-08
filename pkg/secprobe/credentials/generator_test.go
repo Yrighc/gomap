@@ -26,7 +26,7 @@ func TestGeneratorUsesInlineBeforeDirectoryAndBuiltin(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:         "ssh",
-			DefaultSources:   []string{"ssh"},
+			PasswordSource:   "ssh",
 			DefaultTiers:     []Tier{TierTop, TierCommon},
 			ScanProfile:      ScanProfileFull,
 			ExpansionProfile: "none",
@@ -58,7 +58,7 @@ func TestGeneratorKeepsInlineCredentialsLiteralWithoutExpansion(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:           "redis",
-			DefaultSources:     []string{"redis"},
+			PasswordSource:     "redis",
 			DefaultTiers:       []Tier{TierTop, TierCommon},
 			ScanProfile:        ScanProfileDefault,
 			AllowEmptyUsername: true,
@@ -100,7 +100,7 @@ func TestGeneratorUsesDirectoryBeforeBuiltin(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:           "redis",
-			DefaultSources:     []string{"redis"},
+			PasswordSource:     "redis",
 			DefaultTiers:       []Tier{TierTop, TierCommon},
 			ScanProfile:        ScanProfileDefault,
 			AllowEmptyUsername: true,
@@ -137,7 +137,7 @@ func TestGeneratorTreatsWhitespaceDictDirAsExplicitDirectoryInput(t *testing.T) 
 	_, _, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:         "redis",
-			DefaultSources:   []string{"redis"},
+			PasswordSource:   "redis",
 			DefaultTiers:     []Tier{TierTop, TierCommon},
 			ScanProfile:      ScanProfileDefault,
 			ExpansionProfile: "none",
@@ -166,7 +166,7 @@ func TestGeneratorFiltersTierTaggedEntriesByScanProfile(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:         "ssh",
-			DefaultSources:   []string{"ssh"},
+			PasswordSource:   "ssh",
 			DefaultTiers:     []Tier{TierTop, TierCommon, TierExtended},
 			ScanProfile:      ScanProfileDefault,
 			ExpansionProfile: "none",
@@ -205,7 +205,7 @@ func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:           "redis",
-			DefaultSources:     []string{"redis"},
+			PasswordSource:     "redis",
 			DefaultTiers:       []Tier{TierTop, TierCommon, TierExtended},
 			ScanProfile:        ScanProfileFast,
 			AllowEmptyUsername: true,
@@ -250,7 +250,7 @@ func TestGeneratorReturnsSourceErrorWhenBuiltinFallbackFails(t *testing.T) {
 	_, _, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:         "missing",
-			DefaultSources:   []string{"missing"},
+			PasswordSource:   "missing",
 			DefaultTiers:     []Tier{TierTop},
 			ExpansionProfile: "none",
 		},
@@ -272,7 +272,7 @@ func TestGeneratorReturnsMissingDictDirErrorWithoutBuiltinFallback(t *testing.T)
 	_, _, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:         "redis",
-			DefaultSources:   []string{"redis"},
+			PasswordSource:   "redis",
 			DefaultTiers:     []Tier{TierTop, TierCommon},
 			ScanProfile:      ScanProfileDefault,
 			ExpansionProfile: "none",

@@ -243,7 +243,7 @@ func TestCompileConsumesSNMPMetadataFields(t *testing.T) {
 			Transport:   "udp",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"snmp"},
+			PasswordSource:     "snmp",
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: false,
 			ExpansionProfile:   "static_basic",
@@ -308,7 +308,7 @@ func TestCompileConsumesUnauthorizedOnlyMetadataFields(t *testing.T) {
 			Transport:   "tcp",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{},
+			PasswordSource:     "",
 			AllowEmptyUsername: false,
 			AllowEmptyPassword: false,
 			ExpansionProfile:   "none",
@@ -364,7 +364,7 @@ func testSpec() metadata.Spec {
 			LockoutRisk: "low",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"redis"},
+			PasswordSource:     "redis",
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: true,
 			ExpansionProfile:   "static_basic",

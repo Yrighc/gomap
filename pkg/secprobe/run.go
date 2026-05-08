@@ -697,13 +697,20 @@ func metadataSpecFromProtocolSpec(spec ProtocolSpec) metadata.Spec {
 			Enrichment:   spec.SupportsEnrichment,
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources: append([]string(nil), spec.DictNames...),
+			PasswordSource: firstDictionaryName(spec.DictNames),
 		},
 		Results: metadata.ResultProfile{
 			CredentialSuccessType:   string(result.FindingTypeCredentialValid),
 			UnauthorizedSuccessType: string(result.FindingTypeUnauthorizedAccess),
 		},
 	}
+}
+
+func firstDictionaryName(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func containsProbeKind(kinds []ProbeKind, target ProbeKind) bool {

@@ -8,7 +8,7 @@ import (
 )
 
 type DictionaryProfileInput struct {
-	DefaultSources     []string
+	PasswordSource     string
 	DefaultTiers       []string
 	AllowEmptyUsername bool
 	AllowEmptyPassword bool
@@ -30,7 +30,7 @@ type Generator struct{}
 
 func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialProfile {
 	return ProfileFromDictionary(protocol, DictionaryProfileInput{
-		DefaultSources:     dict.DefaultSources,
+		PasswordSource:     dict.PasswordSource,
 		DefaultTiers:       dict.DefaultTiers,
 		AllowEmptyUsername: dict.AllowEmptyUsername,
 		AllowEmptyPassword: dict.AllowEmptyPassword,
@@ -41,7 +41,7 @@ func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialPr
 func ProfileFromDictionary(protocol string, dict DictionaryProfileInput) CredentialProfile {
 	return CredentialProfile{
 		Protocol:           strings.ToLower(strings.TrimSpace(protocol)),
-		DefaultSources:     append([]string(nil), dict.DefaultSources...),
+		PasswordSource:     strings.ToLower(strings.TrimSpace(dict.PasswordSource)),
 		DefaultTiers:       normalizeTiers(dict.DefaultTiers),
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: dict.AllowEmptyUsername,

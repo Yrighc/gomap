@@ -240,29 +240,20 @@ func builtinSourceCandidates(protocol string) []string {
 	}
 
 	profile := protocolDictionaryProfile(normalized)
-	out := make([]string, 0, len(profile.DefaultSources)+1)
-	seen := make(map[string]struct{}, len(profile.DefaultSources)+1)
-	for _, source := range profile.DefaultSources {
-		source = strings.ToLower(strings.TrimSpace(source))
-		if source == "" {
-			continue
-		}
-		if _, ok := seen[source]; ok {
-			continue
-		}
-		seen[source] = struct{}{}
-		out = append(out, source)
+	source := strings.ToLower(strings.TrimSpace(profile.PasswordSource))
+	if source == "" {
+		source = strings.ToLower(strings.TrimSpace(profile.Protocol))
 	}
-	if _, ok := seen[normalized]; !ok {
-		out = append(out, normalized)
+	if source == "" {
+		source = normalized
 	}
-	return out
+	return []string{source}
 }
 
 func protocolDictionaryProfile(protocol string) CredentialProfile {
 	if spec, ok := lookupProtocolDictionarySpec(protocol); ok {
 		return ProfileFromDictionary(spec.Name, DictionaryProfileInput{
-			DefaultSources:     spec.Dictionary.DefaultSources,
+			PasswordSource:     spec.Dictionary.PasswordSource,
 			DefaultTiers:       spec.Dictionary.DefaultTiers,
 			AllowEmptyUsername: spec.Dictionary.AllowEmptyUsername,
 			AllowEmptyPassword: spec.Dictionary.AllowEmptyPassword,
@@ -271,10 +262,9 @@ func protocolDictionaryProfile(protocol string) CredentialProfile {
 	}
 
 	return CredentialProfile{
-		Protocol:       protocol,
-		DefaultSources: []string{protocol},
-		DefaultTiers:   []Tier{TierTop, TierCommon},
-		ScanProfile:    ScanProfileDefault,
+		Protocol:     protocol,
+		DefaultTiers: []Tier{TierTop, TierCommon},
+		ScanProfile:  ScanProfileDefault,
 	}
 }
 

@@ -18,7 +18,7 @@ const (
 
 type CredentialProfile struct {
 	Protocol           string
-	DefaultSources     []string
+	PasswordSource     string
 	DefaultTiers       []Tier
 	ScanProfile        ScanProfile
 	AllowEmptyUsername bool

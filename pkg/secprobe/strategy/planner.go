@@ -55,7 +55,7 @@ func Compile(spec metadata.Spec, in CompileInput) Plan {
 func selectCredentialSet(spec metadata.Spec, in CompileInput) CredentialSet {
 	set := CredentialSet{
 		Source:           CredentialSourceBuiltin,
-		Dictionaries:     append([]string(nil), spec.Dictionary.DefaultSources...),
+		Dictionaries:     dictionarySources(spec),
 		ExpansionProfile: spec.Dictionary.ExpansionProfile,
 		AllowEmptyUser:   spec.Dictionary.AllowEmptyUsername,
 		AllowEmptyPass:   spec.Dictionary.AllowEmptyPassword,
@@ -73,6 +73,20 @@ func selectCredentialSet(spec metadata.Spec, in CompileInput) CredentialSet {
 	}
 
 	return set
+}
+
+func dictionarySources(spec metadata.Spec) []string {
+	passwordSource := spec.Dictionary.PasswordSource
+	if passwordSource == "" {
+		if !spec.Capabilities.Credential {
+			return nil
+		}
+		passwordSource = spec.Name
+	}
+	if passwordSource == "" {
+		return nil
+	}
+	return []string{passwordSource}
 }
 
 func dedupeCredentials(in []Credential) []Credential {

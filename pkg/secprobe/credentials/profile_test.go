@@ -7,7 +7,7 @@ import (
 
 func TestProfileFromDictionaryUsesExplicitDefaultTiers(t *testing.T) {
 	dict := DictionaryProfileInput{
-		DefaultSources:     []string{"ssh"},
+		PasswordSource:     "ssh",
 		DefaultTiers:       []string{" Top ", "COMMON", "top", "extended", ""},
 		AllowEmptyUsername: false,
 		AllowEmptyPassword: true,
@@ -17,7 +17,7 @@ func TestProfileFromDictionaryUsesExplicitDefaultTiers(t *testing.T) {
 	got := ProfileFromDictionary("ssh", dict)
 	want := CredentialProfile{
 		Protocol:           "ssh",
-		DefaultSources:     []string{"ssh"},
+		PasswordSource:     "ssh",
 		DefaultTiers:       []Tier{TierTop, TierCommon, TierExtended},
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: false,
@@ -32,7 +32,7 @@ func TestProfileFromDictionaryUsesExplicitDefaultTiers(t *testing.T) {
 
 func TestProfileFromDictionaryFallsBackToTopCommonDefaultTiers(t *testing.T) {
 	dict := DictionaryProfileInput{
-		DefaultSources:     []string{"redis"},
+		PasswordSource:     "redis",
 		AllowEmptyUsername: true,
 		AllowEmptyPassword: true,
 		ExpansionProfile:   "static_basic",
@@ -41,7 +41,7 @@ func TestProfileFromDictionaryFallsBackToTopCommonDefaultTiers(t *testing.T) {
 	got := ProfileFromDictionary("redis", dict)
 	want := CredentialProfile{
 		Protocol:           "redis",
-		DefaultSources:     []string{"redis"},
+		PasswordSource:     "redis",
 		DefaultTiers:       []Tier{TierTop, TierCommon},
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: true,
@@ -56,7 +56,7 @@ func TestProfileFromDictionaryFallsBackToTopCommonDefaultTiers(t *testing.T) {
 
 func TestProfileFromDictionaryFallsBackWhenDefaultTiersNormalizeToEmpty(t *testing.T) {
 	dict := DictionaryProfileInput{
-		DefaultSources:     []string{"mqtt"},
+		PasswordSource:     "mqtt",
 		DefaultTiers:       []string{" ", "\t", ""},
 		AllowEmptyUsername: false,
 		AllowEmptyPassword: false,
@@ -66,7 +66,7 @@ func TestProfileFromDictionaryFallsBackWhenDefaultTiersNormalizeToEmpty(t *testi
 	got := ProfileFromDictionary(" MQTT ", dict)
 	want := CredentialProfile{
 		Protocol:           "mqtt",
-		DefaultSources:     []string{"mqtt"},
+		PasswordSource:     "mqtt",
 		DefaultTiers:       []Tier{TierTop, TierCommon},
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: false,
@@ -82,7 +82,7 @@ func TestProfileFromDictionaryFallsBackWhenDefaultTiersNormalizeToEmpty(t *testi
 func TestProfileWithScanProfileOverridesDefault(t *testing.T) {
 	base := CredentialProfile{
 		Protocol:           "redis",
-		DefaultSources:     []string{"redis"},
+		PasswordSource:     "redis",
 		DefaultTiers:       []Tier{TierTop, TierCommon},
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: true,
@@ -93,7 +93,7 @@ func TestProfileWithScanProfileOverridesDefault(t *testing.T) {
 	got := base.WithScanProfile(" full ")
 	want := CredentialProfile{
 		Protocol:           "redis",
-		DefaultSources:     []string{"redis"},
+		PasswordSource:     "redis",
 		DefaultTiers:       []Tier{TierTop, TierCommon},
 		ScanProfile:        ScanProfileFull,
 		AllowEmptyUsername: true,

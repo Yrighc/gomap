@@ -157,10 +157,71 @@ func fromMetadataSpec(spec metadata.Spec) ProtocolSpec {
 		Name:               spec.Name,
 		Aliases:            append([]string(nil), spec.Aliases...),
 		Ports:              append([]int(nil), spec.Ports...),
-		DictNames:          append([]string(nil), spec.Dictionary.DefaultSources...),
+		DictNames:          dictionarySources(spec),
 		ProbeKinds:         probeKinds,
 		SupportsEnrichment: spec.Capabilities.Enrichment,
 	}
+}
+
+func dictionarySources(spec metadata.Spec) []string {
+	passwordSource := spec.Dictionary.PasswordSource
+	if passwordSource == "" {
+		if !spec.Capabilities.Credential {
+			return nil
+		}
+		passwordSource = spec.Name
+	}
+	if passwordSource == "" {
+		return nil
+	}
+
+	sources := []string{passwordSource}
+	if spec.Dictionary.PasswordSource == "" {
+		sources = append(sources, simpleDictionaryAliases(spec)...)
+	}
+	return uniqueNonEmptyStrings(sources)
+}
+
+func simpleDictionaryAliases(spec metadata.Spec) []string {
+	out := make([]string, 0, len(spec.Aliases))
+	for _, alias := range spec.Aliases {
+		if !isKnownAliasDictionaryName(spec.Name, alias) {
+			continue
+		}
+		out = append(out, alias)
+	}
+	return out
+}
+
+func isKnownAliasDictionaryName(protocol, alias string) bool {
+	switch protocol {
+	case "mongodb":
+		return alias == "mongo"
+	case "postgresql":
+		return alias == "postgres"
+	default:
+		return false
+	}
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func containsString(values []string, target string) bool {

@@ -109,7 +109,7 @@ func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing
 				Name:       "oracle",
 				Aliases:    []string{"oracle-tns"},
 				Ports:      []int{1521},
-				Dictionary: metadata.Dictionary{DefaultSources: []string{"oracle"}},
+				Dictionary: metadata.Dictionary{PasswordSource: "oracle"},
 				Capabilities: metadata.Capabilities{
 					Credential: true,
 				},
@@ -131,7 +131,7 @@ func TestLookupProtocolSpecRejectsSNMPMetadataTokenMatchOnWrongPort(t *testing.T
 				Name:  "snmp",
 				Ports: []int{161},
 				Dictionary: metadata.Dictionary{
-					DefaultSources: []string{"snmp"},
+					PasswordSource: "snmp",
 				},
 				Capabilities: metadata.Capabilities{
 					Credential: true,
