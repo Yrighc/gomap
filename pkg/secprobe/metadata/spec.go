@@ -24,11 +24,19 @@ type PolicyTags struct {
 }
 
 type Dictionary struct {
-	DefaultSources     []string `yaml:"default_sources"`
-	DefaultTiers       []string `yaml:"default_tiers"`
-	AllowEmptyUsername bool     `yaml:"allow_empty_username"`
-	AllowEmptyPassword bool     `yaml:"allow_empty_password"`
-	ExpansionProfile   string   `yaml:"expansion_profile"`
+	DefaultUsers       []string         `yaml:"default_users"`
+	PasswordSource     string           `yaml:"password_source"`
+	ExtraPasswords     []string         `yaml:"extra_passwords"`
+	DefaultPairs       []CredentialPair `yaml:"default_pairs"`
+	DefaultTiers       []string         `yaml:"default_tiers"`
+	AllowEmptyUsername bool             `yaml:"allow_empty_username"`
+	AllowEmptyPassword bool             `yaml:"allow_empty_password"`
+	ExpansionProfile   string           `yaml:"expansion_profile"`
+}
+
+type CredentialPair struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type ResultProfile struct {

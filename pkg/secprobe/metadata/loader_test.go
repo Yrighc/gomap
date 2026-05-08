@@ -154,13 +154,19 @@ func TestNormalizeSpecNormalizesDictionaryDefaultTiers(t *testing.T) {
 	}
 }
 
-func TestNormalizeSpecNormalizesDictionaryDefaultsAndAliases(t *testing.T) {
+func TestNormalizeSpecNormalizesNewDictionaryFields(t *testing.T) {
 	spec := normalizeSpec(Spec{
 		Name:    " Redis ",
 		Aliases: []string{" Redis/TLS ", "", "REDIS/SSL"},
 		Dictionary: Dictionary{
-			DefaultSources: []string{" Builtin ", "", "USER"},
-			DefaultTiers:   []string{" Top ", "", "COMMON "},
+			DefaultUsers:   []string{" Default ", "", "ROOT"},
+			PasswordSource: " Builtin:Passwords/Global ",
+			ExtraPasswords: []string{" Redis ", "", "Default "},
+			DefaultPairs: []CredentialPair{
+				{Username: " Scott ", Password: " tiger "},
+				{Username: "", Password: "ignored"},
+			},
+			DefaultTiers: []string{" Top ", "", "COMMON "},
 		},
 		Templates: TemplateRefs{
 			Unauthorized: " Redis ",
@@ -173,8 +179,17 @@ func TestNormalizeSpecNormalizesDictionaryDefaultsAndAliases(t *testing.T) {
 	if !slices.Equal(spec.Aliases, []string{"redis/tls", "redis/ssl"}) {
 		t.Fatalf("expected normalized aliases, got %v", spec.Aliases)
 	}
-	if !slices.Equal(spec.Dictionary.DefaultSources, []string{"builtin", "user"}) {
-		t.Fatalf("expected normalized default sources, got %v", spec.Dictionary.DefaultSources)
+	if !slices.Equal(spec.Dictionary.DefaultUsers, []string{"default", "root"}) {
+		t.Fatalf("expected normalized default users, got %v", spec.Dictionary.DefaultUsers)
+	}
+	if spec.Dictionary.PasswordSource != "builtin:passwords/global" {
+		t.Fatalf("expected normalized password source, got %q", spec.Dictionary.PasswordSource)
+	}
+	if !slices.Equal(spec.Dictionary.ExtraPasswords, []string{"Redis", "Default"}) {
+		t.Fatalf("expected trimmed extra passwords preserving case, got %v", spec.Dictionary.ExtraPasswords)
+	}
+	if len(spec.Dictionary.DefaultPairs) != 1 || spec.Dictionary.DefaultPairs[0].Username != "Scott" || spec.Dictionary.DefaultPairs[0].Password != "tiger" {
+		t.Fatalf("expected normalized default pair, got %+v", spec.Dictionary.DefaultPairs)
 	}
 	if !slices.Equal(spec.Dictionary.DefaultTiers, []string{"top", "common"}) {
 		t.Fatalf("expected normalized default tiers, got %v", spec.Dictionary.DefaultTiers)
@@ -184,17 +199,32 @@ func TestNormalizeSpecNormalizesDictionaryDefaultsAndAliases(t *testing.T) {
 	}
 }
 
-func TestNormalizeSpecDropsEmptyDictionaryDefaults(t *testing.T) {
+func TestNormalizeSpecDropsEmptyNewDictionaryFields(t *testing.T) {
 	spec := normalizeSpec(Spec{
 		Name: "ssh",
 		Dictionary: Dictionary{
-			DefaultSources: []string{"", " ", "\t"},
-			DefaultTiers:   []string{"", " ", "\n"},
+			DefaultUsers:   []string{"", " ", "\t"},
+			PasswordSource: "  ",
+			ExtraPasswords: []string{"", " "},
+			DefaultPairs: []CredentialPair{
+				{Username: "", Password: "x"},
+				{Username: "root", Password: ""},
+			},
+			DefaultTiers: []string{"", " ", "\n"},
 		},
 	})
 
-	if spec.Dictionary.DefaultSources != nil {
-		t.Fatalf("expected empty default sources to normalize to nil, got %v", spec.Dictionary.DefaultSources)
+	if spec.Dictionary.DefaultUsers != nil {
+		t.Fatalf("expected empty default users to normalize to nil, got %v", spec.Dictionary.DefaultUsers)
+	}
+	if spec.Dictionary.PasswordSource != "" {
+		t.Fatalf("expected empty password source, got %q", spec.Dictionary.PasswordSource)
+	}
+	if spec.Dictionary.ExtraPasswords != nil {
+		t.Fatalf("expected empty extra passwords to normalize to nil, got %v", spec.Dictionary.ExtraPasswords)
+	}
+	if spec.Dictionary.DefaultPairs != nil {
+		t.Fatalf("expected empty default pairs to normalize to nil, got %+v", spec.Dictionary.DefaultPairs)
 	}
 	if spec.Dictionary.DefaultTiers != nil {
 		t.Fatalf("expected empty default tiers to normalize to nil, got %v", spec.Dictionary.DefaultTiers)

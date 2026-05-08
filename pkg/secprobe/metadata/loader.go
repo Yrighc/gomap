@@ -36,7 +36,10 @@ func LoadBuiltin() (map[string]Spec, error) {
 func normalizeSpec(spec Spec) Spec {
 	spec.Name = strings.ToLower(strings.TrimSpace(spec.Name))
 	spec.Aliases = normalizeStrings(spec.Aliases)
-	spec.Dictionary.DefaultSources = normalizeStrings(spec.Dictionary.DefaultSources)
+	spec.Dictionary.DefaultUsers = normalizeStrings(spec.Dictionary.DefaultUsers)
+	spec.Dictionary.PasswordSource = strings.ToLower(strings.TrimSpace(spec.Dictionary.PasswordSource))
+	spec.Dictionary.ExtraPasswords = normalizePasswords(spec.Dictionary.ExtraPasswords)
+	spec.Dictionary.DefaultPairs = normalizeCredentialPairs(spec.Dictionary.DefaultPairs)
 	spec.Dictionary.DefaultTiers = normalizeStrings(spec.Dictionary.DefaultTiers)
 	spec.Templates.Unauthorized = strings.ToLower(strings.TrimSpace(spec.Templates.Unauthorized))
 	return spec
@@ -54,6 +57,45 @@ func normalizeStrings(values []string) []string {
 			continue
 		}
 		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizePasswords(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeCredentialPairs(pairs []CredentialPair) []CredentialPair {
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	out := make([]CredentialPair, 0, len(pairs))
+	for _, pair := range pairs {
+		pair.Username = strings.TrimSpace(pair.Username)
+		pair.Password = strings.TrimSpace(pair.Password)
+		if pair.Username == "" || pair.Password == "" {
+			continue
+		}
+		out = append(out, pair)
 	}
 	if len(out) == 0 {
 		return nil
