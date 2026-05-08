@@ -68,11 +68,7 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 			Kind: SourceInline,
 			Name: "inline",
 		}
-		return Expand(creds, Options{
-			Profile:        in.Profile.ExpansionProfile,
-			AllowEmptyUser: in.Profile.AllowEmptyUsername,
-			AllowEmptyPass: in.Profile.AllowEmptyPassword,
-		}), meta, nil
+		return creds, meta, nil
 	}
 
 	if in.DictDir != "" {

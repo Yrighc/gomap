@@ -53,6 +53,36 @@ func TestGeneratorUsesInlineBeforeDirectoryAndBuiltin(t *testing.T) {
 	}
 }
 
+func TestGeneratorKeepsInlineCredentialsLiteralWithoutExpansion(t *testing.T) {
+	gen := Generator{}
+	got, meta, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:           "redis",
+			DefaultSources:     []string{"redis"},
+			DefaultTiers:       []Tier{TierTop, TierCommon},
+			ScanProfile:        ScanProfileDefault,
+			AllowEmptyUsername: true,
+			AllowEmptyPassword: true,
+			ExpansionProfile:   "static_basic",
+		},
+		Inline: []strategy.Credential{
+			{Username: "admin", Password: "admin"},
+			{Username: "admin", Password: "admin"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	wantCreds := []strategy.Credential{{Username: "admin", Password: "admin"}}
+	if !reflect.DeepEqual(got, wantCreds) {
+		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	}
+	if meta.Source.Kind != SourceInline {
+		t.Fatalf("Generate() source = %+v, want inline", meta.Source)
+	}
+}
+
 func TestGeneratorUsesDirectoryBeforeBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "redis.txt"), []byte("default : password\n"), 0o600); err != nil {

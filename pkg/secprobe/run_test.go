@@ -346,6 +346,42 @@ func TestRunWithRegistryFallsBackToAtomicCredentialAfterLegacyUnauthorizedFailur
 	}
 }
 
+func TestRunWithRegistryKeepsExplicitCredentialsLiteralWithoutExpansion(t *testing.T) {
+	registry := NewRegistry()
+	var atomicCalls int32
+
+	registry.RegisterAtomicCredential("redis", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		atomic.AddInt32(&atomicCalls, 1)
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "atomic redis auth",
+		}}
+	}))
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		StopOnSuccess: true,
+		Credentials:   []Credential{{Username: "admin", Password: "admin"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if !result.Results[0].Success {
+		t.Fatalf("expected explicit credential success, got %+v", result.Results[0])
+	}
+	if atomic.LoadInt32(&atomicCalls) != 1 {
+		t.Fatalf("expected exactly one atomic credential attempt, got %d", atomicCalls)
+	}
+}
+
 func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{
