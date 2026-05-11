@@ -57,8 +57,8 @@ func TestGeneratorBuildsCredentialsFromSharedPasswordsExtraPasswordsAndPairs(t *
 			DefaultUsers:       []string{""},
 			PasswordSource:     "builtin:passwords/global",
 			ExtraPasswords:     []string{"redis"},
-			DefaultPairs:        []CredentialPair{{Username: "default", Password: "default"}},
-			DefaultTiers:        []Tier{TierTop, TierCommon},
+			DefaultPairs:       []CredentialPair{{Username: "default", Password: "default"}},
+			DefaultTiers:       []Tier{TierTop, TierCommon},
 			ScanProfile:        ScanProfileDefault,
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: true,
@@ -159,5 +159,57 @@ func TestGeneratorReturnsSourceErrorWhenBuiltinFails(t *testing.T) {
 	})
 	if err == nil || !IsMissingSource(err) {
 		t.Fatalf("expected missing source error, got %v", err)
+	}
+}
+
+func TestGeneratorRequiresExplicitPasswordSource(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(string) ([]credentialEntry, error) {
+		return []credentialEntry{{Tier: TierTop, Credential: strategy.Credential{Password: "should-not-load"}}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	_, _, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:     "ssh",
+			DefaultUsers: []string{"root"},
+			DefaultTiers: []Tier{TierTop},
+		},
+	})
+	if err == nil || !IsMissingSource(err) {
+		t.Fatalf("expected missing source error, got %v", err)
+	}
+}
+
+func TestGeneratorKeepsExplicitEmptyDefaultPairs(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(string) ([]credentialEntry, error) {
+		return []credentialEntry{{Tier: TierTop, Credential: strategy.Credential{Password: "redis"}}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	got, _, err := gen.Generate(GenerateInput{
+		Profile: ProfileFromDictionary("redis", DictionaryProfileInput{
+			DefaultUsers:       []string{""},
+			PasswordSource:     "builtin:passwords/global",
+			DefaultPairs:       []CredentialPair{{Username: "", Password: "default"}, {Username: "root", Password: ""}},
+			DefaultTiers:       []string{"top"},
+			AllowEmptyUsername: true,
+			AllowEmptyPassword: true,
+			ExpansionProfile:   "static_basic",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	want := []strategy.Credential{
+		{Username: "", Password: "redis"},
+		{Username: "", Password: ""},
+		{Username: "", Password: "default"},
+		{Username: "root", Password: ""},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Generate() creds = %#v, want %#v", got, want)
 	}
 }

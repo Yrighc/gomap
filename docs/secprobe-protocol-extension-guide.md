@@ -333,29 +333,35 @@ dictionary:
 
 这里维护：
 
-- 默认字典名
+- 默认用户名
+- 共享密码源
+- 协议额外密码
+- 精确账号密码对
 - 默认层级
 - 空用户名/空密码开关
 - 基础变异策略
 
-### 7.2 数据层：字典文件
+### 7.2 数据层：共享密码池
 
 放在：
 
-- `app/secprobe/dicts/*.txt`
+- `app/secprobe/dicts/passwords/global.txt`
 
-当前支持两种行格式：
+当前支持按密码行维护，并可显式标注 tier：
 
 ```text
-root : root
-[common] admin : admin
+123456
+{user}
+[common] {user}@123
+[extended] Passw0rd
 ```
 
 说明：
 
-- 不带 tier 前缀的旧格式仍然有效
-- 旧 flat txt 会被视为 `top`
+- 不带 tier 前缀的密码会被视为 `top`
 - 只有显式写出 `[common]` / `[extended]`，分层过滤才会真实区分
+- 不再为每个协议维护 `app/secprobe/dicts/<protocol>.txt`
+- 协议差异通过 metadata 的 `default_users`、`extra_passwords`、`default_pairs` 表达
 
 这意味着当前版本不会再用“前 N 条”来伪装 `fast/default/full`。
 
@@ -451,7 +457,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 1. 确认协议标准名、别名与默认端口
 2. 在 `app/secprobe/protocols/*.yaml` 增加 metadata
 3. 确认支持哪些能力：`credential`、`unauthorized`、`enrichment`
-4. 如果支持凭证探测，确定默认字典来源
+4. 如果支持凭证探测，确定默认用户与共享密码源
 5. 如果支持凭证探测，明确 `default_tiers`
 6. 如果需要基础变异，明确 `expansion_profile`
 7. 在 `internal/secprobe/<protocol>/` 新建协议目录
@@ -461,8 +467,8 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 11. 在 `pkg/secprobe/default_registry.go` 注册 provider
 12. 如果该协议是简单未授权协议，评估是否改走 template executor
 13. 如果使用模板化未授权，补 `app/secprobe/templates/unauthorized/*.yaml`
-14. 如果支持默认内置字典，补齐 `app/secprobe/dicts/*.txt`
-15. 如需分层，优先在字典行里显式标注 tier
+14. 如果需要协议特征密码，优先补 metadata 的 `extra_passwords` 或 `default_pairs`
+15. 如需扩充通用默认密码，补 `app/secprobe/dicts/passwords/global.txt` 并显式标注 tier
 16. 补对应测试
 17. 复查不会破坏 `Run` / `RunWithRegistry` 的对外契约
 

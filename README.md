@@ -112,7 +112,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
          | app/assetprobe/services/ |
          |   gomap-services         |
          | app/assetprobe/dicts/*.txt |
-         | app/secprobe/dicts/*.txt   |
+         | app/secprobe/dicts/passwords/global.txt |
          +---------------------------+
 ```
 

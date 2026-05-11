@@ -164,7 +164,8 @@ func TestNormalizeSpecNormalizesNewDictionaryFields(t *testing.T) {
 			ExtraPasswords: []string{" Redis ", "", "Default "},
 			DefaultPairs: []CredentialPair{
 				{Username: " Scott ", Password: " tiger "},
-				{Username: "", Password: "ignored"},
+				{Username: "", Password: "nopassuser"},
+				{Username: "empty-pass", Password: ""},
 			},
 			DefaultTiers: []string{" Top ", "", "COMMON "},
 		},
@@ -188,7 +189,12 @@ func TestNormalizeSpecNormalizesNewDictionaryFields(t *testing.T) {
 	if !slices.Equal(spec.Dictionary.ExtraPasswords, []string{"Redis", "Default"}) {
 		t.Fatalf("expected trimmed extra passwords preserving case, got %v", spec.Dictionary.ExtraPasswords)
 	}
-	if len(spec.Dictionary.DefaultPairs) != 1 || spec.Dictionary.DefaultPairs[0].Username != "Scott" || spec.Dictionary.DefaultPairs[0].Password != "tiger" {
+	wantPairs := []CredentialPair{
+		{Username: "Scott", Password: "tiger"},
+		{Username: "", Password: "nopassuser"},
+		{Username: "empty-pass", Password: ""},
+	}
+	if !slices.Equal(spec.Dictionary.DefaultPairs, wantPairs) {
 		t.Fatalf("expected normalized default pair, got %+v", spec.Dictionary.DefaultPairs)
 	}
 	if !slices.Equal(spec.Dictionary.DefaultTiers, []string{"top", "common"}) {
@@ -223,8 +229,8 @@ func TestNormalizeSpecDropsEmptyNewDictionaryFields(t *testing.T) {
 	if spec.Dictionary.ExtraPasswords != nil {
 		t.Fatalf("expected empty extra passwords to normalize to nil, got %v", spec.Dictionary.ExtraPasswords)
 	}
-	if spec.Dictionary.DefaultPairs != nil {
-		t.Fatalf("expected empty default pairs to normalize to nil, got %+v", spec.Dictionary.DefaultPairs)
+	if !slices.Equal(spec.Dictionary.DefaultPairs, []CredentialPair{{Username: "", Password: "x"}, {Username: "root", Password: ""}}) {
+		t.Fatalf("expected explicit empty default pairs to stay declared, got %+v", spec.Dictionary.DefaultPairs)
 	}
 	if spec.Dictionary.DefaultTiers != nil {
 		t.Fatalf("expected empty default tiers to normalize to nil, got %v", spec.Dictionary.DefaultTiers)

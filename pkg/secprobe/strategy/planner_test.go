@@ -213,6 +213,18 @@ func TestCompileCredentialSourceSelection(t *testing.T) {
 	}
 }
 
+func TestCompileDoesNotFallbackMissingPasswordSourceToProtocolName(t *testing.T) {
+	t.Parallel()
+
+	spec := testSpec()
+	spec.Dictionary.PasswordSource = ""
+
+	plan := Compile(spec, CompileInput{})
+	if len(plan.Credentials.Dictionaries) != 0 {
+		t.Fatalf("Dictionaries = %v, want empty when password source is missing", plan.Credentials.Dictionaries)
+	}
+}
+
 func TestCompileConsumesSNMPMetadataFields(t *testing.T) {
 	t.Parallel()
 

@@ -11,7 +11,7 @@ type DictionaryProfileInput struct {
 	DefaultUsers       []string
 	PasswordSource     string
 	ExtraPasswords     []string
-	DefaultPairs        []CredentialPair
+	DefaultPairs       []CredentialPair
 	DefaultTiers       []string
 	AllowEmptyUsername bool
 	AllowEmptyPassword bool
@@ -35,7 +35,7 @@ func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialPr
 		DefaultUsers:       dict.DefaultUsers,
 		PasswordSource:     dict.PasswordSource,
 		ExtraPasswords:     dict.ExtraPasswords,
-		DefaultPairs:        metadataPairsToCredentialPairs(dict.DefaultPairs),
+		DefaultPairs:       metadataPairsToCredentialPairs(dict.DefaultPairs),
 		DefaultTiers:       dict.DefaultTiers,
 		AllowEmptyUsername: dict.AllowEmptyUsername,
 		AllowEmptyPassword: dict.AllowEmptyPassword,
@@ -49,7 +49,7 @@ func ProfileFromDictionary(protocol string, dict DictionaryProfileInput) Credent
 		DefaultUsers:       normalizeUsers(dict.DefaultUsers),
 		PasswordSource:     strings.ToLower(strings.TrimSpace(dict.PasswordSource)),
 		ExtraPasswords:     normalizePasswords(dict.ExtraPasswords),
-		DefaultPairs:        normalizeCredentialPairs(dict.DefaultPairs),
+		DefaultPairs:       normalizeCredentialPairs(dict.DefaultPairs),
 		DefaultTiers:       normalizeTiers(dict.DefaultTiers),
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: dict.AllowEmptyUsername,
@@ -144,10 +144,7 @@ func metadataPairsToCredentialPairs(values []metadata.CredentialPair) []Credenti
 }
 
 func sourceNameForProfile(profile CredentialProfile) string {
-	if source := strings.TrimSpace(profile.PasswordSource); source != "" {
-		return source
-	}
-	return profile.Protocol
+	return strings.TrimSpace(profile.PasswordSource)
 }
 
 func dedupeStrategyCredentials(in []strategy.Credential) []strategy.Credential {
@@ -213,9 +210,6 @@ func normalizeCredentialPairs(values []CredentialPair) []CredentialPair {
 	for _, value := range values {
 		user := strings.TrimSpace(value.Username)
 		pass := strings.TrimSpace(value.Password)
-		if user == "" || pass == "" {
-			continue
-		}
 		key := user + "\x00" + pass
 		if _, ok := seen[key]; ok {
 			continue

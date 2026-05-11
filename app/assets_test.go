@@ -1,6 +1,8 @@
 package appassets
 
 import (
+	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -77,6 +79,28 @@ func TestEmbeddedSecprobePasswordSourceRejectsUnsupportedSource(t *testing.T) {
 	_, err := SecprobePasswordSource("builtin:passwords/missing")
 	if err == nil {
 		t.Fatal("expected unsupported source error")
+	}
+}
+
+func TestSecprobeDictDirectoryOnlyContainsSharedPasswordPool(t *testing.T) {
+	allowed := map[string]struct{}{
+		filepath.Clean("secprobe/dicts/passwords/global.txt"): {},
+	}
+
+	err := filepath.WalkDir("secprobe/dicts", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := allowed[filepath.Clean(path)]; !ok {
+			t.Fatalf("unexpected legacy secprobe dictionary file: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk secprobe dicts: %v", err)
 	}
 }
 

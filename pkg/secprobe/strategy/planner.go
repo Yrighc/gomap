@@ -72,12 +72,6 @@ func selectCredentialSet(spec metadata.Spec, in CompileInput) CredentialSet {
 func dictionarySources(spec metadata.Spec) []string {
 	passwordSource := spec.Dictionary.PasswordSource
 	if passwordSource == "" {
-		if !spec.Capabilities.Credential {
-			return nil
-		}
-		passwordSource = spec.Name
-	}
-	if passwordSource == "" {
 		return nil
 	}
 	return []string{passwordSource}

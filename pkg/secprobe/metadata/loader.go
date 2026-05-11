@@ -104,9 +104,6 @@ func normalizeCredentialPairs(pairs []CredentialPair) []CredentialPair {
 	for _, pair := range pairs {
 		pair.Username = strings.TrimSpace(pair.Username)
 		pair.Password = strings.TrimSpace(pair.Password)
-		if pair.Username == "" || pair.Password == "" {
-			continue
-		}
 		out = append(out, pair)
 	}
 	if len(out) == 0 {
