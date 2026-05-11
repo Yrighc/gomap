@@ -9,6 +9,7 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "kafka", Port: 9092},
 		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
@@ -49,6 +50,7 @@ func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "kafka", Port: 9092},
 		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
@@ -221,6 +223,9 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "imap", Port: 143}); !ok {
 		t.Fatal("expected imap atomic credential plugin")
 	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "kafka", Port: 9092}); !ok {
+		t.Fatal("expected kafka atomic credential plugin")
+	}
 	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "pop3", Port: 110}); !ok {
 		t.Fatal("expected pop3 atomic credential plugin")
 	}
@@ -253,6 +258,7 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "kafka", Port: 9092},
 		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},

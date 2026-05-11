@@ -5,6 +5,7 @@ import (
 	elasticsearchprobe "github.com/yrighc/gomap/internal/secprobe/elasticsearch"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
 	imapprobe "github.com/yrighc/gomap/internal/secprobe/imap"
+	kafkaprobe "github.com/yrighc/gomap/internal/secprobe/kafka"
 	ldapprobe "github.com/yrighc/gomap/internal/secprobe/ldap"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
@@ -32,6 +33,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ftp", ftpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("imap", imapprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("kafka", kafkaprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ldap", ldapprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("pop3", pop3probe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mssql", mssqlprobe.NewAuthenticator(nil))
