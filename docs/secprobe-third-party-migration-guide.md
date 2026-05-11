@@ -53,12 +53,24 @@
 - `DictDir` / `dict_dir` / `-weak-dict-dir` 这类自定义默认字典目录入口已移除
 - public `Registry.Register(...)` 兼容路径继续保留，但被隔离为显式 compatibility adapter
 - builtin 协议能力判断不再等价于 `Lookup(..., ProbeKindXxx)` 是否命中
+- 新增 `imap` / `pop3` / `ldap` / `kafka` 已按同一 provider-first 模型进入默认能力面
 
 当前默认行为可以概括为：
 
 - builtin hot path 是 provider-first
 - legacy public prober 仍可用
 - 但 legacy public prober 不再是内置协议默认实现模型
+
+可以把这次新增协议的落地理解成一个很明确的升级信号：
+
+- 新协议先补 metadata
+- 再补 atomic provider
+- 最后进默认 registry
+
+而不是像早期那样：
+
+- 先写一个批量 prober
+- 再让 `Run` 主链路去做特判兼容
 
 ## 4. 对三方调用方的影响
 
@@ -89,6 +101,27 @@ out := secprobe.Run(context.Background(), candidates, secprobe.CredentialProbeOp
 
 - `Run` 内部已经不是“直接找一个 prober 然后跑完一批凭证”
 - 而是“先编译 Plan，再由 engine 调度 provider 执行”
+
+如果你当前的三方扫描器只是调用 `Run` / `RunWithRegistry`，那么这轮新增 `imap` / `pop3` / `ldap` / `kafka` 后，通常不需要额外改调用代码。
+
+更准确地说，你需要关注的是“输入候选是否能命中这些协议”：
+
+- `imap`
+  - 支持 `143`、`993`、`imaps`、`imap/ssl`
+- `pop3`
+  - 支持 `110`、`995`、`pop3s`、`pop3/ssl`
+- `ldap`
+  - 支持 `389`、`636`、`ldaps`
+- `kafka`
+  - 第一版按 `9092` service / port fallback 建模
+  - 默认认证路径是 `SASL/PLAIN`
+  - `9093` 作为 TLS 常见端口由 provider 内部处理
+
+也就是说，对三方调用方最常见的适配动作不是改 API，而是：
+
+1. 更新服务识别或候选映射
+2. 确认目标端口会被送入 `BuildCandidates` / `Run`
+3. 如有自定义服务名，补齐到 metadata alias 或候选归一化层
 
 ### 4.2 协议扩展方
 
@@ -205,6 +238,22 @@ func run(candidates []secprobe.SecurityCandidate) secprobe.RunResult {
 - `Credential` provider 只负责一次 `AuthenticateOnce`
 - `Unauthorized` provider 只负责一次 `CheckUnauthorizedOnce`
 - 字典循环、停止条件、能力顺序由 engine 决定
+
+如果你要参考当前仓库里的真实样板，建议优先看：
+
+- `internal/secprobe/imap/auth_once.go`
+- `internal/secprobe/pop3/auth_once.go`
+- `internal/secprobe/ldap/auth_once.go`
+- `internal/secprobe/kafka/auth_once.go`
+
+这四个协议分别覆盖了：
+
+- 文本协议显式 TLS 端口
+- DN 风格用户名
+- 二进制协议最小握手
+- 统一错误分类回传
+
+对三方扩展方来说，这比继续参考历史 batch prober 更接近当前推荐模型。
 
 ### 5.3 方式三：历史 public prober 兼容型
 

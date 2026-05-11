@@ -63,6 +63,23 @@
 - YAML 负责静态声明
 - 代码负责真实执行
 
+当前仓库里新增协议的参考实现已经可以直接对照：
+
+- `imap`
+  - metadata: `app/secprobe/protocols/imap.yaml`
+  - provider: `internal/secprobe/imap/auth_once.go`
+- `pop3`
+  - metadata: `app/secprobe/protocols/pop3.yaml`
+  - provider: `internal/secprobe/pop3/auth_once.go`
+- `ldap`
+  - metadata: `app/secprobe/protocols/ldap.yaml`
+  - provider: `internal/secprobe/ldap/auth_once.go`
+- `kafka`
+  - metadata: `app/secprobe/protocols/kafka.yaml`
+  - provider: `internal/secprobe/kafka/auth_once.go`
+
+这四个协议可以视为当前版本“新增 credential 协议”的标准样板。
+
 ## 3. 一个协议应该放在哪里
 
 新增协议时，代码和元数据通常会落在下面几类位置。
@@ -105,6 +122,17 @@
   - 命中后的补采逻辑
 - `*_test.go`
   - 对应能力测试
+
+当前建议优先采用如下文件命名：
+
+- `auth_once.go`
+  - 单次 credential 认证
+- `auth_once_test.go`
+  - 单次认证测试
+- `unauthorized.go`
+  - 单次 unauthorized 确认
+- `enrichment.go`
+  - 命中后的补采
 
 约束：
 
@@ -166,6 +194,29 @@
 - 成功判定
 
 因此后续如果要调整“默认用哪些口令”“是否允许空用户名”“是否启用基础变异”，优先应修改 metadata 或 `pkg/secprobe/credentials/*`，不要把这些逻辑塞回 provider。
+
+当前内置默认弱口令维护方式已经进一步收口为：
+
+- 一份共享密码池
+  - `app/secprobe/dicts/passwords/global.txt`
+- 每协议单独声明：
+  - `default_users`
+  - `extra_passwords`
+  - `default_pairs`
+  - `default_tiers`
+  - `allow_empty_username`
+  - `allow_empty_password`
+  - `expansion_profile`
+
+也就是说，现在不再推荐为每个协议长期维护一整份独立密码库。
+真正需要协议差异时，优先：
+
+1. 增补协议默认用户名
+2. 增补少量协议特征密码
+3. 补精确账号密码对
+4. 必要时再补 generator 变异策略
+
+而不是回退成“每个协议复制一份完整密码字典”。
 
 ## 4. 哪些内容适合 metadata
 
@@ -262,6 +313,13 @@ dictionary:
 - 这些都依赖真实协议交互
 - 很多协议存在握手时序、状态机和返回值判定差异
 - 同样叫“未授权”，不同协议的确认动作完全不同
+
+`kafka` 是一个比较典型的例子：
+
+- metadata 只声明它是 `credential` 协议、默认端口是 `9092`、默认用户名有哪些
+- 但 `SASL/PLAIN` 握手、`9093` 的 TLS 路径、错误码识别、认证成功证据，都必须留在代码里
+
+这类协议如果强行模板化，反而会让维护复杂度升高。
 
 反例：
 

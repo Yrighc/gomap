@@ -197,7 +197,7 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 
 说明：
 - 默认仍只执行 credential 探测
-- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, smtp, mysql, postgresql, redis, mssql, oracle, amqp, snmp, rdp, vnc, smb`
+- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, smtp, mysql, postgresql, redis, mssql, oracle, amqp, snmp, rdp, vnc, smb, imap, pop3, ldap, kafka`
 - `snmp` 第一版按 `v2c community` 接入，内置字典使用兼容现有解析器的 `: community` 行格式
 - `weak` 子命令当前发现阶段固定使用 `TCP`，上述 `snmp` 能力不等价于已覆盖常规 `UDP/161` SNMP 发现
 - `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
@@ -225,6 +225,8 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - 当前所有内置 `credential` 协议都已通过 atomic `AuthenticateOnce` 执行，默认 registry 不再直接依赖对应的 legacy credential core prober
 - builtin `credential` 能力仅通过 `lookupAtomicCredential(...)` / capability 路径表达，不再经由默认 registry 的 `Lookup(..., ProbeKindCredential)` 暴露成 batch prober
 - `credential` loop、`stop-on-success` 与 terminal-error 判定统一由 `pkg/secprobe/engine` 控制
+- 新增的 `imap` / `pop3` / `ldap` / `kafka` 已按同一模型接入：metadata 声明协议事实，provider 只做单次认证，registry 负责默认装配
+- `imap` / `pop3` / `ldap` 额外覆盖了显式 TLS 端口语义；`kafka` 第一版聚焦 `SASL/PLAIN` 用户名密码认证，支持 `9092` 明文与 `9093` TLS 常见部署
 - public-prober compatibility 仍暂时保留给外部扩展注册，以及当前仍需 code-backed 的 `zookeeper unauthorized` 默认路径
 - phase 2 已将历史内置协议目录迁移到 `app/secprobe/protocols/*.yaml`，保持既有 public API 与结果契约
 
