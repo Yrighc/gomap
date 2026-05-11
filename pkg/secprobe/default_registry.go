@@ -1,6 +1,7 @@
 package secprobe
 
 import (
+	activemqprobe "github.com/yrighc/gomap/internal/secprobe/activemq"
 	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
 	elasticsearchprobe "github.com/yrighc/gomap/internal/secprobe/elasticsearch"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
@@ -30,6 +31,7 @@ func RegisterDefaultProbers(r *Registry) {
 		return
 	}
 
+	r.RegisterAtomicCredential("activemq", activemqprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ftp", ftpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("imap", imapprobe.NewAuthenticator(nil))
