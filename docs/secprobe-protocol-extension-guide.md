@@ -427,11 +427,117 @@ dictionary:
 
 而不必每次都重新实现一套批量执行控制。
 
-## 7. 当前弱口令引擎的维护方式
+## 7. 新增协议最小 Checklist
+
+如果后续要继续扩协议，建议严格按下面顺序推进。
+
+### 7.1 先判断协议属于哪一类
+
+先不要急着写代码，先判断它到底落在哪种模型里：
+
+- 原子 `credential` 协议
+  - 一次目标 + 一组凭证即可完成一次认证尝试
+  - 例如 `imap`、`pop3`、`ldap`、`kafka`、`activemq`
+- HTTP/API 登录型 `credential` 协议
+  - 本质仍是一次认证尝试，但底层走 HTTP 请求
+  - 例如 `zabbix`、`neo4j`
+- simple `unauthorized` 协议
+  - 一次请求即可完成确认，且可被受限模板准确表达
+  - 例如当前 `memcached`
+- code-backed `unauthorized` 协议
+  - 未授权确认依赖协议特定交互，不能安全压进简单模板
+  - 例如当前 `zookeeper`
+
+如果一个协议不能自然收敛成“一次原子动作”，那就不要为了套当前模型强行抽象。
+这类协议通常应该先做边界评估，而不是直接进入实现。
+
+### 7.2 再补 metadata
+
+至少补齐：
+
+- `name`
+- `aliases`
+- `ports`
+- `capabilities`
+- `dictionary`
+- 必要时补 `template` / `result` 默认策略
+
+最小要求不是“写完 YAML 就结束”，而是：
+
+- metadata 能正确描述协议静态事实
+- generator 能根据 `dictionary` 生成合理候选
+- planner 能根据 capability 判断这协议理论上可执行什么
+
+### 7.3 然后补 provider
+
+按协议类型选择实现方式：
+
+- 原子 `credential`
+  - 新增 `internal/secprobe/<protocol>/auth_once.go`
+- HTTP/API 登录型 `credential`
+  - 同样新增 `auth_once.go`
+  - 底层优先复用 `internal/secprobe/httpauth`
+- `unauthorized`
+  - 简单协议先评估是否可进入模板执行器
+  - 不适合模板时，再写 code-backed checker
+
+这里的关键约束是：
+
+- provider 只做单次原子动作
+- provider 不枚举字典
+- provider 不控制停止条件
+- provider 不自带全局调度语义
+
+### 7.4 再接 registry
+
+默认内置协议要显式接到：
+
+- `RegisterAtomicCredential(...)`
+- `RegisterAtomicUnauthorized(...)`
+
+不要新增协议后，只补 metadata 和 provider，却忘了接默认装配层。
+那样代码虽然存在，但 builtin 默认路径仍然不可达。
+
+### 7.5 最后补测试
+
+最少要覆盖三层：
+
+1. provider 单测
+2. default registry 接线测试
+3. 候选或主链路回归测试
+
+provider 单测至少要覆盖：
+
+- success
+- auth failed
+- connection failed
+- timeout
+- canceled
+
+如果是 HTTP/API 协议，不要只测 fake 函数映射。
+至少要有一组真实 HTTP 路径测试，验证：
+
+- scheme 选择是否正确
+- 状态码或响应体判定是否正确
+- transport 错误是否被正确归类
+
+### 7.6 什么时候不要扩
+
+下面这些情况，建议先停下来做设计，不要直接开写：
+
+- 需要多阶段状态机
+- 需要 provider 自己决定大量执行顺序
+- 需要在 YAML 里描述流程控制
+- 需要把 `httpauth` 扩成通用登录框架
+- 需要把 strategy 做成第二个 engine
+
+出现这些信号时，通常说明你正在偏离当前架构边界。
+
+## 8. 当前弱口令引擎的维护方式
 
 当前建议把弱口令相关维护拆成三层：
 
-### 7.1 策略层：metadata
+### 8.1 策略层：metadata
 
 放在：
 
@@ -447,7 +553,7 @@ dictionary:
 - 空用户名/空密码开关
 - 基础变异策略
 
-### 7.2 数据层：共享密码池
+### 8.2 数据层：共享密码池
 
 放在：
 
@@ -472,7 +578,7 @@ dictionary:
 
 这意味着当前版本不会再用“前 N 条”来伪装 `fast/default/full`。
 
-### 7.3 执行层：generator
+### 8.3 执行层：generator
 
 放在：
 
@@ -495,7 +601,7 @@ dictionary:
 - 想改层级交集，改 `tiers.go`
 - 不要把这些逻辑塞回 provider
 
-## 8. legacy public prober 的位置
+## 9. legacy public prober 的位置
 
 public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 
@@ -519,7 +625,7 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 
 - legacy core/public prober 暴露
 
-## 9. simple unauthorized template 的使用边界
+## 10. simple unauthorized template 的使用边界
 
 当前 simple unauthorized template executor 是刻意收边的受限执行器，不是通用协议 DSL。
 
@@ -556,28 +662,6 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 - `zookeeper unauthorized`
 
 这类协议应继续走 code-backed provider，而不是为了“统一成 YAML”硬塞进模板。
-
-## 10. 新协议接入 Checklist
-
-新增一个协议时，建议至少按下面顺序检查：
-
-1. 确认协议标准名、别名与默认端口
-2. 在 `app/secprobe/protocols/*.yaml` 增加 metadata
-3. 确认支持哪些能力：`credential`、`unauthorized`、`enrichment`
-4. 如果支持凭证探测，确定默认用户与共享密码源
-5. 如果支持凭证探测，明确 `default_tiers`
-6. 如果需要基础变异，明确 `expansion_profile`
-7. 在 `internal/secprobe/<protocol>/` 新建协议目录
-8. 实现 atomic `authenticator`
-9. 如支持未授权，实现 atomic `unauthorized checker`
-10. 如命中后需补采，实现 `enrichment`
-11. 在 `pkg/secprobe/default_registry.go` 注册 provider
-12. 如果该协议是简单未授权协议，评估是否改走 template executor
-13. 如果使用模板化未授权，补 `app/secprobe/templates/unauthorized/*.yaml`
-14. 如果需要协议特征密码，优先补 metadata 的 `extra_passwords` 或 `default_pairs`
-15. 如需扩充通用默认密码，补 `app/secprobe/dicts/passwords/global.txt` 并显式标注 tier
-16. 补对应测试
-17. 复查不会破坏 `Run` / `RunWithRegistry` 的对外契约
 
 ## 11. 结果语义要求
 

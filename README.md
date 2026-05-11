@@ -197,7 +197,7 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 
 说明：
 - 默认仍只执行 credential 探测
-- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, smtp, mysql, postgresql, redis, mssql, oracle, amqp, snmp, rdp, vnc, smb, imap, pop3, ldap, kafka`
+- 当前内置 `credential` 协议列表：`activemq, ftp, ssh, imap, kafka, ldap, pop3, mssql, mysql, postgresql, redis, elasticsearch, zabbix, neo4j, smtp, telnet, amqp, oracle, rdp, vnc, smb, snmp, mongodb`
 - `snmp` 第一版按 `v2c community` 接入，内置字典使用兼容现有解析器的 `: community` 行格式
 - `weak` 子命令当前发现阶段固定使用 `TCP`，上述 `snmp` 能力不等价于已覆盖常规 `UDP/161` SNMP 发现
 - `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
