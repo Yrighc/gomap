@@ -59,6 +59,89 @@ func TestLoadSpecsIncludesAllBuiltinProtocolNamesAfterPhase2(t *testing.T) {
 	}
 }
 
+func TestLoadBuiltinIncludesPlannedPhaseNextProtocols(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		aliases          []string
+		ports            []int
+		users            []string
+		evidenceProfile  string
+	}{
+		{
+			name:            "imap",
+			aliases:         []string{"imaps", "imap/ssl"},
+			ports:           []int{143, 993},
+			users:           []string{"admin", "mail", "postmaster", "root", "user", "test"},
+			evidenceProfile: "imap_basic",
+		},
+		{
+			name:            "pop3",
+			aliases:         []string{"pop3s", "pop3/ssl"},
+			ports:           []int{110, 995},
+			users:           []string{"admin", "root", "mail", "user", "test", "postmaster"},
+			evidenceProfile: "pop3_basic",
+		},
+		{
+			name:            "kafka",
+			ports:           []int{9092},
+			users:           []string{"admin", "kafka", "root", "test"},
+			evidenceProfile: "kafka_basic",
+		},
+		{
+			name:            "ldap",
+			aliases:         []string{"ldaps"},
+			ports:           []int{389, 636},
+			users:           []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"},
+			evidenceProfile: "ldap_basic",
+		},
+	}
+
+	for _, tt := range tests {
+		spec, ok := specs[tt.name]
+		if !ok {
+			t.Fatalf("expected %s spec, got keys %v", tt.name, slices.Sorted(maps.Keys(specs)))
+		}
+		if !slices.Equal(spec.Aliases, tt.aliases) {
+			t.Fatalf("%s aliases = %v, want %v", tt.name, spec.Aliases, tt.aliases)
+		}
+		if !slices.Equal(spec.Ports, tt.ports) {
+			t.Fatalf("%s ports = %v, want %v", tt.name, spec.Ports, tt.ports)
+		}
+		if !spec.Capabilities.Credential || spec.Capabilities.Unauthorized || spec.Capabilities.Enrichment {
+			t.Fatalf("%s capabilities = %+v, want credential only", tt.name, spec.Capabilities)
+		}
+		if !slices.Equal(spec.Dictionary.DefaultUsers, tt.users) {
+			t.Fatalf("%s default users = %v, want %v", tt.name, spec.Dictionary.DefaultUsers, tt.users)
+		}
+		if spec.Dictionary.PasswordSource != "builtin:passwords/global" {
+			t.Fatalf("%s password source = %q, want builtin:passwords/global", tt.name, spec.Dictionary.PasswordSource)
+		}
+		if !slices.Equal(spec.Dictionary.DefaultTiers, []string{"top", "common"}) {
+			t.Fatalf("%s default tiers = %v, want [top common]", tt.name, spec.Dictionary.DefaultTiers)
+		}
+		if spec.Dictionary.AllowEmptyUsername {
+			t.Fatalf("%s allow empty username = true, want false", tt.name)
+		}
+		if spec.Dictionary.AllowEmptyPassword {
+			t.Fatalf("%s allow empty password = true, want false", tt.name)
+		}
+		if spec.Dictionary.ExpansionProfile != "static_basic" {
+			t.Fatalf("%s expansion profile = %q, want static_basic", tt.name, spec.Dictionary.ExpansionProfile)
+		}
+		if spec.Results.CredentialSuccessType != "credential_valid" {
+			t.Fatalf("%s credential success type = %q, want credential_valid", tt.name, spec.Results.CredentialSuccessType)
+		}
+		if spec.Results.EvidenceProfile != tt.evidenceProfile {
+			t.Fatalf("%s evidence profile = %q, want %q", tt.name, spec.Results.EvidenceProfile, tt.evidenceProfile)
+		}
+	}
+}
+
 func TestLoadSpecsIncludesPhase2HistoricalContracts(t *testing.T) {
 	specs, err := LoadBuiltin()
 	if err != nil {

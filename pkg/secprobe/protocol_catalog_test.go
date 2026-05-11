@@ -152,6 +152,29 @@ func TestLookupProtocolSpecRejectsSNMPMetadataTokenMatchOnWrongPort(t *testing.T
 	}
 }
 
+func TestLookupProtocolSpecRejectsSecureAliasOnNonTLSPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		port    int
+	}{
+		{name: "imaps on 143", service: "imaps", port: 143},
+		{name: "imap ssl on 143", service: "imap/ssl", port: 143},
+		{name: "pop3s on 110", service: "pop3s", port: 110},
+		{name: "pop3 ssl on 110", service: "pop3/ssl", port: 110},
+		{name: "ldaps on 389", service: "ldaps", port: 389},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, ok := LookupProtocolSpec(tt.service, tt.port)
+			if ok {
+				t.Fatalf("expected secure alias %q to reject port %d, got %+v", tt.service, tt.port, spec)
+			}
+		})
+	}
+}
+
 func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 	tests := []struct {
 		name string
@@ -217,6 +240,51 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 			name: "elasticsearch",
 			in:   SecurityCandidate{Service: "elasticsearch", Port: 9200},
 			want: ProtocolSpec{Name: "elasticsearch", Aliases: []string{"elastic"}, Ports: []int{9200}, DefaultUsers: []string{"elastic", "admin", "kibana"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "imap service",
+			in:   SecurityCandidate{Service: "imap"},
+			want: ProtocolSpec{Name: "imap", Aliases: []string{"imaps", "imap/ssl"}, Ports: []int{143, 993}, DefaultUsers: []string{"admin", "mail", "postmaster", "root", "user", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "imap alias",
+			in:   SecurityCandidate{Service: "imaps"},
+			want: ProtocolSpec{Name: "imap", Aliases: []string{"imaps", "imap/ssl"}, Ports: []int{143, 993}, DefaultUsers: []string{"admin", "mail", "postmaster", "root", "user", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "pop3 alias",
+			in:   SecurityCandidate{Service: "pop3s"},
+			want: ProtocolSpec{Name: "pop3", Aliases: []string{"pop3s", "pop3/ssl"}, Ports: []int{110, 995}, DefaultUsers: []string{"admin", "root", "mail", "user", "test", "postmaster"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "pop3 port fallback",
+			in:   SecurityCandidate{Port: 995},
+			want: ProtocolSpec{Name: "pop3", Aliases: []string{"pop3s", "pop3/ssl"}, Ports: []int{110, 995}, DefaultUsers: []string{"admin", "root", "mail", "user", "test", "postmaster"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "kafka service",
+			in:   SecurityCandidate{Service: "kafka"},
+			want: ProtocolSpec{Name: "kafka", Ports: []int{9092}, DefaultUsers: []string{"admin", "kafka", "root", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "kafka port fallback",
+			in:   SecurityCandidate{Port: 9092},
+			want: ProtocolSpec{Name: "kafka", Ports: []int{9092}, DefaultUsers: []string{"admin", "kafka", "root", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "ldap service",
+			in:   SecurityCandidate{Service: "ldap"},
+			want: ProtocolSpec{Name: "ldap", Aliases: []string{"ldaps"}, Ports: []int{389, 636}, DefaultUsers: []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "ldap alias",
+			in:   SecurityCandidate{Service: "ldaps"},
+			want: ProtocolSpec{Name: "ldap", Aliases: []string{"ldaps"}, Ports: []int{389, 636}, DefaultUsers: []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "ldap port fallback",
+			in:   SecurityCandidate{Port: 636},
+			want: ProtocolSpec{Name: "ldap", Aliases: []string{"ldaps"}, Ports: []int{389, 636}, DefaultUsers: []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 	}
 

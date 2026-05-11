@@ -29,27 +29,46 @@ var (
 var legacyProtocolSpecs = []ProtocolSpec{}
 
 func LookupProtocolSpec(service string, port int) (ProtocolSpec, bool) {
+	rawToken := rawProtocolToken(service)
 	token := normalizeProtocolToken(service)
-	spec, ok, err := lookupMetadataProtocolSpec(token, port)
+	spec, ok, err := lookupMetadataProtocolSpec(rawToken, token, port)
 	if ok {
 		return spec, true
 	}
 	if err != nil {
 		panic(fmt.Errorf("load secprobe metadata: %w", err))
 	}
-	return lookupLegacyProtocolSpec(token, port)
+	return lookupLegacyProtocolSpec(rawToken, token, port)
 }
 
-func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool, error) {
+func lookupMetadataProtocolSpec(rawToken, token string, port int) (ProtocolSpec, bool, error) {
 	specs, err := builtinMetadataSpecsOnceValue()
 	if err != nil {
 		return ProtocolSpec{}, false, err
+	}
+
+	if rawToken != "" {
+		for _, spec := range specs {
+			if spec.Name == rawToken || containsString(spec.Aliases, rawToken) {
+				protocolSpec := fromMetadataSpec(spec)
+				if !tokenSupportsPort(rawToken, port) {
+					return ProtocolSpec{}, false, nil
+				}
+				if port != 0 && requiresStrictPortMatch(protocolSpec.Name) && !specSupportsPort(protocolSpec, port) {
+					return ProtocolSpec{}, false, nil
+				}
+				return protocolSpec, true, nil
+			}
+		}
 	}
 
 	if token != "" {
 		for _, spec := range specs {
 			if spec.Name == token || containsString(spec.Aliases, token) {
 				protocolSpec := fromMetadataSpec(spec)
+				if rawToken != "" && !tokenSupportsPort(rawToken, port) {
+					return ProtocolSpec{}, false, nil
+				}
 				if port != 0 && requiresStrictPortMatch(protocolSpec.Name) && !specSupportsPort(protocolSpec, port) {
 					return ProtocolSpec{}, false, nil
 				}
@@ -69,7 +88,31 @@ func lookupMetadataProtocolSpec(token string, port int) (ProtocolSpec, bool, err
 	return ProtocolSpec{}, false, nil
 }
 
-func lookupLegacyProtocolSpec(token string, port int) (ProtocolSpec, bool) {
+func lookupLegacyProtocolSpec(rawToken, token string, port int) (ProtocolSpec, bool) {
+	if rawToken != "" {
+		for _, spec := range legacyProtocolSpecs {
+			matched := spec.Name == rawToken
+			if !matched {
+				for _, alias := range spec.Aliases {
+					if alias == rawToken {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+			if !tokenSupportsPort(rawToken, port) {
+				return ProtocolSpec{}, false
+			}
+			if port != 0 && requiresStrictPortMatch(spec.Name) && !specSupportsPort(spec, port) {
+				return ProtocolSpec{}, false
+			}
+			return cloneProtocolSpec(spec), true
+		}
+	}
+
 	if token != "" {
 		for _, spec := range legacyProtocolSpecs {
 			matched := spec.Name == token
@@ -83,6 +126,9 @@ func lookupLegacyProtocolSpec(token string, port int) (ProtocolSpec, bool) {
 			}
 			if !matched {
 				continue
+			}
+			if rawToken != "" && !tokenSupportsPort(rawToken, port) {
+				return ProtocolSpec{}, false
 			}
 			if port != 0 && requiresStrictPortMatch(spec.Name) && !specSupportsPort(spec, port) {
 				return ProtocolSpec{}, false
@@ -117,9 +163,13 @@ func ProtocolSupportsKind(service string, kind ProbeKind) bool {
 	return false
 }
 
-func normalizeProtocolToken(service string) string {
+func rawProtocolToken(service string) string {
 	service = strings.ToLower(strings.TrimSpace(service))
-	service = strings.TrimSuffix(service, "?")
+	return strings.TrimSuffix(service, "?")
+}
+
+func normalizeProtocolToken(service string) string {
+	service = rawProtocolToken(service)
 	service = strings.TrimSuffix(service, "/ssl")
 	return service
 }
@@ -143,6 +193,31 @@ func specSupportsPort(spec ProtocolSpec, port int) bool {
 		}
 	}
 	return false
+}
+
+func tokenSupportsPort(token string, port int) bool {
+	if port == 0 {
+		return true
+	}
+
+	if required, ok := secureAliasPort(token); ok {
+		return port == required
+	}
+
+	return true
+}
+
+func secureAliasPort(token string) (int, bool) {
+	switch token {
+	case "imaps", "imap/ssl":
+		return 993, true
+	case "pop3s", "pop3/ssl":
+		return 995, true
+	case "ldaps":
+		return 636, true
+	default:
+		return 0, false
+	}
 }
 
 func fromMetadataSpec(spec metadata.Spec) ProtocolSpec {

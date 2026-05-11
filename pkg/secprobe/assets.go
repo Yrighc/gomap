@@ -7,12 +7,14 @@ import (
 )
 
 func BuiltinCredentials(protocol string) ([]Credential, error) {
-	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(protocol), 0)
+	rawToken := rawProtocolToken(protocol)
+	normalizedToken := normalizeProtocolToken(protocol)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, 0)
 	if err != nil {
 		return nil, fmt.Errorf("load secprobe metadata: %w", err)
 	}
 	if !ok {
-		return nil, fmt.Errorf("unsupported secprobe credential protocol: %s", normalizeProtocolToken(protocol))
+		return nil, fmt.Errorf("unsupported secprobe credential protocol: %s", normalizedToken)
 	}
 
 	profile := credentials.ProfileFromMetadata(spec.Name, spec.Dictionary)

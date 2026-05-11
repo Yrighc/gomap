@@ -299,12 +299,14 @@ func probeCandidateLegacy(
 }
 
 func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
-	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(protocol), 0)
+	rawToken := rawProtocolToken(protocol)
+	normalizedToken := normalizeProtocolToken(protocol)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, 0)
 	if err != nil {
 		return nil, fmt.Errorf("load secprobe metadata: %w", err)
 	}
 	if !ok {
-		if legacy, ok := lookupLegacyProtocolSpec(normalizeProtocolToken(protocol), 0); ok {
+		if legacy, ok := lookupLegacyProtocolSpec(rawToken, normalizedToken, 0); ok {
 			spec = metadataSpecFromProtocolSpec(legacy)
 		} else {
 			return legacyCredentialsForCandidate(protocol, opts)
@@ -589,7 +591,9 @@ func compilePlanForCandidate(candidate SecurityCandidate, opts CredentialProbeOp
 }
 
 func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential, hasUnauthorized bool) (metadata.Spec, bool) {
-	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(candidate.Service), candidate.Port)
+	rawToken := rawProtocolToken(candidate.Service)
+	normalizedToken := normalizeProtocolToken(candidate.Service)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, candidate.Port)
 	if err != nil {
 		panic(fmt.Errorf("load secprobe metadata: %w", err))
 	}
@@ -597,7 +601,7 @@ func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential,
 		return spec, true
 	}
 
-	if legacy, ok := lookupLegacyProtocolSpec(normalizeProtocolToken(candidate.Service), candidate.Port); ok {
+	if legacy, ok := lookupLegacyProtocolSpec(rawToken, normalizedToken, candidate.Port); ok {
 		return metadataSpecFromProtocolSpec(legacy), true
 	}
 
@@ -621,15 +625,32 @@ func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential,
 	return metadata.Spec{}, false
 }
 
-func lookupRuntimeMetadataSpec(token string, port int) (metadata.Spec, bool, error) {
+func lookupRuntimeMetadataSpec(rawToken, token string, port int) (metadata.Spec, bool, error) {
 	specs, err := builtinMetadataSpecsOnceValue()
 	if err != nil {
 		return metadata.Spec{}, false, err
 	}
 
+	if rawToken != "" {
+		for _, spec := range specs {
+			if spec.Name == rawToken || containsString(spec.Aliases, rawToken) {
+				if !tokenSupportsPort(rawToken, port) {
+					return metadata.Spec{}, false, nil
+				}
+				if port != 0 && requiresStrictPortMatch(spec.Name) && !containsPort(spec.Ports, port) {
+					return metadata.Spec{}, false, nil
+				}
+				return spec, true, nil
+			}
+		}
+	}
+
 	if token != "" {
 		for _, spec := range specs {
 			if spec.Name == token || containsString(spec.Aliases, token) {
+				if rawToken != "" && !tokenSupportsPort(rawToken, port) {
+					return metadata.Spec{}, false, nil
+				}
 				if port != 0 && requiresStrictPortMatch(spec.Name) && !containsPort(spec.Ports, port) {
 					return metadata.Spec{}, false, nil
 				}
