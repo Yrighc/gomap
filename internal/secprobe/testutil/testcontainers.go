@@ -55,6 +55,15 @@ type MongoDBConfig struct {
 	Password string
 }
 
+func normalizeContainerHost(host string) string {
+	switch strings.TrimSpace(strings.ToLower(host)) {
+	case "", "localhost", "::1", "[::1]":
+		return "127.0.0.1"
+	default:
+		return host
+	}
+}
+
 func integrationEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOMAP_INTEGRATION"))) {
 	case "1", "true", "yes", "on":
@@ -95,6 +104,7 @@ func StartLinuxServer(t *testing.T, cfg LinuxServerConfig) LinuxServer {
 	if err != nil {
 		t.Fatalf("container host: %v", err)
 	}
+	host = normalizeContainerHost(host)
 
 	ports := map[string]int{}
 	for _, port := range req.ExposedPorts {
@@ -269,6 +279,7 @@ func startServiceContainer(t *testing.T, req testcontainers.ContainerRequest, po
 	if err != nil {
 		t.Fatalf("container host: %v", err)
 	}
+	host = normalizeContainerHost(host)
 
 	mapped, err := container.MappedPort(ctx, nat.Port(port))
 	if err != nil {
