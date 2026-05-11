@@ -245,6 +245,9 @@ func run(candidates []secprobe.SecurityCandidate) secprobe.RunResult {
 - `internal/secprobe/pop3/auth_once.go`
 - `internal/secprobe/ldap/auth_once.go`
 - `internal/secprobe/kafka/auth_once.go`
+- `internal/secprobe/activemq/auth_once.go`
+- `internal/secprobe/zabbix/auth_once.go`
+- `internal/secprobe/neo4j/auth_once.go`
 
 这四个协议分别覆盖了：
 
@@ -254,6 +257,18 @@ func run(candidates []secprobe.SecurityCandidate) secprobe.RunResult {
 - 统一错误分类回传
 
 对三方扩展方来说，这比继续参考历史 batch prober 更接近当前推荐模型。
+
+### 5.2.1 P2 HTTP/API Credential 子层
+
+当前 `zabbix`、`neo4j` 通过 `internal/secprobe/httpauth` 复用 HTTP 登录辅助逻辑，
+但对外仍然只是普通 `credential` provider。
+
+这意味着三方扩展方如果需要接类似协议，应优先：
+
+1. 保持 `RegisterAtomicCredential(...)`
+2. 在 provider 内复用 HTTP helper
+3. 由 provider 自己定义固定登录 endpoint 与成功判定
+4. 不新增顶层 capability
 
 ### 5.3 方式三：历史 public prober 兼容型
 

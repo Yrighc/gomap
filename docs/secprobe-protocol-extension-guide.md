@@ -77,8 +77,22 @@
 - `kafka`
   - metadata: `app/secprobe/protocols/kafka.yaml`
   - provider: `internal/secprobe/kafka/auth_once.go`
+- `activemq`
+  - metadata: `app/secprobe/protocols/activemq.yaml`
+  - provider: `internal/secprobe/activemq/auth_once.go`
+- `zabbix`
+  - metadata: `app/secprobe/protocols/zabbix.yaml`
+  - provider: `internal/secprobe/zabbix/auth_once.go`
+- `neo4j`
+  - metadata: `app/secprobe/protocols/neo4j.yaml`
+  - provider: `internal/secprobe/neo4j/auth_once.go`
 
-这四个协议可以视为当前版本“新增 credential 协议”的标准样板。
+其中：
+
+- `imap` / `pop3` / `ldap` / `kafka` / `activemq`
+  - 可以视为当前版本“新增原子 credential 协议”的样板
+- `zabbix` / `neo4j`
+  - 可以视为当前版本“HTTP/API 登录型 credential 协议”的样板
 
 ## 3. 一个协议应该放在哪里
 
@@ -217,6 +231,40 @@
 4. 必要时再补 generator 变异策略
 
 而不是回退成“每个协议复制一份完整密码字典”。
+
+## 3.6 HTTP/API Credential 子层
+
+当前 `zabbix`、`neo4j` 不是直接在 provider 里各自散写一套完整 `net/http` 交互，而是先复用：
+
+`internal/secprobe/httpauth/`
+
+这层当前只负责：
+
+- HTTP client 构造
+- cookie jar 保持
+- 可选 TLS 放宽
+- context / timeout 透传
+- transport 错误归一化
+
+这层当前不负责：
+
+- 登录成功判定
+- 协议特定状态机
+- JSON-RPC / basic-auth 语义
+- 结果 finding 生成
+
+也就是说：
+
+- `httpauth` 是 provider 层复用助手
+- 不是新的 capability
+- 不是 YAML DSL
+- 更不是第二个 engine
+
+当前这类协议的推荐做法是：
+
+1. provider 自己决定固定登录入口
+2. provider 自己解释响应是否等于认证成功
+3. provider 只把 HTTP 传输细节下沉到 `httpauth`
 
 ## 4. 哪些内容适合 metadata
 

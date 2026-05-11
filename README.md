@@ -215,6 +215,10 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
 - 当前公开 `Run` / `RunWithRegistry` / `Scan` 主链路固定使用 `default` 档位；内部虽然已有 `fast/default/full` 抽象，但尚未作为 public 参数开放。
 - 自定义默认字典目录入口已移除；三方调用方如需完全指定候选，请通过 `Credentials`、`-up` 或 `-upf` 显式传入。
+- `activemq` 第一版按原子 `credential` 协议接入，使用 STOMP 单次认证模型。
+- `zabbix`、`neo4j` 第一版按 HTTP/API 登录型 `credential` 接入，复用 `internal/secprobe/httpauth`。
+- `httpauth` 是 provider 层 HTTP 传输复用助手，不是新的 capability，也不是 YAML DSL。
+- `rsync` 本轮只完成边界评估，不并入当前实现批次。
 - 协议扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 - 三方库调用与历史扩展升级方式请参考 [docs/secprobe-third-party-migration-guide.md](docs/secprobe-third-party-migration-guide.md)。
 
