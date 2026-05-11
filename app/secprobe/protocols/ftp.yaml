@@ -13,9 +13,12 @@ dictionary:
   default_users:
     - ftp
     - admin
-    - root
     - www
     - web
+    - root
+    - db
+    - wwwroot
+    - data
   password_source: builtin:passwords/global
   default_pairs:
     - username: anonymous

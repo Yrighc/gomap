@@ -141,6 +141,32 @@ func TestLoadBuiltinNormalizesDictionaryDefaultTiers(t *testing.T) {
 	}
 }
 
+func TestLoadBuiltinUsesFscanExpandedProtocolUsers(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	tests := []struct {
+		protocol string
+		users    []string
+	}{
+		{protocol: "ftp", users: []string{"ftp", "admin", "www", "web", "root", "db", "wwwroot", "data"}},
+		{protocol: "amqp", users: []string{"guest", "admin", "administrator", "rabbit", "rabbitmq", "root"}},
+		{protocol: "elasticsearch", users: []string{"elastic", "admin", "kibana"}},
+	}
+
+	for _, tt := range tests {
+		spec, ok := specs[tt.protocol]
+		if !ok {
+			t.Fatalf("expected %s spec, got keys %v", tt.protocol, slices.Sorted(maps.Keys(specs)))
+		}
+		if !slices.Equal(spec.Dictionary.DefaultUsers, tt.users) {
+			t.Fatalf("%s default users = %v, want %v", tt.protocol, spec.Dictionary.DefaultUsers, tt.users)
+		}
+	}
+}
+
 func TestNormalizeSpecNormalizesDictionaryDefaultTiers(t *testing.T) {
 	spec := normalizeSpec(Spec{
 		Name: "ssh",

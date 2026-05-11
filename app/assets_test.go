@@ -69,9 +69,23 @@ func TestEmbeddedSecprobePasswordSourceResourcesLoad(t *testing.T) {
 		t.Fatalf("load failed: %v", err)
 	}
 
-	const want = "123456\nadmin\npassword\n{user}\n{user}123\n[common] {user}@123\n[common] {user}_123\n[extended] Passw0rd\n"
-	if string(data) != want {
-		t.Fatalf("expected global password source %q, got %q", want, string(data))
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 70 {
+		t.Fatalf("expected fscan-sized global password source, got %d entries", len(lines))
+	}
+	for _, want := range []string{
+		"123456",
+		"admin123",
+		"{user}@123",
+		"P@ssw0rd!",
+		"1qaz@WSX",
+		"Charge123",
+		"redis",
+		"elastic123",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Fatalf("expected global password source to contain %q", want)
+		}
 	}
 }
 

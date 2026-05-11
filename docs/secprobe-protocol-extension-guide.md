@@ -360,6 +360,7 @@ dictionary:
 
 - 不带 tier 前缀的密码会被视为 `top`
 - 只有显式写出 `[common]` / `[extended]`，分层过滤才会真实区分
+- 当前内置密码项参考 fscan `DefaultPasswords` 维护，fscan 采用 MIT License；空密码不写成空行，由协议 metadata 的 `allow_empty_password` 控制生成
 - 不再为每个协议维护 `app/secprobe/dicts/<protocol>.txt`
 - 协议差异通过 metadata 的 `default_users`、`extra_passwords`、`default_pairs` 表达
 

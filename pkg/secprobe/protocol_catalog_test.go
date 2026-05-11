@@ -161,7 +161,7 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 		{
 			name: "ftp",
 			in:   SecurityCandidate{Service: "ftp"},
-			want: ProtocolSpec{Name: "ftp", Ports: []int{21}, DefaultUsers: []string{"ftp", "admin", "root", "www", "web"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+			want: ProtocolSpec{Name: "ftp", Ports: []int{21}, DefaultUsers: []string{"ftp", "admin", "www", "web", "root", "db", "wwwroot", "data"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
 			name: "mssql",
@@ -201,7 +201,7 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 		{
 			name: "amqp port fallback",
 			in:   SecurityCandidate{Port: 5672},
-			want: ProtocolSpec{Name: "amqp", Aliases: []string{"amqps"}, Ports: []int{5672, 5671}, DefaultUsers: []string{"guest", "admin"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+			want: ProtocolSpec{Name: "amqp", Aliases: []string{"amqps"}, Ports: []int{5672, 5671}, DefaultUsers: []string{"guest", "admin", "administrator", "rabbit", "rabbitmq", "root"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
 			name: "oracle alias",

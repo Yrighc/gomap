@@ -16,6 +16,10 @@ dictionary:
   default_users:
     - guest
     - admin
+    - administrator
+    - rabbit
+    - rabbitmq
+    - root
   password_source: builtin:passwords/global
   default_pairs:
     - username: guest
