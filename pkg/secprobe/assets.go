@@ -11,7 +11,7 @@ func BuiltinCredentials(protocol string) ([]Credential, error) {
 	dictNames := builtinCredentialDictNames(protocol)
 	var lastErr error
 	for _, name := range dictNames {
-		data, err := appassets.SecprobeDict(name)
+		data, err := appassets.SecprobePasswordSource(name)
 		if err != nil {
 			lastErr = err
 			continue

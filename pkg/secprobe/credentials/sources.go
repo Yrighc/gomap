@@ -54,7 +54,7 @@ func IsMissingSource(err error) bool {
 }
 
 var builtinLoader = func(protocol string) ([]strategy.Credential, error) {
-	data, err := appassets.SecprobeDict(protocol)
+	data, err := appassets.SecprobePasswordSource(protocol)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ var builtinLoader = func(protocol string) ([]strategy.Credential, error) {
 }
 
 var builtinEntryLoader = func(protocol string) ([]credentialEntry, error) {
-	data, err := appassets.SecprobeDict(protocol)
+	data, err := appassets.SecprobePasswordSource(protocol)
 	if err != nil {
 		return nil, err
 	}
