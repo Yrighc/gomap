@@ -9,6 +9,7 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
 		{Service: "telnet", Port: 23},
@@ -48,6 +49,7 @@ func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
 		{Service: "telnet", Port: 23},
@@ -251,6 +253,7 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 	tests := []SecurityCandidate{
 		{Service: "ftp", Port: 21},
 		{Service: "imap", Port: 143},
+		{Service: "ldap", Port: 389},
 		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
 		{Service: "mssql", Port: 1433},
