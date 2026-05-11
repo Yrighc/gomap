@@ -11,6 +11,7 @@ import (
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
+	neo4jprobe "github.com/yrighc/gomap/internal/secprobe/neo4j"
 	oracledbprobe "github.com/yrighc/gomap/internal/secprobe/oracle"
 	pop3probe "github.com/yrighc/gomap/internal/secprobe/pop3"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
@@ -22,6 +23,7 @@ import (
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
+	zabbixprobe "github.com/yrighc/gomap/internal/secprobe/zabbix"
 	zookeeperprobe "github.com/yrighc/gomap/internal/secprobe/zookeeper"
 	"github.com/yrighc/gomap/pkg/secprobe/template"
 )
@@ -43,6 +45,8 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("postgresql", postgresqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("redis", redisprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("elasticsearch", elasticsearchprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("zabbix", zabbixprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("neo4j", neo4jprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("smtp", smtpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("telnet", telnetprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))
