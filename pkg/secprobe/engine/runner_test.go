@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/yrighc/gomap/pkg/secprobe/result"
 	atomregistry "github.com/yrighc/gomap/pkg/secprobe/registry"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
@@ -94,8 +94,8 @@ func TestRunnerPrefersUnauthorizedBeforeCredential(t *testing.T) {
 	}
 
 	out := Run(context.Background(), plan, Input{
-		Credentials:        []strategy.Credential{{Username: "a", Password: "1"}},
-		Authenticator:      auth,
+		Credentials:         []strategy.Credential{{Username: "a", Password: "1"}},
+		Authenticator:       auth,
 		UnauthorizedChecker: checker,
 	})
 

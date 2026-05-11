@@ -9,8 +9,8 @@ import (
 	"github.com/yrighc/gomap/internal/secprobe/core"
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	"github.com/yrighc/gomap/internal/secprobe/testutil"
-	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe"
+	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 	gssh "golang.org/x/crypto/ssh"
 )

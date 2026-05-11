@@ -27,7 +27,7 @@ jobs:
 
       - name: Verify formatting
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(git ls-files '*.go' | xargs gofmt -l)
           if [ -n "$unformatted" ]; then
             echo "The following files are not gofmt-formatted:"
             echo "$unformatted"
