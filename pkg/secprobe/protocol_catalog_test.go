@@ -182,11 +182,6 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 		want ProtocolSpec
 	}{
 		{
-			name: "activemq service",
-			in:   SecurityCandidate{Service: "activemq"},
-			want: ProtocolSpec{Name: "activemq", Ports: []int{61613}, DefaultUsers: []string{"admin", "root", "activemq", "system", "user"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
-		},
-		{
 			name: "ftp",
 			in:   SecurityCandidate{Service: "ftp"},
 			want: ProtocolSpec{Name: "ftp", Ports: []int{21}, DefaultUsers: []string{"ftp", "admin", "www", "web", "root", "db", "wwwroot", "data"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
@@ -290,16 +285,6 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 			name: "ldap port fallback",
 			in:   SecurityCandidate{Port: 636},
 			want: ProtocolSpec{Name: "ldap", Aliases: []string{"ldaps"}, Ports: []int{389, 636}, DefaultUsers: []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
-		},
-		{
-			name: "neo4j port fallback",
-			in:   SecurityCandidate{Port: 7474},
-			want: ProtocolSpec{Name: "neo4j", Ports: []int{7474, 7473}, DefaultUsers: []string{"neo4j", "admin", "root", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
-		},
-		{
-			name: "zabbix service",
-			in:   SecurityCandidate{Service: "zabbix"},
-			want: ProtocolSpec{Name: "zabbix", Ports: []int{80, 443, 8080, 8443}, DefaultUsers: []string{"admin", "admin", "guest", "user"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 	}
 

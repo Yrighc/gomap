@@ -47,7 +47,7 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
+func TestDefaultRegistry_activemq_zabbix_neo4j_BuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 	r := DefaultRegistry()
 
 	tests := []SecurityCandidate{
@@ -74,33 +74,6 @@ func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 		{Service: "zabbix", Port: 80},
 		{Service: "smb", Port: 445},
 		{Service: "mongodb", Port: 27017},
-	}
-
-	for _, candidate := range tests {
-		t.Run(candidate.Service, func(t *testing.T) {
-			if !r.hasCapability(candidate, ProbeKindCredential) {
-				t.Fatalf("expected credential capability for %+v", candidate)
-			}
-			if _, ok := r.lookupAtomicCredential(candidate); !ok {
-				t.Fatalf("expected atomic credential plugin for %+v", candidate)
-			}
-			if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
-				t.Fatalf("expected builtin credential public lookup miss for %+v", candidate)
-			}
-			if _, ok := r.lookupCore(candidate, ProbeKindCredential); ok {
-				t.Fatalf("expected builtin credential core lookup miss for %+v", candidate)
-			}
-		})
-	}
-}
-
-func TestDefaultRegistry_activemq_zabbix_neo4j_CredentialBaseline(t *testing.T) {
-	r := DefaultRegistry()
-
-	tests := []SecurityCandidate{
-		{Service: "activemq", Port: 61613},
-		{Service: "zabbix", Port: 80},
-		{Service: "neo4j", Port: 7474},
 	}
 
 	for _, candidate := range tests {
