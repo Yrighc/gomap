@@ -8,7 +8,10 @@ import (
 )
 
 type DictionaryProfileInput struct {
+	DefaultUsers       []string
 	PasswordSource     string
+	ExtraPasswords     []string
+	DefaultPairs        []CredentialPair
 	DefaultTiers       []string
 	AllowEmptyUsername bool
 	AllowEmptyPassword bool
@@ -17,7 +20,6 @@ type DictionaryProfileInput struct {
 
 type GenerateInput struct {
 	Profile CredentialProfile
-	DictDir string
 	Inline  []strategy.Credential
 }
 
@@ -30,7 +32,10 @@ type Generator struct{}
 
 func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialProfile {
 	return ProfileFromDictionary(protocol, DictionaryProfileInput{
+		DefaultUsers:       dict.DefaultUsers,
 		PasswordSource:     dict.PasswordSource,
+		ExtraPasswords:     dict.ExtraPasswords,
+		DefaultPairs:        metadataPairsToCredentialPairs(dict.DefaultPairs),
 		DefaultTiers:       dict.DefaultTiers,
 		AllowEmptyUsername: dict.AllowEmptyUsername,
 		AllowEmptyPassword: dict.AllowEmptyPassword,
@@ -41,7 +46,10 @@ func ProfileFromMetadata(protocol string, dict metadata.Dictionary) CredentialPr
 func ProfileFromDictionary(protocol string, dict DictionaryProfileInput) CredentialProfile {
 	return CredentialProfile{
 		Protocol:           strings.ToLower(strings.TrimSpace(protocol)),
+		DefaultUsers:       normalizeUsers(dict.DefaultUsers),
 		PasswordSource:     strings.ToLower(strings.TrimSpace(dict.PasswordSource)),
+		ExtraPasswords:     normalizePasswords(dict.ExtraPasswords),
+		DefaultPairs:        normalizeCredentialPairs(dict.DefaultPairs),
 		DefaultTiers:       normalizeTiers(dict.DefaultTiers),
 		ScanProfile:        ScanProfileDefault,
 		AllowEmptyUsername: dict.AllowEmptyUsername,
@@ -71,30 +79,68 @@ func (g Generator) Generate(in GenerateInput) ([]strategy.Credential, GenerateMe
 		return creds, meta, nil
 	}
 
-	sourceName := sourceNameForProfile(in.Profile)
-	if in.DictDir != "" {
-		creds, source, err := loadDirectorySourceNameByTiers(sourceName, in.DictDir, selectedTiers)
-		if err == nil {
-			meta.Source = source
-			return Expand(creds, Options{
-				Profile:        in.Profile.ExpansionProfile,
-				AllowEmptyUser: in.Profile.AllowEmptyUsername,
-				AllowEmptyPass: in.Profile.AllowEmptyPassword,
-			}), meta, nil
-		}
-		return nil, GenerateMeta{}, err
-	}
-
-	creds, source, err := loadBuiltinSourceNameByTiers(sourceName, selectedTiers)
+	passwords, source, err := loadBuiltinSourceNameByTiers(sourceNameForProfile(in.Profile), selectedTiers)
 	if err != nil {
 		return nil, GenerateMeta{}, err
 	}
 	meta.Source = source
-	return Expand(creds, Options{
+	creds := buildGeneratedCredentials(in.Profile, passwords)
+	expanded := Expand(creds, Options{
 		Profile:        in.Profile.ExpansionProfile,
 		AllowEmptyUser: in.Profile.AllowEmptyUsername,
 		AllowEmptyPass: in.Profile.AllowEmptyPassword,
-	}), meta, nil
+	})
+	return appendExactPairs(expanded, in.Profile.DefaultPairs), meta, nil
+}
+
+func buildGeneratedCredentials(profile CredentialProfile, passwords []strategy.Credential) []strategy.Credential {
+	out := make([]strategy.Credential, 0, len(profile.DefaultUsers)*(len(passwords)+len(profile.ExtraPasswords)))
+	for _, user := range profile.DefaultUsers {
+		for _, password := range passwords {
+			out = append(out, strategy.Credential{
+				Username: user,
+				Password: strings.ReplaceAll(password.Password, "{user}", user),
+			})
+		}
+		for _, password := range profile.ExtraPasswords {
+			out = append(out, strategy.Credential{
+				Username: user,
+				Password: strings.ReplaceAll(password, "{user}", user),
+			})
+		}
+	}
+	return out
+}
+
+func appendExactPairs(creds []strategy.Credential, pairs []CredentialPair) []strategy.Credential {
+	if len(pairs) == 0 {
+		return creds
+	}
+	out := make([]strategy.Credential, 0, len(creds)+len(pairs))
+	seen := make(map[string]struct{}, len(creds)+len(pairs))
+	appendUniqueCredential := func(cred strategy.Credential) {
+		key := cred.Username + "\x00" + cred.Password
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, cred)
+	}
+	for _, cred := range creds {
+		appendUniqueCredential(cred)
+	}
+	for _, pair := range pairs {
+		appendUniqueCredential(strategy.Credential{Username: pair.Username, Password: pair.Password})
+	}
+	return out
+}
+
+func metadataPairsToCredentialPairs(values []metadata.CredentialPair) []CredentialPair {
+	out := make([]CredentialPair, 0, len(values))
+	for _, value := range values {
+		out = append(out, CredentialPair{Username: value.Username, Password: value.Password})
+	}
+	return out
 }
 
 func sourceNameForProfile(profile CredentialProfile) string {
@@ -114,6 +160,71 @@ func dedupeStrategyCredentials(in []strategy.Credential) []strategy.Credential {
 		}
 		seen[key] = struct{}{}
 		out = append(out, cred)
+	}
+	return out
+}
+
+func normalizeUsers(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizePasswords(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeCredentialPairs(values []CredentialPair) []CredentialPair {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]CredentialPair, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		user := strings.TrimSpace(value.Username)
+		pass := strings.TrimSpace(value.Password)
+		if user == "" || pass == "" {
+			continue
+		}
+		key := user + "\x00" + pass
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, CredentialPair{Username: user, Password: pass})
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

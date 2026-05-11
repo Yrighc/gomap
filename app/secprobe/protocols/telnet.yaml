@@ -10,8 +10,11 @@ policy_tags:
   auth_family: password
   transport: tcp
 dictionary:
-  default_sources:
-    - telnet
+  default_users:
+    - root
+    - admin
+    - test
+  password_source: builtin:passwords/global
   default_tiers:
     - top
     - common

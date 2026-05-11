@@ -18,10 +18,18 @@ const (
 
 type CredentialProfile struct {
 	Protocol           string
+	DefaultUsers       []string
 	PasswordSource     string
+	ExtraPasswords     []string
+	DefaultPairs        []CredentialPair
 	DefaultTiers       []Tier
 	ScanProfile        ScanProfile
 	AllowEmptyUsername bool
 	AllowEmptyPassword bool
 	ExpansionProfile   string
+}
+
+type CredentialPair struct {
+	Username string
+	Password string
 }

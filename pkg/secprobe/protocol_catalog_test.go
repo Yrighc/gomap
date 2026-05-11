@@ -8,20 +8,22 @@ import (
 	"github.com/yrighc/gomap/pkg/secprobe/metadata"
 )
 
+const sharedPasswordSource = "builtin:passwords/global"
+
 func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 	tests := []struct {
 		name    string
 		service string
 		port    int
 		want    string
-		dicts   []string
+		users   []string
 		enrich  bool
 	}{
-		{name: "postgres alias", service: "postgres", want: "postgresql", dicts: []string{"postgresql", "postgres"}},
-		{name: "pgsql alias", service: "pgsql", want: "postgresql", dicts: []string{"postgresql", "postgres"}},
-		{name: "mongo alias", service: "mongo", want: "mongodb", dicts: []string{"mongodb", "mongo"}, enrich: true},
-		{name: "redis tls alias", service: "redis/tls", want: "redis", dicts: []string{"redis"}, enrich: true},
-		{name: "mongodb port fallback", port: 27017, want: "mongodb", dicts: []string{"mongodb", "mongo"}, enrich: true},
+		{name: "postgres alias", service: "postgres", want: "postgresql", users: []string{"postgres", "admin"}},
+		{name: "pgsql alias", service: "pgsql", want: "postgresql", users: []string{"postgres", "admin"}},
+		{name: "mongo alias", service: "mongo", want: "mongodb", users: []string{"root", "admin"}, enrich: true},
+		{name: "redis tls alias", service: "redis/tls", want: "redis", users: []string{""}, enrich: true},
+		{name: "mongodb port fallback", port: 27017, want: "mongodb", users: []string{"root", "admin"}, enrich: true},
 	}
 
 	for _, tt := range tests {
@@ -33,8 +35,11 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 			if spec.Name != tt.want {
 				t.Fatalf("expected %q, got %q", tt.want, spec.Name)
 			}
-			if !reflect.DeepEqual(spec.DictNames, tt.dicts) {
-				t.Fatalf("expected dict names %v, got %v", tt.dicts, spec.DictNames)
+			if spec.PasswordSource != sharedPasswordSource {
+				t.Fatalf("expected shared password source, got %q", spec.PasswordSource)
+			}
+			if !reflect.DeepEqual(spec.DefaultUsers, tt.users) {
+				t.Fatalf("expected default users %v, got %v", tt.users, spec.DefaultUsers)
 			}
 			if spec.SupportsEnrichment != tt.enrich {
 				t.Fatalf("expected SupportsEnrichment=%v, got %v", tt.enrich, spec.SupportsEnrichment)
@@ -51,7 +56,7 @@ func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
 
 	spec.Aliases[0] = "mutated"
 	spec.Ports[0] = 1
-	spec.DictNames[0] = "changed"
+	spec.DefaultUsers[0] = "changed"
 	spec.ProbeKinds[0] = ProbeKindUnauthorized
 
 	again, ok := LookupProtocolSpec("redis", 0)
@@ -65,8 +70,8 @@ func TestLookupProtocolSpecReturnsIsolatedSlices(t *testing.T) {
 	if again.Ports[0] != 6379 {
 		t.Fatalf("expected ports to stay isolated, got %v", again.Ports)
 	}
-	if again.DictNames[0] != "redis" {
-		t.Fatalf("expected dict names to stay isolated, got %v", again.DictNames)
+	if again.DefaultUsers[0] != "" {
+		t.Fatalf("expected default users to stay isolated, got %v", again.DefaultUsers)
 	}
 	if again.ProbeKinds[0] != ProbeKindCredential {
 		t.Fatalf("expected probe kinds to stay isolated, got %v", again.ProbeKinds)
@@ -109,7 +114,7 @@ func TestLookupProtocolSpecRejectsStrictMetadataTokenMatchOnWrongPort(t *testing
 				Name:       "oracle",
 				Aliases:    []string{"oracle-tns"},
 				Ports:      []int{1521},
-				Dictionary: metadata.Dictionary{PasswordSource: "oracle"},
+				Dictionary: metadata.Dictionary{PasswordSource: sharedPasswordSource},
 				Capabilities: metadata.Capabilities{
 					Credential: true,
 				},
@@ -131,7 +136,7 @@ func TestLookupProtocolSpecRejectsSNMPMetadataTokenMatchOnWrongPort(t *testing.T
 				Name:  "snmp",
 				Ports: []int{161},
 				Dictionary: metadata.Dictionary{
-					PasswordSource: "snmp",
+					PasswordSource: sharedPasswordSource,
 				},
 				Capabilities: metadata.Capabilities{
 					Credential: true,
@@ -147,253 +152,79 @@ func TestLookupProtocolSpecRejectsSNMPMetadataTokenMatchOnWrongPort(t *testing.T
 	}
 }
 
-func TestLookupProtocolSpecPhase2MetadataMatchesHistoricalLegacyContracts(t *testing.T) {
+func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 	tests := []struct {
-		service string
-		port    int
-		want    ProtocolSpec
+		name string
+		in   SecurityCandidate
+		want ProtocolSpec
 	}{
 		{
-			service: "ftp",
-			want: ProtocolSpec{
-				Name:       "ftp",
-				Ports:      []int{21},
-				DictNames:  []string{"ftp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "ftp",
+			in:   SecurityCandidate{Service: "ftp"},
+			want: ProtocolSpec{Name: "ftp", Ports: []int{21}, DefaultUsers: []string{"ftp", "admin", "root", "www", "web"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
-			service: "memcached",
-			want: ProtocolSpec{
-				Name:       "memcached",
-				Ports:      []int{11211},
-				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
-			},
+			name: "mssql",
+			in:   SecurityCandidate{Service: "mssql"},
+			want: ProtocolSpec{Name: "mssql", Ports: []int{1433}, DefaultUsers: []string{"sa", "sql"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
-			service: "mongo",
-			want: ProtocolSpec{
-				Name:               "mongodb",
-				Aliases:            []string{"mongo"},
-				Ports:              []int{27017},
-				DictNames:          []string{"mongodb", "mongo"},
-				ProbeKinds:         []ProbeKind{ProbeKindCredential, ProbeKindUnauthorized},
-				SupportsEnrichment: true,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		spec, ok := LookupProtocolSpec(tt.service, tt.port)
-		if !ok {
-			t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
-		}
-		if !reflect.DeepEqual(spec, tt.want) {
-			t.Fatalf("expected %#v, got %#v", tt.want, spec)
-		}
-	}
-}
-
-func TestLookupProtocolSpecPhase2BatchAMetadataProtocols(t *testing.T) {
-	tests := []struct {
-		service string
-		port    int
-		want    ProtocolSpec
-	}{
-		{
-			service: "ftp",
-			want: ProtocolSpec{
-				Name:       "ftp",
-				Ports:      []int{21},
-				DictNames:  []string{"ftp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "mysql by port",
+			in:   SecurityCandidate{Port: 3306},
+			want: ProtocolSpec{Name: "mysql", Ports: []int{3306}, DefaultUsers: []string{"root", "mysql"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
-			service: "mssql",
-			want: ProtocolSpec{
-				Name:       "mssql",
-				Ports:      []int{1433},
-				DictNames:  []string{"mssql"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
-		},
-		{
-			port: 3306,
-			want: ProtocolSpec{
-				Name:       "mysql",
-				Ports:      []int{3306},
-				DictNames:  []string{"mysql"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
-		},
-		{
-			service: "telnet",
-			want: ProtocolSpec{
-				Name:       "telnet",
-				Ports:      []int{23},
-				DictNames:  []string{"telnet"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		spec, ok := LookupProtocolSpec(tt.service, tt.port)
-		if !ok {
-			t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
-		}
-		if !reflect.DeepEqual(spec, tt.want) {
-			t.Fatalf("expected %#v, got %#v", tt.want, spec)
-		}
-	}
-}
-
-func TestLookupProtocolSpecIncludesPhaseOneCredentialProtocols(t *testing.T) {
-	tests := []struct {
-		name    string
-		service string
-		port    int
-		want    ProtocolSpec
-	}{
-		{
-			name:    "mssql by name",
-			service: "mssql",
-			want: ProtocolSpec{
-				Name:       "mssql",
-				Ports:      []int{1433},
-				DictNames:  []string{"mssql"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "telnet",
+			in:   SecurityCandidate{Service: "telnet"},
+			want: ProtocolSpec{Name: "telnet", Ports: []int{23}, DefaultUsers: []string{"root", "admin", "test"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
 			name: "rdp by port",
-			port: 3389,
-			want: ProtocolSpec{
-				Name:       "rdp",
-				Ports:      []int{3389},
-				DictNames:  []string{"rdp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			in:   SecurityCandidate{Port: 3389},
+			want: ProtocolSpec{Name: "rdp", Ports: []int{3389}, DefaultUsers: []string{"administrator", "admin", "guest"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
-			name:    "vnc by name",
-			service: "vnc",
-			want: ProtocolSpec{
-				Name:       "vnc",
-				Ports:      []int{5900},
-				DictNames:  []string{"vnc"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "vnc",
+			in:   SecurityCandidate{Service: "vnc"},
+			want: ProtocolSpec{Name: "vnc", Ports: []int{5900}, DefaultUsers: []string{""}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
-			name:    "smb alias",
-			service: "cifs",
-			want: ProtocolSpec{
-				Name:       "smb",
-				Aliases:    []string{"cifs"},
-				Ports:      []int{445, 139},
-				DictNames:  []string{"smb"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "smb alias",
+			in:   SecurityCandidate{Service: "cifs"},
+			want: ProtocolSpec{Name: "smb", Aliases: []string{"cifs"}, Ports: []int{445, 139}, DefaultUsers: []string{"administrator", "admin", "guest"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			spec, ok := LookupProtocolSpec(tt.service, tt.port)
-			if !ok {
-				t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
-			}
-			if !reflect.DeepEqual(spec, tt.want) {
-				t.Fatalf("expected %#v, got %#v", tt.want, spec)
-			}
-		})
-	}
-}
-
-func TestLookupProtocolSpecIncludesPhaseTwoBatchACredentialProtocols(t *testing.T) {
-	tests := []struct {
-		name    string
-		service string
-		port    int
-		want    ProtocolSpec
-	}{
 		{
-			name:    "smtp alias",
-			service: "smtps",
-			want: ProtocolSpec{
-				Name:       "smtp",
-				Aliases:    []string{"smtps"},
-				Ports:      []int{25, 465, 587},
-				DictNames:  []string{"smtp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "smtp alias",
+			in:   SecurityCandidate{Service: "smtps"},
+			want: ProtocolSpec{Name: "smtp", Aliases: []string{"smtps"}, Ports: []int{25, 465, 587}, DefaultUsers: []string{"admin", "root", "postmaster", "mail", "smtp", "administrator"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
 			name: "amqp port fallback",
-			port: 5672,
-			want: ProtocolSpec{
-				Name:       "amqp",
-				Aliases:    []string{"amqps"},
-				Ports:      []int{5672, 5671},
-				DictNames:  []string{"amqp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			in:   SecurityCandidate{Port: 5672},
+			want: ProtocolSpec{Name: "amqp", Aliases: []string{"amqps"}, Ports: []int{5672, 5671}, DefaultUsers: []string{"guest", "admin"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			spec, ok := LookupProtocolSpec(tt.service, tt.port)
-			if !ok {
-				t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
-			}
-			if !reflect.DeepEqual(spec, tt.want) {
-				t.Fatalf("expected %#v, got %#v", tt.want, spec)
-			}
-			if !ProtocolSupportsKind(tt.want.Name, ProbeKindCredential) {
-				t.Fatalf("expected %s credential probing to be declared", tt.want.Name)
-			}
-		})
-	}
-}
-
-func TestLookupProtocolSpecIncludesPhaseTwoBatchBCredentialProtocols(t *testing.T) {
-	tests := []struct {
-		name    string
-		service string
-		port    int
-		want    ProtocolSpec
-	}{
 		{
-			name:    "oracle alias",
-			service: "oracle-tns",
-			want: ProtocolSpec{
-				Name:       "oracle",
-				Aliases:    []string{"oracle-tns"},
-				Ports:      []int{1521},
-				DictNames:  []string{"oracle"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			name: "oracle alias",
+			in:   SecurityCandidate{Service: "oracle-tns"},
+			want: ProtocolSpec{Name: "oracle", Aliases: []string{"oracle-tns"}, Ports: []int{1521}, DefaultUsers: []string{"sys", "system", "admin", "test", "web", "orcl"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 		{
 			name: "snmp port fallback",
-			port: 161,
-			want: ProtocolSpec{
-				Name:       "snmp",
-				Ports:      []int{161},
-				DictNames:  []string{"snmp"},
-				ProbeKinds: []ProbeKind{ProbeKindCredential},
-			},
+			in:   SecurityCandidate{Port: 161},
+			want: ProtocolSpec{Name: "snmp", Ports: []int{161}, DefaultUsers: []string{""}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+		},
+		{
+			name: "elasticsearch",
+			in:   SecurityCandidate{Service: "elasticsearch", Port: 9200},
+			want: ProtocolSpec{Name: "elasticsearch", Aliases: []string{"elastic"}, Ports: []int{9200}, DefaultUsers: []string{"elastic", "admin", "kibana"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spec, ok := LookupProtocolSpec(tt.service, tt.port)
+			spec, ok := LookupProtocolSpec(tt.in.Service, tt.in.Port)
 			if !ok {
-				t.Fatalf("expected protocol spec for %q/%d", tt.service, tt.port)
+				t.Fatalf("expected protocol spec for %+v", tt.in)
 			}
 			if !reflect.DeepEqual(spec, tt.want) {
 				t.Fatalf("expected %#v, got %#v", tt.want, spec)
@@ -405,7 +236,7 @@ func TestLookupProtocolSpecIncludesPhaseTwoBatchBCredentialProtocols(t *testing.
 	}
 }
 
-func TestLookupProtocolSpecIncludesPhaseThreeUnauthorizedProtocols(t *testing.T) {
+func TestLookupProtocolSpecIncludesUnauthorizedProtocols(t *testing.T) {
 	tests := []struct {
 		name    string
 		service string
@@ -415,20 +246,12 @@ func TestLookupProtocolSpecIncludesPhaseThreeUnauthorizedProtocols(t *testing.T)
 		{
 			name:    "memcached by name",
 			service: "memcached",
-			want: ProtocolSpec{
-				Name:       "memcached",
-				Ports:      []int{11211},
-				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
-			},
+			want:    ProtocolSpec{Name: "memcached", Ports: []int{11211}, ProbeKinds: []ProbeKind{ProbeKindUnauthorized}},
 		},
 		{
 			name: "zookeeper by port",
 			port: 2181,
-			want: ProtocolSpec{
-				Name:       "zookeeper",
-				Ports:      []int{2181},
-				ProbeKinds: []ProbeKind{ProbeKindUnauthorized},
-			},
+			want: ProtocolSpec{Name: "zookeeper", Ports: []int{2181}, ProbeKinds: []ProbeKind{ProbeKindUnauthorized}},
 		},
 	}
 
@@ -471,8 +294,11 @@ func TestLookupProtocolSpecSupportsElasticsearchCredentialOnly(t *testing.T) {
 	if !reflect.DeepEqual(spec.ProbeKinds, wantKinds) {
 		t.Fatalf("expected elasticsearch probe kinds %v, got %v", wantKinds, spec.ProbeKinds)
 	}
-	if !reflect.DeepEqual(spec.DictNames, []string{"elasticsearch"}) {
-		t.Fatalf("expected elasticsearch dict names, got %v", spec.DictNames)
+	if spec.PasswordSource != sharedPasswordSource {
+		t.Fatalf("expected shared password source, got %q", spec.PasswordSource)
+	}
+	if !reflect.DeepEqual(spec.DefaultUsers, []string{"elastic", "admin", "kibana"}) {
+		t.Fatalf("expected elasticsearch default users, got %v", spec.DefaultUsers)
 	}
 	if !ProtocolSupportsKind("elasticsearch", ProbeKindCredential) {
 		t.Fatal("expected elasticsearch credential probing to be declared")

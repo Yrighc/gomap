@@ -104,7 +104,6 @@ func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
 			"-weak-protocols", "postgresql",
 			"-weak-concurrency", "7",
 			"-weak-stop-on-success=false",
-			"-weak-dict-dir", "  ./dicts  ",
 			"-weak-enable-unauth",
 			"-weak-enable-enrichment",
 		})
@@ -144,9 +143,6 @@ func TestPortWithWeakWrapsAssetAndSecurityResults(t *testing.T) {
 	if gotWeakOpts.StopOnSuccess {
 		t.Fatal("expected stop-on-success false")
 	}
-	if gotWeakOpts.DictDir != "./dicts" {
-		t.Fatalf("expected trimmed dict dir, got %q", gotWeakOpts.DictDir)
-	}
 	if !gotWeakOpts.EnableUnauthorized {
 		t.Fatal("expected unauthorized probing enabled")
 	}
@@ -181,7 +177,7 @@ func TestPortWithWeakOutputOmitsInternalStateFields(t *testing.T) {
 }
 
 func TestBuildPortWeakProbeOptions(t *testing.T) {
-	opts := buildPortWeakProbeOptions("ssh, redis", 7, 3*time.Second, false, "  ./dicts  ", false, false)
+	opts := buildPortWeakProbeOptions("ssh, redis", 7, 3*time.Second, false, false, false)
 
 	if got, want := opts.Protocols, []string{"ssh", "redis"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("expected protocols %v, got %v", want, got)
@@ -195,13 +191,10 @@ func TestBuildPortWeakProbeOptions(t *testing.T) {
 	if opts.StopOnSuccess {
 		t.Fatal("expected stop-on-success false")
 	}
-	if opts.DictDir != "./dicts" {
-		t.Fatalf("expected trimmed dict dir, got %q", opts.DictDir)
-	}
 }
 
 func TestBuildPortWeakProbeOptionsForwardsUnauthorizedAndEnrichment(t *testing.T) {
-	opts := buildPortWeakProbeOptions("mongodb", 5, 4*time.Second, true, " ./dicts ", true, true)
+	opts := buildPortWeakProbeOptions("mongodb", 5, 4*time.Second, true, true, true)
 
 	if !opts.EnableUnauthorized {
 		t.Fatal("expected unauthorized probing enabled")

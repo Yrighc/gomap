@@ -12,7 +12,8 @@ type ProtocolSpec struct {
 	Name               string
 	Aliases            []string
 	Ports              []int
-	DictNames          []string
+	DefaultUsers       []string
+	PasswordSource     string
 	ProbeKinds         []ProbeKind
 	SupportsEnrichment bool
 }
@@ -126,7 +127,7 @@ func normalizeProtocolToken(service string) string {
 func cloneProtocolSpec(spec ProtocolSpec) ProtocolSpec {
 	spec.Aliases = append([]string(nil), spec.Aliases...)
 	spec.Ports = append([]int(nil), spec.Ports...)
-	spec.DictNames = append([]string(nil), spec.DictNames...)
+	spec.DefaultUsers = append([]string(nil), spec.DefaultUsers...)
 	spec.ProbeKinds = append([]ProbeKind(nil), spec.ProbeKinds...)
 	return spec
 }
@@ -157,50 +158,10 @@ func fromMetadataSpec(spec metadata.Spec) ProtocolSpec {
 		Name:               spec.Name,
 		Aliases:            append([]string(nil), spec.Aliases...),
 		Ports:              append([]int(nil), spec.Ports...),
-		DictNames:          dictionarySources(spec),
+		DefaultUsers:       append([]string(nil), spec.Dictionary.DefaultUsers...),
+		PasswordSource:     spec.Dictionary.PasswordSource,
 		ProbeKinds:         probeKinds,
 		SupportsEnrichment: spec.Capabilities.Enrichment,
-	}
-}
-
-func dictionarySources(spec metadata.Spec) []string {
-	passwordSource := spec.Dictionary.PasswordSource
-	if passwordSource == "" {
-		if !spec.Capabilities.Credential {
-			return nil
-		}
-		passwordSource = spec.Name
-	}
-	if passwordSource == "" {
-		return nil
-	}
-
-	sources := []string{passwordSource}
-	if spec.Dictionary.PasswordSource == "" {
-		sources = append(sources, simpleDictionaryAliases(spec)...)
-	}
-	return uniqueNonEmptyStrings(sources)
-}
-
-func simpleDictionaryAliases(spec metadata.Spec) []string {
-	out := make([]string, 0, len(spec.Aliases))
-	for _, alias := range spec.Aliases {
-		if !isKnownAliasDictionaryName(spec.Name, alias) {
-			continue
-		}
-		out = append(out, alias)
-	}
-	return out
-}
-
-func isKnownAliasDictionaryName(protocol, alias string) bool {
-	switch protocol {
-	case "mongodb":
-		return alias == "mongo"
-	case "postgresql":
-		return alias == "postgres"
-	default:
-		return false
 	}
 }
 

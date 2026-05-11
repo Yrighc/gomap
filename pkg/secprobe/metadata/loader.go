@@ -36,13 +36,25 @@ func LoadBuiltin() (map[string]Spec, error) {
 func normalizeSpec(spec Spec) Spec {
 	spec.Name = strings.ToLower(strings.TrimSpace(spec.Name))
 	spec.Aliases = normalizeStrings(spec.Aliases)
-	spec.Dictionary.DefaultUsers = normalizeStrings(spec.Dictionary.DefaultUsers)
+	spec.Dictionary.DefaultUsers = normalizeDefaultUsers(spec.Dictionary.DefaultUsers)
 	spec.Dictionary.PasswordSource = strings.ToLower(strings.TrimSpace(spec.Dictionary.PasswordSource))
 	spec.Dictionary.ExtraPasswords = normalizePasswords(spec.Dictionary.ExtraPasswords)
 	spec.Dictionary.DefaultPairs = normalizeCredentialPairs(spec.Dictionary.DefaultPairs)
 	spec.Dictionary.DefaultTiers = normalizeStrings(spec.Dictionary.DefaultTiers)
 	spec.Templates.Unauthorized = strings.ToLower(strings.TrimSpace(spec.Templates.Unauthorized))
 	return spec
+}
+
+func normalizeDefaultUsers(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, strings.ToLower(strings.TrimSpace(value)))
+	}
+	return out
 }
 
 func normalizeStrings(values []string) []string {

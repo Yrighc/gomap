@@ -179,7 +179,7 @@ func TestNormalizeSpecNormalizesNewDictionaryFields(t *testing.T) {
 	if !slices.Equal(spec.Aliases, []string{"redis/tls", "redis/ssl"}) {
 		t.Fatalf("expected normalized aliases, got %v", spec.Aliases)
 	}
-	if !slices.Equal(spec.Dictionary.DefaultUsers, []string{"default", "root"}) {
+	if !slices.Equal(spec.Dictionary.DefaultUsers, []string{"default", "", "root"}) {
 		t.Fatalf("expected normalized default users, got %v", spec.Dictionary.DefaultUsers)
 	}
 	if spec.Dictionary.PasswordSource != "builtin:passwords/global" {
@@ -214,8 +214,8 @@ func TestNormalizeSpecDropsEmptyNewDictionaryFields(t *testing.T) {
 		},
 	})
 
-	if spec.Dictionary.DefaultUsers != nil {
-		t.Fatalf("expected empty default users to normalize to nil, got %v", spec.Dictionary.DefaultUsers)
+	if !slices.Equal(spec.Dictionary.DefaultUsers, []string{"", "", ""}) {
+		t.Fatalf("expected explicit empty default users to stay declared, got %v", spec.Dictionary.DefaultUsers)
 	}
 	if spec.Dictionary.PasswordSource != "" {
 		t.Fatalf("expected empty password source, got %q", spec.Dictionary.PasswordSource)

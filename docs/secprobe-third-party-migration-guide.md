@@ -21,7 +21,7 @@
 也就是：
 
 - `metadata`
-  - 负责描述协议静态信息，例如协议名、别名、端口、能力、字典名
+  - 负责描述协议静态信息，例如协议名、别名、端口、能力、默认用户与共享密码源
 - `planner`
   - 负责把候选目标与运行参数编译成执行计划
 - `engine`
@@ -49,6 +49,8 @@
 - `Run` / `RunWithRegistry` 统一走 planner + engine 主链路
 - `credential` 候选加载已统一走 generator，而不是各协议零散直读 txt
 - `memcached unauthorized` 改为 simple template executor 执行
+- 内置默认弱口令从“每协议一份字典”改为“全局共享密码池 + 协议差异 metadata”
+- `DictDir` / `dict_dir` / `-weak-dict-dir` 这类自定义默认字典目录入口已移除
 - public `Registry.Register(...)` 兼容路径继续保留，但被隔离为显式 compatibility adapter
 - builtin 协议能力判断不再等价于 `Lookup(..., ProbeKindXxx)` 是否命中
 
@@ -301,7 +303,7 @@ r.RegisterAtomicUnauthorized("myproto", myUnauthorizedChecker)
 - `EnableUnauthorized` 开关是否仍符合预期
 - `StopOnSuccess` 是否仍符合预期
 - 命中结果的 `FindingType`、`Evidence`、`Username`、`Password` 是否符合预期
-- 显式 `dict_dir` 缺失时是否按 `no-credentials` 处理，而不是静默回退 builtin
+- 未显式传入 `Credentials` 时，默认候选是否来自内置共享密码池
 
 ### 7.2 你维护私有协议扩展
 
@@ -332,7 +334,7 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 如果你的私有协议也需要默认弱口令候选生成能力，当前建议同步维护：
 
 - 一份协议 metadata
-- 一份默认字典
+- 必要的 `default_users` / `extra_passwords` / `default_pairs`
 - 一个 atomic provider
 
 也就是让私有协议尽量和内置协议保持同一条链路：
@@ -381,13 +383,13 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 字典侧当前也可以这样理解：
 
 - `inline`
-  - 仍然最高优先级
-- `dict_dir`
-  - 仍然覆盖 builtin
-- `builtin`
-  - 仍然作为默认回退
+  - 仍然最高优先级，显式传入后只做去重，不做自动扩展
+- `builtin shared password source`
+  - 未传 inline 时使用 `app/secprobe/dicts/passwords/global.txt`
+- `protocol metadata`
+  - 只描述默认用户、协议额外密码、精确账号密码对与默认 tier
 
-但这三者现在已经不是三套分散逻辑，而是统一进入 generator。
+这意味着默认候选的维护重心不再是多份协议字典，而是一份共享密码池加少量协议差异声明。
 
 ## 9. 当前 simple unauthorized template 的边界
 
@@ -437,7 +439,7 @@ func RegisterMySecprobe(r *secprobe.Registry) {
 这意味着：
 
 - 你现在升级到这版后，不需要额外传 scan profile 参数
-- 但如果你维护自己的默认字典，已经可以开始按 tier 写数据
+- 但如果你维护共享密码池，已经可以开始按 tier 写数据
 - 不应再用“取前 N 条”这种隐藏截断方式模拟 `fast/default/full`
 
 ## 11. 常见坑
@@ -474,14 +476,16 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 
 `Registry.Register(...)` 现在的语义是“兼容仍可用”，不是“推荐新扩展继续这么写”。
 
-### 11.5 以为显式 `dict_dir` 缺失会自动回退 builtin
+### 11.5 继续按协议维护多份默认字典
 
-当前 generator 已收紧这个语义：
+当前版本已经移除自定义默认字典目录入口，也不再推荐新增 `app/secprobe/dicts/<protocol>.txt`。
 
-- 如果调用方显式传了 `dict_dir`
-- 但该目录下没有对应协议字典
+推荐做法是：
 
-那么运行时应按 `no-credentials` 处理，而不是静默改用 builtin。
+- 通用密码维护在 `app/secprobe/dicts/passwords/global.txt`
+- 协议默认用户维护在 `app/secprobe/protocols/*.yaml`
+- 少量协议特征密码写入 `extra_passwords`
+- 必须精确保留的账号密码组合写入 `default_pairs`
 
 ## 12. 建议的回归测试基线
 
@@ -492,8 +496,8 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 3. unauthorized 失败后 credential 回退回归
 4. `StopOnSuccess=true` 时的停止行为
 5. `EnableUnauthorized=true/false` 的分支行为
-6. 缺少字典时的 `no-credentials` 行为
-7. `inline / dict_dir / builtin` 优先级行为
+6. 共享密码源缺失或 tier 过滤为空时的 `no-credentials` 行为
+7. inline 凭据优先且保持字面语义
 8. 如使用 tier-tagged 字典，默认档位过滤行为
 9. 自定义 provider 注册后的 capability 命中行为
 10. legacy public prober 兼容路径行为
@@ -514,7 +518,7 @@ simple template executor 是受限执行器，不是通用协议 DSL。
 3. 如果是扩展方，优先评估能否迁移到 atomic provider
 4. 检查是否有代码依赖 `Lookup(..., kind)` 作为 capability 判断
 5. 检查是否把 loop、重试、停止条件写死在协议实现里
-6. 检查是否误以为显式 `dict_dir` 缺失会自动回退 builtin
+6. 检查是否仍依赖 `DictDir` / `-weak-dict-dir` / 每协议默认字典文件
 7. 检查未授权确认是否适合模板化，还是应继续 code-backed
 8. 补齐回归测试后再升级生产调用
 

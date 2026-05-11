@@ -101,7 +101,6 @@ func runWeak(args []string) {
 	protocols := fs.String("protocols", "", "[可选] 仅探测指定协议，逗号分隔")
 	timeout := fs.Int("timeout", 3, "[可选] 资产发现与 secprobe 超时秒数")
 	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] secprobe 并发数")
-	dictDir := fs.String("dict-dir", "", "[可选] 自定义协议字典目录")
 	inlineCreds := fs.String("up", "", "[可选] 内联凭证，格式 'admin : admin,root : root'")
 	credFile := fs.String("upf", "", "[可选] 凭证文件，一行一个 'admin : admin'")
 	stopOnSuccess := fs.Bool("stop-on-success", true, "[可选] 单目标命中后停止继续尝试")
@@ -160,7 +159,6 @@ func runWeak(args []string) {
 		Concurrency:        *weakConcurrency,
 		Timeout:            discoveryTimeout,
 		StopOnSuccess:      *stopOnSuccess,
-		DictDir:            strings.TrimSpace(*dictDir),
 		Credentials:        creds,
 		EnableUnauthorized: *enableUnauthorized,
 		EnableEnrichment:   *enableEnrichment,
@@ -220,7 +218,6 @@ func runPort(args []string) {
 	weakProtocols := fs.String("weak-protocols", "", "[可选] 限定 weak 探测协议，逗号分隔")
 	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] weak 探测并发数")
 	weakStopOnSuccess := fs.Bool("weak-stop-on-success", true, "[可选] weak 命中后停止继续尝试")
-	weakDictDir := fs.String("weak-dict-dir", "", "[可选] 自定义 weak 字典目录")
 	weakEnableUnauthorized := fs.Bool("weak-enable-unauth", false, "[可选] 启用 weak 未授权访问探测")
 	weakEnableEnrichment := fs.Bool("weak-enable-enrichment", false, "[可选] 为 weak 命中结果追加补充信息")
 	if err := fs.Parse(args); err != nil {
@@ -335,7 +332,6 @@ func runPort(args []string) {
 				*weakConcurrency,
 				time.Duration(*timeout)*time.Second,
 				*weakStopOnSuccess,
-				*weakDictDir,
 				*weakEnableUnauthorized,
 				*weakEnableEnrichment,
 			)
@@ -768,13 +764,12 @@ func splitComma(v string) []string {
 	return out
 }
 
-func buildPortWeakProbeOptions(protocols string, concurrency int, timeout time.Duration, stopOnSuccess bool, dictDir string, enableUnauthorized bool, enableEnrichment bool) secprobe.CredentialProbeOptions {
+func buildPortWeakProbeOptions(protocols string, concurrency int, timeout time.Duration, stopOnSuccess bool, enableUnauthorized bool, enableEnrichment bool) secprobe.CredentialProbeOptions {
 	return secprobe.CredentialProbeOptions{
 		Protocols:          splitComma(protocols),
 		Concurrency:        concurrency,
 		Timeout:            timeout,
 		StopOnSuccess:      stopOnSuccess,
-		DictDir:            strings.TrimSpace(dictDir),
 		EnableUnauthorized: enableUnauthorized,
 		EnableEnrichment:   enableEnrichment,
 	}

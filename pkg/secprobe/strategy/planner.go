@@ -15,7 +15,6 @@ type CompileInput struct {
 	EnableEnrichment   bool
 	StopOnSuccess      bool
 	Timeout            time.Duration
-	DictDir            string
 	Credentials        []Credential
 }
 
@@ -65,11 +64,6 @@ func selectCredentialSet(spec metadata.Spec, in CompileInput) CredentialSet {
 		set.Source = CredentialSourceInline
 		set.InlineCount = len(dedupeCredentials(in.Credentials))
 		return set
-	}
-
-	if in.DictDir != "" {
-		set.Source = CredentialSourceDirectory
-		set.Directory = in.DictDir
 	}
 
 	return set

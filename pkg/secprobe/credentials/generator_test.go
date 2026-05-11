@@ -2,65 +2,19 @@ package credentials
 
 import (
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/yrighc/gomap/pkg/secprobe/strategy"
 )
 
-func TestGeneratorUsesInlineBeforeDirectoryAndBuiltin(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte("root : root\n"), 0o600); err != nil {
-		t.Fatalf("write dict: %v", err)
-	}
-
-	builtinCalled := false
-	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
-		builtinCalled = true
-		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "ssh",
-			PasswordSource:   "ssh",
-			DefaultTiers:     []Tier{TierTop, TierCommon},
-			ScanProfile:      ScanProfileFull,
-			ExpansionProfile: "none",
-		},
-		DictDir: dir,
-		Inline: []strategy.Credential{
-			{Username: "inline", Password: "secret"},
-			{Username: "inline", Password: "secret"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{{Username: "inline", Password: "secret"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if meta.Source.Kind != SourceInline {
-		t.Fatalf("Generate() source = %+v, want inline", meta.Source)
-	}
-	if builtinCalled {
-		t.Fatal("expected builtin loader to stay unused when inline credentials exist")
-	}
-}
-
 func TestGeneratorKeepsInlineCredentialsLiteralWithoutExpansion(t *testing.T) {
 	gen := Generator{}
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:           "redis",
-			PasswordSource:     "redis",
-			DefaultTiers:       []Tier{TierTop, TierCommon},
-			ScanProfile:        ScanProfileDefault,
+			DefaultUsers:       []string{""},
+			PasswordSource:     "builtin:passwords/global",
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: true,
 			ExpansionProfile:   "static_basic",
@@ -74,223 +28,24 @@ func TestGeneratorKeepsInlineCredentialsLiteralWithoutExpansion(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	wantCreds := []strategy.Credential{{Username: "admin", Password: "admin"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	want := []strategy.Credential{{Username: "admin", Password: "admin"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Generate() creds = %v, want %v", got, want)
 	}
 	if meta.Source.Kind != SourceInline {
 		t.Fatalf("Generate() source = %+v, want inline", meta.Source)
 	}
 }
 
-func TestGeneratorUsesDirectoryBeforeBuiltin(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "redis.txt"), []byte("default : password\n"), 0o600); err != nil {
-		t.Fatalf("write dict: %v", err)
-	}
-
-	builtinCalled := false
-	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
-		builtinCalled = true
-		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:           "redis",
-			PasswordSource:     "redis",
-			DefaultTiers:       []Tier{TierTop, TierCommon},
-			ScanProfile:        ScanProfileDefault,
-			AllowEmptyUsername: true,
-			AllowEmptyPassword: true,
-			ExpansionProfile:   "none",
-		},
-		DictDir: dir,
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{{Username: "default", Password: "password"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if meta.Source.Kind != SourceDictDir || meta.Source.Name != "redis" {
-		t.Fatalf("Generate() source = %+v", meta.Source)
-	}
-	if builtinCalled {
-		t.Fatal("expected builtin loader to stay unused when dict_dir hit exists")
-	}
-}
-
-func TestGeneratorUsesPasswordSourceForDirectoryLookup(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "postgres.txt"), []byte("pg : secret\n"), 0o600); err != nil {
-		t.Fatalf("write dict: %v", err)
-	}
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "postgresql",
-			PasswordSource:   " postgres ",
-			DefaultTiers:     []Tier{TierTop, TierCommon},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-		DictDir: dir,
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if meta.Source.Kind != SourceDictDir || meta.Source.Name != "postgres" {
-		t.Fatalf("Generate() source = %+v, want postgres dict dir", meta.Source)
-	}
-}
-
-func TestGeneratorFallsBackToProtocolWhenPasswordSourceBlank(t *testing.T) {
-	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
-		if protocol != "postgresql" {
-			t.Fatalf("protocol = %q, want %q", protocol, "postgresql")
+func TestGeneratorBuildsCredentialsFromSharedPasswordsExtraPasswordsAndPairs(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(source string) ([]credentialEntry, error) {
+		if source != "builtin:passwords/global" {
+			t.Fatalf("source = %q, want builtin:passwords/global", source)
 		}
-		return []strategy.Credential{{Username: "pg", Password: "secret"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "postgresql",
-			PasswordSource:   " ",
-			DefaultTiers:     []Tier{TierTop},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if meta.Source.Kind != SourceBuiltin || meta.Source.Name != "postgresql" {
-		t.Fatalf("Generate() source = %+v, want postgresql builtin", meta.Source)
-	}
-}
-
-func TestGeneratorUsesPasswordSourceForBuiltinLookup(t *testing.T) {
-	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
-		if protocol != "postgres" {
-			t.Fatalf("protocol = %q, want %q", protocol, "postgres")
-		}
-		return []strategy.Credential{{Username: "pg", Password: "secret"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "postgresql",
-			PasswordSource:   " postgres ",
-			DefaultTiers:     []Tier{TierTop},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{{Username: "pg", Password: "secret"}}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if meta.Source.Kind != SourceBuiltin || meta.Source.Name != "postgres" {
-		t.Fatalf("Generate() source = %+v, want postgres builtin", meta.Source)
-	}
-}
-
-func TestGeneratorTreatsWhitespaceDictDirAsExplicitDirectoryInput(t *testing.T) {
-	builtinCalled := false
-	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
-		builtinCalled = true
-		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	_, _, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "redis",
-			PasswordSource:   "redis",
-			DefaultTiers:     []Tier{TierTop, TierCommon},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-		DictDir: "   ",
-	})
-	if err == nil {
-		t.Fatal("expected Generate() error when whitespace dict_dir is explicitly provided")
-	}
-	if !IsMissingSource(err) {
-		t.Fatalf("expected missing source error, got %v", err)
-	}
-	if builtinCalled {
-		t.Fatal("expected builtin loader to stay unused when whitespace dict_dir is explicit")
-	}
-}
-
-func TestGeneratorFiltersTierTaggedEntriesByScanProfile(t *testing.T) {
-	dir := t.TempDir()
-	data := "[top] root : root\n[common] admin : admin\n[extended] guest : guest\n"
-	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte(data), 0o600); err != nil {
-		t.Fatalf("write dict: %v", err)
-	}
-
-	gen := Generator{}
-	got, meta, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "ssh",
-			PasswordSource:   "ssh",
-			DefaultTiers:     []Tier{TierTop, TierCommon, TierExtended},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-		DictDir: dir,
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	wantCreds := []strategy.Credential{
-		{Username: "root", Password: "root"},
-		{Username: "admin", Password: "admin"},
-	}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
-	}
-	if !reflect.DeepEqual(meta.SelectedTiers, []Tier{TierTop, TierCommon}) {
-		t.Fatalf("Generate() selected tiers = %v, want [top common]", meta.SelectedTiers)
-	}
-}
-
-func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
-	restore := stubBuiltinLoader(func(protocol string) ([]strategy.Credential, error) {
-		if protocol != "redis" {
-			t.Fatalf("protocol = %q, want %q", protocol, "redis")
-		}
-		return []strategy.Credential{
-			{Username: "redis", Password: "redis"},
-			{Username: "admin", Password: "admin"},
+		return []credentialEntry{
+			{Tier: TierTop, Credential: strategy.Credential{Password: "123456"}},
+			{Tier: TierCommon, Credential: strategy.Credential{Password: "{user}123"}},
+			{Tier: TierExtended, Credential: strategy.Credential{Password: "Passw0rd"}},
 		}, nil
 	})
 	defer restore()
@@ -299,9 +54,12 @@ func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
 	got, meta, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
 			Protocol:           "redis",
-			PasswordSource:     "redis",
-			DefaultTiers:       []Tier{TierTop, TierCommon, TierExtended},
-			ScanProfile:        ScanProfileFast,
+			DefaultUsers:       []string{""},
+			PasswordSource:     "builtin:passwords/global",
+			ExtraPasswords:     []string{"redis"},
+			DefaultPairs:        []CredentialPair{{Username: "default", Password: "default"}},
+			DefaultTiers:        []Tier{TierTop, TierCommon},
+			ScanProfile:        ScanProfileDefault,
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: true,
 			ExpansionProfile:   "static_basic",
@@ -311,31 +69,81 @@ func TestGeneratorFallsBackToBuiltinAndExpands(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	wantCreds := []strategy.Credential{
-		{Username: "redis", Password: "redis"},
-		{Username: "admin", Password: "admin"},
-		{Username: "redis", Password: "redis123"},
-		{Username: "redis", Password: "redis@123"},
+	want := []strategy.Credential{
+		{Username: "", Password: "123456"},
+		{Username: "", Password: "123"},
 		{Username: "", Password: "redis"},
-		{Username: "redis", Password: ""},
-		{Username: "admin", Password: "admin123"},
-		{Username: "admin", Password: "admin@123"},
-		{Username: "", Password: "admin"},
-		{Username: "admin", Password: ""},
+		{Username: "", Password: ""},
+		{Username: "default", Password: "default"},
 	}
-	if !reflect.DeepEqual(got, wantCreds) {
-		t.Fatalf("Generate() creds = %v, want %v", got, wantCreds)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Generate() creds = %#v, want %#v", got, want)
 	}
-	if meta.Source.Kind != SourceBuiltin {
-		t.Fatalf("Generate() source = %+v, want builtin", meta.Source)
+	if meta.Source.Kind != SourceBuiltin || meta.Source.Name != "builtin:passwords/global" {
+		t.Fatalf("Generate() source = %+v", meta.Source)
 	}
-	if !reflect.DeepEqual(meta.SelectedTiers, []Tier{TierTop}) {
-		t.Fatalf("Generate() selected tiers = %v, want [top]", meta.SelectedTiers)
+	if !reflect.DeepEqual(meta.SelectedTiers, []Tier{TierTop, TierCommon}) {
+		t.Fatalf("Generate() selected tiers = %v, want [top common]", meta.SelectedTiers)
 	}
 }
 
-func TestGeneratorReturnsSourceErrorWhenBuiltinFallbackFails(t *testing.T) {
-	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
+func TestGeneratorAppliesUsernamePasswordTemplates(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(string) ([]credentialEntry, error) {
+		return []credentialEntry{
+			{Tier: TierTop, Credential: strategy.Credential{Password: "{user}"}},
+			{Tier: TierTop, Credential: strategy.Credential{Password: "{user}@123"}},
+		}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	got, _, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:       "ssh",
+			DefaultUsers:   []string{"root", "admin"},
+			PasswordSource: "builtin:passwords/global",
+			DefaultTiers:   []Tier{TierTop},
+			ScanProfile:    ScanProfileFast,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	want := []strategy.Credential{
+		{Username: "root", Password: "root"},
+		{Username: "root", Password: "root@123"},
+		{Username: "admin", Password: "admin"},
+		{Username: "admin", Password: "admin@123"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Generate() creds = %v, want %v", got, want)
+	}
+}
+
+func TestGeneratorReturnsMissingWhenPasswordSourceFiltersToEmpty(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(string) ([]credentialEntry, error) {
+		return []credentialEntry{{Tier: TierExtended, Credential: strategy.Credential{Password: "extended"}}}, nil
+	})
+	defer restore()
+
+	gen := Generator{}
+	_, _, err := gen.Generate(GenerateInput{
+		Profile: CredentialProfile{
+			Protocol:       "ssh",
+			DefaultUsers:   []string{"root"},
+			PasswordSource: "builtin:passwords/global",
+			DefaultTiers:   []Tier{TierTop},
+			ScanProfile:    ScanProfileFast,
+		},
+	})
+	if err == nil || !IsMissingSource(err) {
+		t.Fatalf("expected missing source error, got %v", err)
+	}
+}
+
+func TestGeneratorReturnsSourceErrorWhenBuiltinFails(t *testing.T) {
+	restore := stubBuiltinPasswordEntryLoader(func(string) ([]credentialEntry, error) {
 		return nil, os.ErrNotExist
 	})
 	defer restore()
@@ -343,43 +151,13 @@ func TestGeneratorReturnsSourceErrorWhenBuiltinFallbackFails(t *testing.T) {
 	gen := Generator{}
 	_, _, err := gen.Generate(GenerateInput{
 		Profile: CredentialProfile{
-			Protocol:         "missing",
-			PasswordSource:   "missing",
-			DefaultTiers:     []Tier{TierTop},
-			ExpansionProfile: "none",
+			Protocol:       "missing",
+			DefaultUsers:   []string{"root"},
+			PasswordSource: "builtin:passwords/missing",
+			DefaultTiers:   []Tier{TierTop},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected Generate() error")
-	}
-}
-
-func TestGeneratorReturnsMissingDictDirErrorWithoutBuiltinFallback(t *testing.T) {
-	builtinCalled := false
-	restore := stubBuiltinLoader(func(string) ([]strategy.Credential, error) {
-		builtinCalled = true
-		return []strategy.Credential{{Username: "builtin", Password: "builtin"}}, nil
-	})
-	defer restore()
-
-	gen := Generator{}
-	_, _, err := gen.Generate(GenerateInput{
-		Profile: CredentialProfile{
-			Protocol:         "redis",
-			PasswordSource:   "redis",
-			DefaultTiers:     []Tier{TierTop, TierCommon},
-			ScanProfile:      ScanProfileDefault,
-			ExpansionProfile: "none",
-		},
-		DictDir: t.TempDir(),
-	})
-	if err == nil {
-		t.Fatal("expected Generate() error when explicit dict_dir has no matching dictionary")
-	}
-	if !IsMissingSource(err) {
+	if err == nil || !IsMissingSource(err) {
 		t.Fatalf("expected missing source error, got %v", err)
-	}
-	if builtinCalled {
-		t.Fatal("expected builtin loader to stay unused when explicit dict_dir misses")
 	}
 }

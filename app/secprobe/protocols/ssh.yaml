@@ -10,8 +10,10 @@ policy_tags:
   auth_family: password
   transport: tcp
 dictionary:
-  default_sources:
-    - ssh
+  default_users:
+    - root
+    - admin
+  password_source: builtin:passwords/global
   default_tiers:
     - top
     - common

@@ -75,7 +75,6 @@ type CredentialProbeOptions struct {
 	Concurrency        int
 	Timeout            time.Duration
 	StopOnSuccess      bool
-	DictDir            string
 	Credentials        []Credential
 	EnableUnauthorized bool
 	EnableEnrichment   bool

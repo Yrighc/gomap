@@ -153,7 +153,7 @@
 这一层负责：
 
 - 把 metadata 中的 `dictionary` 编译成运行时 profile
-- 统一处理 `inline > dict_dir > builtin` 来源优先级
+- 统一处理 `inline > builtin shared password source` 来源优先级
 - 执行基础去重
 - 执行基础变异
 - 按 tier 选择最终候选
@@ -174,7 +174,9 @@
 - 协议标准名
 - 协议别名
 - 默认端口
-- 默认字典来源
+- 默认用户
+- 共享密码源
+- 协议额外密码与精确账号密码对
 - 默认字典层级
 - 是否支持 `credential`
 - 是否支持 `unauthorized`
@@ -198,8 +200,15 @@
 
 ```yaml
 dictionary:
-  default_sources:
+  default_users:
+    - root
+    - admin
+  password_source: builtin:passwords/global
+  extra_passwords:
     - ssh
+  default_pairs:
+    - username: root
+      password: toor
   default_tiers:
     - top
     - common
@@ -210,8 +219,14 @@ dictionary:
 
 字段语义：
 
-- `default_sources`
-  - 默认字典名列表
+- `default_users`
+  - 协议默认用户名列表；如 Redis、VNC、SNMP 这类无用户名协议，可显式写空字符串
+- `password_source`
+  - 默认共享密码池，目前内置为 `builtin:passwords/global`
+- `extra_passwords`
+  - 该协议在共享密码池之外追加的少量协议特征密码
+- `default_pairs`
+  - 需要精确保留的账号密码对，不参与用户名密码笛卡尔扩展
 - `default_tiers`
   - 该协议默认允许使用哪些层
 - `allow_empty_username`
@@ -538,9 +553,9 @@ public `Registry.Register(...)` 当前仍然保留，但定位已经变化。
 7. 成功结果的 `FindingType` 是否正确
 8. `RunWithRegistry` 下能否被正确调度
 9. 如支持 credential，字典链路是否可用
-10. 如支持 credential，`inline / dict_dir / builtin` 优先级是否符合预期
+10. 如支持 credential，inline 凭据是否保持字面语义且优先于 builtin
 11. 如支持 credential，显式 tier 行是否能被正确过滤
-12. 如支持 credential，缺失 `dict_dir` 是否按 `no-credentials` 处理而不是静默回退
+12. 如支持 credential，共享密码源缺失或 tier 过滤为空时是否按 `no-credentials` 处理
 13. 如支持 unauthorized，credential / unauthorized 顺序与回退是否符合预期
 14. 如支持 enrichment，补采失败是否不影响主 finding
 15. 如使用 template executor，模板匹配成功与失败是否都可覆盖

@@ -16,7 +16,7 @@
 - 支持用户名密码认证
 - 暂不支持 enrichment
 - 暂不支持复杂未授权确认
-- 使用内置默认字典 `demoauth.txt`
+- 使用全局共享密码池，并在 metadata 中声明协议默认用户
 
 这个协议的最小接入面通常包括：
 
@@ -48,14 +48,21 @@ policy_tags:
   auth_family: password
   transport: tcp
 dictionary:
-  default_sources:
+  default_users:
+    - admin
+    - root
+  password_source: builtin:passwords/global
+  extra_passwords:
     - demoauth
+  default_tiers:
+    - top
+    - common
   allow_empty_username: false
   allow_empty_password: false
-  expansion_profile: basic
+  expansion_profile: static_basic
 results:
-  credential_success_type: credential-valid
-  unauthorized_success_type: unauthorized-access
+  credential_success_type: credential_valid
+  unauthorized_success_type: unauthorized_access
   evidence_profile: default
 templates:
   unauthorized: ""
@@ -69,21 +76,27 @@ templates:
 - 停止条件
 - 状态机
 
-## 3. 第二步：补默认字典
+## 3. 第二步：维护默认候选来源
 
-如果协议要支持默认内置字典，还需要补：
+当前内置协议不再按协议维护 `app/secprobe/dicts/<protocol>.txt`。默认密码统一来自：
 
-`app/secprobe/dicts/demoauth.txt`
+`app/secprobe/dicts/passwords/global.txt`
 
-例如：
+协议自己的差异放在 metadata：
 
-```txt
-admin:admin
-root:root
-test:test123
+```yaml
+dictionary:
+  default_users:
+    - admin
+    - root
+  extra_passwords:
+    - demoauth
+  default_pairs:
+    - username: demo
+      password: demo
 ```
 
-如果协议不需要默认内置字典，也可以只依赖调用方外部传入字典目录或 inline credentials。
+如果调用方要完全指定候选，可以通过 public API 的 `Credentials` 或 CLI 的 `-up` / `-upf` 传入；显式传入的凭据只做去重，不再自动扩展。
 
 ## 4. 第三步：实现 atomic credential provider
 

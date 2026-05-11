@@ -2,9 +2,7 @@ package secprobe
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -318,11 +316,10 @@ func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Cr
 
 	generated, _, err := (credentials.Generator{}).Generate(credentials.GenerateInput{
 		Profile: profile,
-		DictDir: opts.DictDir,
 		Inline:  strategyCredentials(opts.Credentials),
 	})
 	if err != nil {
-		return nil, translateCredentialGenerationError(protocol, opts.DictDir, err)
+		return nil, translateCredentialGenerationError(protocol, err)
 	}
 	return coreCredentials(generated), nil
 }
@@ -331,47 +328,14 @@ func legacyCredentialsForCandidate(protocol string, opts CredentialProbeOptions)
 	if len(opts.Credentials) > 0 {
 		return dedupeCredentials(opts.Credentials), nil
 	}
-	if opts.DictDir != "" {
-		return loadCredentialsFromDir(protocol, opts.DictDir)
-	}
 	return CredentialsFor(protocol, opts)
 }
 
-func translateCredentialGenerationError(protocol, dictDir string, err error) error {
+func translateCredentialGenerationError(protocol string, err error) error {
 	if !credentials.IsMissingSource(err) {
 		return err
 	}
-	if dictDir != "" {
-		return fmt.Errorf("credential dictionary not found for protocol %s in %s", protocol, dictDir)
-	}
 	return fmt.Errorf("credential dictionary not found for protocol %s", protocol)
-}
-
-func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
-	candidates := CredentialDictionaryCandidates(protocol, dictDir)
-
-	var lastErr error
-	for _, path := range candidates {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				lastErr = err
-				continue
-			}
-			return nil, err
-		}
-
-		creds, err := parseCredentialLines(string(data))
-		if err != nil {
-			return nil, fmt.Errorf("parse %s credentials: %w", protocol, err)
-		}
-		return dedupeCredentials(creds), nil
-	}
-
-	if lastErr != nil {
-		return nil, fmt.Errorf("credential dictionary not found for protocol %s in %s", protocol, dictDir)
-	}
-	return nil, fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
 func canceledResult(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions, err error) core.SecurityResult {
@@ -620,7 +584,6 @@ func compilePlanForCandidate(candidate SecurityCandidate, opts CredentialProbeOp
 		EnableEnrichment:   opts.EnableEnrichment,
 		StopOnSuccess:      opts.StopOnSuccess,
 		Timeout:            opts.Timeout,
-		DictDir:            opts.DictDir,
 		Credentials:        strategyCredentials(opts.Credentials),
 	}), true
 }
@@ -697,20 +660,14 @@ func metadataSpecFromProtocolSpec(spec ProtocolSpec) metadata.Spec {
 			Enrichment:   spec.SupportsEnrichment,
 		},
 		Dictionary: metadata.Dictionary{
-			PasswordSource: firstDictionaryName(spec.DictNames),
+			DefaultUsers:   append([]string(nil), spec.DefaultUsers...),
+			PasswordSource: spec.PasswordSource,
 		},
 		Results: metadata.ResultProfile{
 			CredentialSuccessType:   string(result.FindingTypeCredentialValid),
 			UnauthorizedSuccessType: string(result.FindingTypeUnauthorizedAccess),
 		},
 	}
-}
-
-func firstDictionaryName(values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	return values[0]
 }
 
 func containsProbeKind(kinds []ProbeKind, target ProbeKind) bool {
