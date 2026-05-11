@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yrighc/gomap/pkg/secprobe/result"
 	"github.com/yrighc/gomap/pkg/secprobe/strategy"
@@ -105,14 +107,123 @@ func TestNeo4jAuthenticatorAuthenticateOnceUsesBasicAuthRequest(t *testing.T) {
 	}
 }
 
+func TestNeo4jAuthenticatorAuthenticateOnceUsesHTTPSOnPort7473(t *testing.T) {
+	var called bool
+	srv, cleanup := newNeo4jTLSServer(t, "127.0.0.1:7473", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.TLS == nil {
+			t.Fatal("expected tls request")
+		}
+		_, _ = io.WriteString(w, `{"results":[{}],"errors":[]}`)
+	}))
+	defer cleanup()
+
+	out := NewAuthenticator(nil).AuthenticateOnce(context.Background(), strategy.Target{
+		Host:     "127.0.0.1",
+		IP:       "127.0.0.1",
+		Port:     7473,
+		Protocol: "neo4j",
+	}, strategy.Credential{Username: "neo4j", Password: "secret"})
+
+	if !called {
+		t.Fatal("expected tls login request")
+	}
+	if !out.Result.Success {
+		t.Fatalf("expected success, got %+v", out)
+	}
+
+	_ = srv
+}
+
+func TestNeo4jAuthenticatorAuthenticateOnceRealAuthenticationFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	out := NewAuthenticator(nil).AuthenticateOnce(context.Background(), neo4jTargetFromURL(t, srv.URL), strategy.Credential{
+		Username: "neo4j",
+		Password: "wrong",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected authentication failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeAuthentication {
+		t.Fatalf("expected authentication error code, got %+v", out.Result)
+	}
+}
+
+func TestNeo4jAuthenticatorAuthenticateOnceRealConnectionFailure(t *testing.T) {
+	out := NewAuthenticator(nil).AuthenticateOnce(context.Background(), closedNeo4jTarget(t), strategy.Credential{
+		Username: "neo4j",
+		Password: "secret",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected connection failure, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeConnection {
+		t.Fatalf("expected connection error code, got %+v", out.Result)
+	}
+}
+
+func TestNeo4jAuthenticatorAuthenticateOnceRealTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = io.WriteString(w, `{"results":[{}],"errors":[]}`)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	out := NewAuthenticator(nil).AuthenticateOnce(ctx, neo4jTargetFromURL(t, srv.URL), strategy.Credential{
+		Username: "neo4j",
+		Password: "secret",
+	})
+
+	if out.Result.Success {
+		t.Fatalf("expected timeout, got %+v", out)
+	}
+	if out.Result.ErrorCode != result.ErrorCodeTimeout {
+		t.Fatalf("expected timeout error code, got %+v", out.Result)
+	}
+}
+
+func TestNeo4jAuthenticatorAuthenticateOnceRealCanceled(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan result.Attempt, 1)
+	go func() {
+		out := NewAuthenticator(nil).AuthenticateOnce(ctx, neo4jTargetFromURL(t, srv.URL), strategy.Credential{
+			Username: "neo4j",
+			Password: "secret",
+		})
+		done <- out.Result
+	}()
+
+	<-started
+	cancel()
+	out := <-done
+	if out.Success {
+		t.Fatalf("expected canceled failure, got %+v", out)
+	}
+	if out.ErrorCode != result.ErrorCodeCanceled {
+		t.Fatalf("expected canceled error code, got %+v", out)
+	}
+}
+
 func neo4jTargetFromURL(t *testing.T, rawURL string) strategy.Target {
 	t.Helper()
 
-	parts := strings.TrimPrefix(rawURL, "http://")
-	host, port, ok := strings.Cut(parts, ":")
-	if !ok {
-		t.Fatalf("unexpected test server url %q", rawURL)
-	}
+	host, port := mustParseHostPort(t, rawURL)
 	return strategy.Target{
 		Host:     host,
 		IP:       host,
@@ -129,4 +240,45 @@ func mustAtoi(t *testing.T, raw string) int {
 		t.Fatalf("atoi %q: %v", raw, err)
 	}
 	return value
+}
+
+func mustParseHostPort(t *testing.T, rawURL string) (string, string) {
+	t.Helper()
+
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(rawURL, "http://"), "https://")
+	host, port, ok := strings.Cut(trimmed, ":")
+	if !ok {
+		t.Fatalf("unexpected test server url %q", rawURL)
+	}
+	return host, port
+}
+
+func closedNeo4jTarget(t *testing.T) strategy.Target {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+
+	return strategy.Target{Host: "127.0.0.1", IP: "127.0.0.1", Port: port, Protocol: "neo4j"}
+}
+
+func newNeo4jTLSServer(t *testing.T, addr string, handler http.Handler) (*httptest.Server, func()) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Skipf("listen %s: %v", addr, err)
+	}
+
+	srv := httptest.NewUnstartedServer(handler)
+	srv.Listener = listener
+	srv.StartTLS()
+
+	return srv, func() {
+		srv.Close()
+	}
 }

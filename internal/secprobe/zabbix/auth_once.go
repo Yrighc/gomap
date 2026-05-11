@@ -75,7 +75,7 @@ func authWithCredential(ctx context.Context, target strategy.Target, cred strate
 }
 
 func buildZabbixLoginURL(target strategy.Target) string {
-	return "http://" + targetAddress(target) + zabbixLoginPath
+	return zabbixScheme(target) + "://" + targetAddress(target) + zabbixLoginPath
 }
 
 func buildZabbixJSONRPCLogin(username, password string) string {
@@ -145,6 +145,15 @@ func targetAddress(target strategy.Target) string {
 		host = target.Host
 	}
 	return host + ":" + strconv.Itoa(target.Port)
+}
+
+func zabbixScheme(target strategy.Target) string {
+	switch target.Port {
+	case 443, 8443:
+		return "https"
+	default:
+		return "http"
+	}
 }
 
 func timeoutFromContext(ctx context.Context) time.Duration {

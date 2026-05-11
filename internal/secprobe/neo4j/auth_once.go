@@ -74,7 +74,7 @@ func authWithCredential(ctx context.Context, target strategy.Target, cred strate
 }
 
 func buildNeo4jRequest(target strategy.Target, cred strategy.Credential) (httpauth.Request, error) {
-	req, err := http.NewRequest(http.MethodPost, "http://"+targetAddress(target)+neo4jLoginPath, strings.NewReader(`{"statements":[{"statement":"RETURN 1"}]}`))
+	req, err := http.NewRequest(http.MethodPost, neo4jScheme(target)+"://"+targetAddress(target)+neo4jLoginPath, strings.NewReader(`{"statements":[{"statement":"RETURN 1"}]}`))
 	if err != nil {
 		return httpauth.Request{}, err
 	}
@@ -142,6 +142,13 @@ func targetAddress(target strategy.Target) string {
 		host = target.Host
 	}
 	return host + ":" + strconv.Itoa(target.Port)
+}
+
+func neo4jScheme(target strategy.Target) string {
+	if target.Port == 7473 {
+		return "https"
+	}
+	return "http"
 }
 
 func timeoutFromContext(ctx context.Context) time.Duration {
