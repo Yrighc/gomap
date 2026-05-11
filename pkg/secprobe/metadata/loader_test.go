@@ -73,6 +73,12 @@ func TestLoadBuiltinIncludesPlannedPhaseNextProtocols(t *testing.T) {
 		evidenceProfile  string
 	}{
 		{
+			name:            "activemq",
+			ports:           []int{61613},
+			users:           []string{"admin", "root", "activemq", "system", "user"},
+			evidenceProfile: "activemq_basic",
+		},
+		{
 			name:            "imap",
 			aliases:         []string{"imaps", "imap/ssl"},
 			ports:           []int{143, 993},
@@ -98,6 +104,18 @@ func TestLoadBuiltinIncludesPlannedPhaseNextProtocols(t *testing.T) {
 			ports:           []int{389, 636},
 			users:           []string{"admin", "administrator", "root", "cn=admin", "cn=administrator", "cn=manager"},
 			evidenceProfile: "ldap_basic",
+		},
+		{
+			name:            "neo4j",
+			ports:           []int{7474, 7473},
+			users:           []string{"neo4j", "admin", "root", "test"},
+			evidenceProfile: "neo4j_http_basic",
+		},
+		{
+			name:            "zabbix",
+			ports:           []int{80, 443, 8080, 8443},
+			users:           []string{"admin", "admin", "guest", "user"},
+			evidenceProfile: "zabbix_http_basic",
 		},
 	}
 
