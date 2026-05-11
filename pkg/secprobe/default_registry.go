@@ -9,6 +9,7 @@ import (
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
 	oracledbprobe "github.com/yrighc/gomap/internal/secprobe/oracle"
+	pop3probe "github.com/yrighc/gomap/internal/secprobe/pop3"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	rdpprobe "github.com/yrighc/gomap/internal/secprobe/rdp"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
@@ -30,6 +31,7 @@ func RegisterDefaultProbers(r *Registry) {
 	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ftp", ftpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("imap", imapprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("pop3", pop3probe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mssql", mssqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mysql", mysqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("postgresql", postgresqlprobe.NewAuthenticator(nil))
