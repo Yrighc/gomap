@@ -47,6 +47,29 @@ func TestPostgreSQLContainerRequestWaitsForFinalReadyLog(t *testing.T) {
 	assertFinalReadyLogOccurrence(t, req.WaitingFor, "database system is ready to accept connections")
 }
 
+func TestNormalizeContainerHost(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "localhost becomes ipv4 loopback", in: "localhost", want: "127.0.0.1"},
+		{name: "ipv6 loopback becomes ipv4 loopback", in: "::1", want: "127.0.0.1"},
+		{name: "ipv4 loopback stays stable", in: "127.0.0.1", want: "127.0.0.1"},
+		{name: "docker gateway stays unchanged", in: "192.168.65.2", want: "192.168.65.2"},
+		{name: "remote hostname stays unchanged", in: "docker.internal", want: "docker.internal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeContainerHost(tt.in)
+			if got != tt.want {
+				t.Fatalf("normalizeContainerHost(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func assertLogStrategyPresent(t *testing.T, strategy wait.Strategy, logLine string) {
 	t.Helper()
 
