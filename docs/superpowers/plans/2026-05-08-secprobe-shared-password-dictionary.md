@@ -1,6 +1,6 @@
 # secprobe Shared Password Dictionary Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace per-protocol credential dictionaries with one shared password pool plus thin protocol-level dictionary declarations.
 
@@ -109,7 +109,7 @@ dictionary:
 - Modify: `pkg/secprobe/metadata/loader.go`
 - Modify: `pkg/secprobe/metadata/loader_test.go`
 
-- [ ] **Step 1: Write failing loader tests for the new fields**
+- [x] **Step 1: Write failing loader tests for the new fields**
 
 Update `pkg/secprobe/metadata/loader_test.go` by replacing the old default-source normalization tests with:
 
@@ -190,7 +190,7 @@ func TestNormalizeSpecDropsEmptyNewDictionaryFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run metadata tests and confirm failure**
+- [x] **Step 2: Run metadata tests and confirm failure**
 
 Run:
 
@@ -200,7 +200,7 @@ go test ./pkg/secprobe/metadata -run 'TestNormalizeSpecNormalizesNewDictionaryFi
 
 Expected: FAIL because `Dictionary` does not define `DefaultUsers`, `PasswordSource`, `ExtraPasswords`, or `DefaultPairs`.
 
-- [ ] **Step 3: Update metadata types**
+- [x] **Step 3: Update metadata types**
 
 Change `pkg/secprobe/metadata/spec.go`:
 
@@ -224,7 +224,7 @@ type CredentialPair struct {
 
 Remove `DefaultSources []string`.
 
-- [ ] **Step 4: Update normalization**
+- [x] **Step 4: Update normalization**
 
 Change `normalizeSpec` in `pkg/secprobe/metadata/loader.go`:
 
@@ -279,7 +279,7 @@ func normalizeCredentialPairs(values []CredentialPair) []CredentialPair {
 }
 ```
 
-- [ ] **Step 5: Run metadata tests**
+- [x] **Step 5: Run metadata tests**
 
 Run:
 
@@ -289,7 +289,7 @@ go test ./pkg/secprobe/metadata -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit metadata schema change**
+- [x] **Step 6: Commit metadata schema change**
 
 ```bash
 git add pkg/secprobe/metadata/spec.go pkg/secprobe/metadata/loader.go pkg/secprobe/metadata/loader_test.go
@@ -306,7 +306,7 @@ git commit -m "feat(secprobe): 重构弱口令字典元数据模型"
 - Modify: `app/assets_test.go`
 - Delete: `app/secprobe/dicts/*.txt`
 
-- [ ] **Step 1: Write failing asset test for the global password pool**
+- [x] **Step 1: Write failing asset test for the global password pool**
 
 Update `app/assets_test.go` with:
 
@@ -327,7 +327,7 @@ func TestEmbeddedSecprobeGlobalPasswordPoolLoads(t *testing.T) {
 
 Ensure the file imports `strings`.
 
-- [ ] **Step 2: Run asset test and confirm failure**
+- [x] **Step 2: Run asset test and confirm failure**
 
 Run:
 
@@ -337,7 +337,7 @@ go test ./app -run TestEmbeddedSecprobeGlobalPasswordPoolLoads -count=1 -v
 
 Expected: FAIL because `SecprobePasswordSource` does not exist.
 
-- [ ] **Step 3: Create global password pool**
+- [x] **Step 3: Create global password pool**
 
 Create `app/secprobe/dicts/passwords/global.txt`:
 
@@ -352,7 +352,7 @@ password
 [extended] Passw0rd
 ```
 
-- [ ] **Step 4: Update embedded assets**
+- [x] **Step 4: Update embedded assets**
 
 Change the `//go:embed` line in `app/assets.go` so it embeds `secprobe/dicts/passwords/global.txt` instead of each `secprobe/dicts/<protocol>.txt`.
 
@@ -371,7 +371,7 @@ func SecprobePasswordSource(source string) ([]byte, error) {
 
 Remove `SecprobeDict(protocol string)`.
 
-- [ ] **Step 5: Delete old per-protocol dictionaries**
+- [x] **Step 5: Delete old per-protocol dictionaries**
 
 Delete these files:
 
@@ -393,11 +393,11 @@ app/secprobe/dicts/telnet.txt
 app/secprobe/dicts/vnc.txt
 ```
 
-- [ ] **Step 6: Update old asset tests**
+- [x] **Step 6: Update old asset tests**
 
 Replace any test that calls `SecprobeDict(protocol)` with assertions against `SecprobePasswordSource("builtin:passwords/global")`.
 
-- [ ] **Step 7: Run asset tests**
+- [x] **Step 7: Run asset tests**
 
 Run:
 
@@ -407,7 +407,7 @@ go test ./app -count=1
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit asset change**
+- [x] **Step 8: Commit asset change**
 
 ```bash
 git add app/assets.go app/assets_test.go app/secprobe/dicts
@@ -425,7 +425,7 @@ git commit -m "feat(secprobe): 使用全局共享密码池替代协议字典"
 - Modify: `pkg/secprobe/credentials/profile_test.go`
 - Modify: `pkg/secprobe/credentials/sources_test.go`
 
-- [ ] **Step 1: Write failing profile tests**
+- [x] **Step 1: Write failing profile tests**
 
 Replace default-source profile expectations in `pkg/secprobe/credentials/profile_test.go` with:
 
@@ -458,7 +458,7 @@ func TestProfileFromDictionaryUsesSharedPasswordModel(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run profile test and confirm failure**
+- [x] **Step 2: Run profile test and confirm failure**
 
 Run:
 
@@ -468,7 +468,7 @@ go test ./pkg/secprobe/credentials -run TestProfileFromDictionaryUsesSharedPassw
 
 Expected: FAIL because the profile types still contain `DefaultSources`.
 
-- [ ] **Step 3: Update credential profile types**
+- [x] **Step 3: Update credential profile types**
 
 In `pkg/secprobe/credentials/types.go`, replace `DefaultSources` with:
 
@@ -492,7 +492,7 @@ type CredentialProfile struct {
 }
 ```
 
-- [ ] **Step 4: Update profile construction**
+- [x] **Step 4: Update profile construction**
 
 In `pkg/secprobe/credentials/generator.go`, change `DictionaryProfileInput`:
 
@@ -536,7 +536,7 @@ func metadataPairsToCredentialPairs(values []metadata.CredentialPair) []Credenti
 
 Change `ProfileFromDictionary` to fill the new fields and default `PasswordSource` to `builtin:passwords/global` when blank.
 
-- [ ] **Step 5: Replace source loader behavior**
+- [x] **Step 5: Replace source loader behavior**
 
 In `pkg/secprobe/credentials/sources.go`:
 
@@ -603,7 +603,7 @@ func parsePasswordEntries(raw string) ([]credentialEntry, error) {
 
 Keep `parseStrategyCredentialEntries` only if tests or inline pair parsing still need it; otherwise remove it with the old protocol dictionary path.
 
-- [ ] **Step 6: Run credential package tests**
+- [x] **Step 6: Run credential package tests**
 
 Run:
 
@@ -613,7 +613,7 @@ go test ./pkg/secprobe/credentials -count=1
 
 Expected: FAIL only in generator tests that still expect old protocol dictionaries. Those are rewritten in Task 4.
 
-- [ ] **Step 7: Commit profile and source changes**
+- [x] **Step 7: Commit profile and source changes**
 
 ```bash
 git add pkg/secprobe/credentials
@@ -628,7 +628,7 @@ git commit -m "feat(secprobe): 改造凭据配置为共享密码模型"
 - Modify: `pkg/secprobe/credentials/generator.go`
 - Modify: `pkg/secprobe/credentials/generator_test.go`
 
-- [ ] **Step 1: Replace generator tests with new model tests**
+- [x] **Step 1: Replace generator tests with new model tests**
 
 Rewrite `pkg/secprobe/credentials/generator_test.go` around these behaviors:
 
@@ -733,7 +733,7 @@ func TestGeneratorReturnsNoCredentialsWhenPasswordSourceFiltersToEmpty(t *testin
 }
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 Run:
 
@@ -743,7 +743,7 @@ go test ./pkg/secprobe/credentials -run 'TestGeneratorBuildsCredentialsFromUsers
 
 Expected: FAIL because generator still loads protocol dictionaries and has `DictDir`.
 
-- [ ] **Step 3: Remove DictDir from GenerateInput**
+- [x] **Step 3: Remove DictDir from GenerateInput**
 
 Change `GenerateInput`:
 
@@ -754,7 +754,7 @@ type GenerateInput struct {
 }
 ```
 
-- [ ] **Step 4: Implement fixed assembly flow**
+- [x] **Step 4: Implement fixed assembly flow**
 
 Replace the non-inline branch in `Generator.Generate` with:
 
@@ -809,7 +809,7 @@ func credentialPairsToStrategy(values []CredentialPair) []strategy.Credential {
 
 Keep final dedupe behavior in `Expand`; if `Expand` does not dedupe generated credentials, run generated output through `dedupeStrategyCredentials` before returning.
 
-- [ ] **Step 5: Run credential tests**
+- [x] **Step 5: Run credential tests**
 
 Run:
 
@@ -819,7 +819,7 @@ go test ./pkg/secprobe/credentials -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit generator change**
+- [x] **Step 6: Commit generator change**
 
 ```bash
 git add pkg/secprobe/credentials
@@ -838,7 +838,7 @@ git commit -m "feat(secprobe): 实现共享密码池凭据生成流程"
 - Modify: `pkg/secprobe/strategy/planner.go`
 - Modify: `pkg/secprobe/strategy/planner_test.go`
 
-- [ ] **Step 1: Write failing planner test for simplified dictionary source**
+- [x] **Step 1: Write failing planner test for simplified dictionary source**
 
 Update `pkg/secprobe/strategy/planner_test.go` to remove DictDir cases and add:
 
@@ -871,7 +871,7 @@ func TestCompileCredentialDictionarySetUsesMetadataOnly(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run planner test and confirm failure**
+- [x] **Step 2: Run planner test and confirm failure**
 
 Run:
 
@@ -881,7 +881,7 @@ go test ./pkg/secprobe/strategy -run TestCompileCredentialDictionarySetUsesMetad
 
 Expected: FAIL because planner still references `DictDir` and `DefaultSources`.
 
-- [ ] **Step 3: Remove DictDir fields**
+- [x] **Step 3: Remove DictDir fields**
 
 Remove `DictDir` from:
 
@@ -895,7 +895,7 @@ Remove helper functions that only load credentials from a directory:
 - `translateCredentialGenerationError` branches that mention `DictDir`
 - tests that assert explicit missing `dict_dir` behavior
 
-- [ ] **Step 4: Update planner dictionary set mapping**
+- [x] **Step 4: Update planner dictionary set mapping**
 
 Change planner dictionary metadata mapping from `DefaultSources` to `PasswordSource`:
 
@@ -911,7 +911,7 @@ if spec.Capabilities.Credential && strings.TrimSpace(spec.Dictionary.PasswordSou
 }
 ```
 
-- [ ] **Step 5: Update run tests**
+- [x] **Step 5: Update run tests**
 
 Remove or rewrite tests named around:
 
@@ -926,7 +926,7 @@ Keep tests for:
 - generated credentials use builtin global password source
 - no credentials maps to `no-credentials`
 
-- [ ] **Step 6: Run affected tests**
+- [x] **Step 6: Run affected tests**
 
 Run:
 
@@ -936,7 +936,7 @@ go test ./pkg/secprobe ./pkg/secprobe/strategy -count=1
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit public option simplification**
+- [x] **Step 7: Commit public option simplification**
 
 ```bash
 git add pkg/secprobe/core pkg/secprobe/run.go pkg/secprobe/*_test.go pkg/secprobe/strategy
@@ -964,7 +964,7 @@ git commit -m "feat(secprobe): 移除弱口令目录覆盖配置"
 - Modify: `app/secprobe/protocols/telnet.yaml`
 - Modify: `app/secprobe/protocols/vnc.yaml`
 
-- [ ] **Step 1: Update YAML tests to assert new model**
+- [x] **Step 1: Update YAML tests to assert new model**
 
 In `pkg/secprobe/metadata/loader_test.go`, add:
 
@@ -990,7 +990,7 @@ func TestBuiltinCredentialSpecsUseSharedPasswordModel(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run YAML test and confirm failure**
+- [x] **Step 2: Run YAML test and confirm failure**
 
 Run:
 
@@ -1000,7 +1000,7 @@ go test ./pkg/secprobe/metadata -run TestBuiltinCredentialSpecsUseSharedPassword
 
 Expected: FAIL because YAML files still use `default_sources`.
 
-- [ ] **Step 3: Migrate credential protocol YAML**
+- [x] **Step 3: Migrate credential protocol YAML**
 
 For every credential-capable protocol, remove `default_sources` and add:
 
@@ -1048,7 +1048,7 @@ dictionary:
 
 Do not add `password_source` to unauthorized-only protocols.
 
-- [ ] **Step 4: Run metadata tests**
+- [x] **Step 4: Run metadata tests**
 
 Run:
 
@@ -1058,7 +1058,7 @@ go test ./pkg/secprobe/metadata -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit YAML migration**
+- [x] **Step 5: Commit YAML migration**
 
 ```bash
 git add app/secprobe/protocols pkg/secprobe/metadata/loader_test.go
@@ -1076,7 +1076,7 @@ git commit -m "feat(secprobe): 迁移协议元数据到共享密码模型"
 - Modify: `docs/secprobe-protocol-extension-guide.md`
 - Modify: `docs/secprobe-third-party-migration-guide.md`
 
-- [ ] **Step 1: Update catalog tests**
+- [x] **Step 1: Update catalog tests**
 
 In `pkg/secprobe/protocol_catalog_test.go`, replace `DictNames` expectations with a single password source expectation:
 
@@ -1105,7 +1105,7 @@ func TestProtocolCatalogExposesSharedPasswordSource(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run catalog test and confirm failure**
+- [x] **Step 2: Run catalog test and confirm failure**
 
 Run:
 
@@ -1115,7 +1115,7 @@ go test ./pkg/secprobe -run TestProtocolCatalogExposesSharedPasswordSource -coun
 
 Expected: FAIL because catalog still exposes `DictNames`.
 
-- [ ] **Step 3: Update catalog type and builder**
+- [x] **Step 3: Update catalog type and builder**
 
 In `pkg/secprobe/protocol_catalog.go`, replace `DictNames` with:
 
@@ -1131,7 +1131,7 @@ DefaultUsers: append([]string(nil), spec.Dictionary.DefaultUsers...),
 PasswordSource: spec.Dictionary.PasswordSource,
 ```
 
-- [ ] **Step 4: Update docs**
+- [x] **Step 4: Update docs**
 
 Make these documentation changes:
 
@@ -1142,7 +1142,7 @@ Make these documentation changes:
 - State that third-party callers should pass exact `Credentials` for custom attempts.
 - State that large custom dictionary injection is not part of this simplified version.
 
-- [ ] **Step 5: Run doc grep checks**
+- [x] **Step 5: Run doc grep checks**
 
 Run:
 
@@ -1152,7 +1152,7 @@ rg -n "default_sources|dict_dir|DictDir|weak-dict-dir|inline > dict_dir|Secprobe
 
 Expected: no matches except historical docs under `docs/superpowers/`.
 
-- [ ] **Step 6: Run catalog and doc-adjacent tests**
+- [x] **Step 6: Run catalog and doc-adjacent tests**
 
 Run:
 
@@ -1162,7 +1162,7 @@ go test ./pkg/secprobe -run 'TestProtocolCatalog|TestBuildCandidates|TestRun' -c
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit catalog and docs**
+- [x] **Step 7: Commit catalog and docs**
 
 ```bash
 git add pkg/secprobe/protocol_catalog.go pkg/secprobe/protocol_catalog_test.go README.md docs/secprobe-protocol-extension-guide.md docs/secprobe-third-party-migration-guide.md
@@ -1176,7 +1176,7 @@ git commit -m "docs(secprobe): 更新共享密码池接入说明"
 **Files:**
 - Review all changed files
 
-- [ ] **Step 1: Run repository search for removed surfaces**
+- [x] **Step 1: Run repository search for removed surfaces**
 
 Run:
 
@@ -1186,7 +1186,7 @@ rg -n "DefaultSources|default_sources|DictDir|dict_dir|weak-dict-dir|LoadDirecto
 
 Expected: no matches.
 
-- [ ] **Step 2: Run focused secprobe tests**
+- [x] **Step 2: Run focused secprobe tests**
 
 Run:
 
@@ -1196,7 +1196,7 @@ go test ./app ./pkg/secprobe ./pkg/secprobe/credentials ./pkg/secprobe/metadata 
 
 Expected: PASS.
 
-- [ ] **Step 3: Run broader package tests**
+- [x] **Step 3: Run broader package tests**
 
 Run:
 
@@ -1206,7 +1206,7 @@ go test ./pkg/... ./app/... -count=1
 
 Expected: PASS.
 
-- [ ] **Step 4: Inspect final diff**
+- [x] **Step 4: Inspect final diff**
 
 Run:
 
@@ -1222,7 +1222,7 @@ Expected:
 - Diff contains the new global password pool.
 - Diff contains no `DictDir` public option references.
 
-- [ ] **Step 5: Final commit if cleanup changed files**
+- [x] **Step 5: Final commit if cleanup changed files**
 
 If Step 1-4 required cleanup changes, commit them:
 
@@ -1237,10 +1237,58 @@ If there are no cleanup changes, do not create an empty commit.
 
 ## Self-Review Checklist
 
-- [ ] Every old dictionary entry path has a replacement in either `default_users`, `extra_passwords`, `default_pairs`, or `passwords/global.txt`.
-- [ ] Explicit credentials remain literal and do not pass through expansion.
-- [ ] No compatibility fallback remains for `default_sources`.
-- [ ] No compatibility fallback remains for `DictDir`.
-- [ ] Unauthorized-only protocols do not require `password_source`.
-- [ ] Credential-capable protocols have `password_source`.
-- [ ] Tests cover metadata parsing, asset embedding, generator assembly, public option simplification, and docs grep cleanup.
+- [x] Every old dictionary entry path has a replacement in either `default_users`, `extra_passwords`, `default_pairs`, or `passwords/global.txt`.
+- [x] Explicit credentials remain literal and do not pass through expansion.
+- [x] No compatibility fallback remains for `default_sources`.
+- [x] No compatibility fallback remains for `DictDir`.
+- [x] Unauthorized-only protocols do not require `password_source`.
+- [x] Credential-capable protocols have `password_source`.
+- [x] Tests cover metadata parsing, asset embedding, generator assembly, public option simplification, and docs grep cleanup.
+
+---
+
+## Execution Summary
+
+Completed on branch `codex/secprobe-dictionary-blite`.
+
+Implemented commits:
+
+1. `218880d docs(secprobe): 制定共享密码池改造计划`
+2. `57a90ff feat(secprobe): 重构弱口令字典元数据模型`
+3. `c01ddb9 fix(secprobe): 同步弱口令元数据消费者`
+4. `61a3a3b fix(secprobe): 使用密码源字段加载弱口令字典`
+5. `c6b9970 feat(secprobe): 使用全局共享密码池替代协议字典`
+6. `197f5ea fix(secprobe): 同步共享密码池资源入口`
+7. `9a29bd9 feat(secprobe): 完成共享密码池弱口令迁移`
+
+Final implemented model:
+
+- Protocol YAML no longer uses `default_sources`.
+- Public `CredentialProbeOptions` no longer exposes `DictDir`.
+- CLI no longer exposes `-dict-dir` or `-weak-dict-dir`.
+- Per-protocol built-in dictionary files were removed.
+- Built-in defaults now use the shared password source `builtin:passwords/global`.
+- Protocol differences are expressed through `default_users`, `extra_passwords`, and `default_pairs`.
+- Explicit inline credentials remain literal and only pass through deduplication.
+
+Verified commands:
+
+```bash
+go test ./cmd ./app ./pkg/secprobe/... -count=1
+git diff --check
+rg -n "default_sources|DictDir|dict_dir|weak-dict-dir|dict-dir|LoadDirectorySource|CredentialSourceDirectory|SourceDictDir|SecprobeDict" cmd internal pkg app README.md docs --glob '!docs/superpowers/**'
+```
+
+Results:
+
+- `go test ./cmd ./app ./pkg/secprobe/... -count=1` passed.
+- `git diff --check` passed.
+- Removed-surface grep only reports migration-guide text that explicitly says `DictDir` / `dict_dir` / `-weak-dict-dir` have been removed.
+
+Broader package test note:
+
+```bash
+go test ./pkg/... ./app/... -count=1
+```
+
+This command was executed, but `pkg/assetprobe` failed at `TestScanTargetsKeepsOrderAndPerTargetErrors` because the test expects `invalid.invalid` to produce a per-target error in the current environment. This package was not modified by the shared password dictionary work; all secprobe-related packages in the command passed.
