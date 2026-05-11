@@ -13,8 +13,15 @@ policy_tags:
   auth_family: password
   transport: tcp
 dictionary:
-  default_sources:
+  default_users:
+    - ""
+  password_source: builtin:passwords/global
+  extra_passwords:
     - redis
+    - default
+  default_tiers:
+    - top
+    - common
   allow_empty_username: true
   allow_empty_password: true
   expansion_profile: static_basic

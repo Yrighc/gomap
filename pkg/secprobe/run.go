@@ -2,15 +2,14 @@ package secprobe
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/yrighc/gomap/internal/secprobe/core"
+	"github.com/yrighc/gomap/pkg/secprobe/credentials"
 	"github.com/yrighc/gomap/pkg/secprobe/engine"
 	"github.com/yrighc/gomap/pkg/secprobe/metadata"
 	registrybridge "github.com/yrighc/gomap/pkg/secprobe/registry"
@@ -300,40 +299,45 @@ func probeCandidateLegacy(
 }
 
 func credentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
+	rawToken := rawProtocolToken(protocol)
+	normalizedToken := normalizeProtocolToken(protocol)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, 0)
+	if err != nil {
+		return nil, fmt.Errorf("load secprobe metadata: %w", err)
+	}
+	if !ok {
+		if legacy, ok := lookupLegacyProtocolSpec(rawToken, normalizedToken, 0); ok {
+			spec = metadataSpecFromProtocolSpec(legacy)
+		} else {
+			return legacyCredentialsForCandidate(protocol, opts)
+		}
+	}
+
+	profile := credentials.ProfileFromMetadata(spec.Name, spec.Dictionary)
+	profile = profile.WithScanProfile(string(credentials.ScanProfileDefault))
+
+	generated, _, err := (credentials.Generator{}).Generate(credentials.GenerateInput{
+		Profile: profile,
+		Inline:  strategyCredentials(opts.Credentials),
+	})
+	if err != nil {
+		return nil, translateCredentialGenerationError(protocol, err)
+	}
+	return coreCredentials(generated), nil
+}
+
+func legacyCredentialsForCandidate(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
 	if len(opts.Credentials) > 0 {
 		return dedupeCredentials(opts.Credentials), nil
-	}
-	if opts.DictDir != "" {
-		return loadCredentialsFromDir(protocol, opts.DictDir)
 	}
 	return CredentialsFor(protocol, opts)
 }
 
-func loadCredentialsFromDir(protocol, dictDir string) ([]Credential, error) {
-	candidates := CredentialDictionaryCandidates(protocol, dictDir)
-
-	var lastErr error
-	for _, path := range candidates {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				lastErr = err
-				continue
-			}
-			return nil, err
-		}
-
-		creds, err := parseCredentialLines(string(data))
-		if err != nil {
-			return nil, fmt.Errorf("parse %s credentials: %w", protocol, err)
-		}
-		return dedupeCredentials(creds), nil
+func translateCredentialGenerationError(protocol string, err error) error {
+	if !credentials.IsMissingSource(err) {
+		return err
 	}
-
-	if lastErr != nil {
-		return nil, fmt.Errorf("credential dictionary not found for protocol %s in %s", protocol, dictDir)
-	}
-	return nil, fmt.Errorf("credential dictionary not found for protocol %s", protocol)
+	return fmt.Errorf("credential dictionary not found for protocol %s", protocol)
 }
 
 func canceledResult(registry *Registry, candidate SecurityCandidate, opts CredentialProbeOptions, err error) core.SecurityResult {
@@ -554,6 +558,20 @@ func strategyCredentials(creds []Credential) []strategy.Credential {
 	return out
 }
 
+func coreCredentials(creds []strategy.Credential) []Credential {
+	if len(creds) == 0 {
+		return nil
+	}
+	out := make([]Credential, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, Credential{
+			Username: cred.Username,
+			Password: cred.Password,
+		})
+	}
+	return out
+}
+
 func compilePlanForCandidate(candidate SecurityCandidate, opts CredentialProbeOptions, hasCredential, hasUnauthorized bool) (strategy.Plan, bool) {
 	spec, ok := runtimeMetadataSpecForCandidate(candidate, hasCredential, hasUnauthorized)
 	if !ok {
@@ -568,13 +586,14 @@ func compilePlanForCandidate(candidate SecurityCandidate, opts CredentialProbeOp
 		EnableEnrichment:   opts.EnableEnrichment,
 		StopOnSuccess:      opts.StopOnSuccess,
 		Timeout:            opts.Timeout,
-		DictDir:            opts.DictDir,
 		Credentials:        strategyCredentials(opts.Credentials),
 	}), true
 }
 
 func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential, hasUnauthorized bool) (metadata.Spec, bool) {
-	spec, ok, err := lookupRuntimeMetadataSpec(normalizeProtocolToken(candidate.Service), candidate.Port)
+	rawToken := rawProtocolToken(candidate.Service)
+	normalizedToken := normalizeProtocolToken(candidate.Service)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, candidate.Port)
 	if err != nil {
 		panic(fmt.Errorf("load secprobe metadata: %w", err))
 	}
@@ -582,7 +601,7 @@ func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential,
 		return spec, true
 	}
 
-	if legacy, ok := lookupLegacyProtocolSpec(normalizeProtocolToken(candidate.Service), candidate.Port); ok {
+	if legacy, ok := lookupLegacyProtocolSpec(rawToken, normalizedToken, candidate.Port); ok {
 		return metadataSpecFromProtocolSpec(legacy), true
 	}
 
@@ -606,15 +625,32 @@ func runtimeMetadataSpecForCandidate(candidate SecurityCandidate, hasCredential,
 	return metadata.Spec{}, false
 }
 
-func lookupRuntimeMetadataSpec(token string, port int) (metadata.Spec, bool, error) {
+func lookupRuntimeMetadataSpec(rawToken, token string, port int) (metadata.Spec, bool, error) {
 	specs, err := builtinMetadataSpecsOnceValue()
 	if err != nil {
 		return metadata.Spec{}, false, err
 	}
 
+	if rawToken != "" {
+		for _, spec := range specs {
+			if spec.Name == rawToken || containsString(spec.Aliases, rawToken) {
+				if !tokenSupportsPort(rawToken, port) {
+					return metadata.Spec{}, false, nil
+				}
+				if port != 0 && requiresStrictPortMatch(spec.Name) && !containsPort(spec.Ports, port) {
+					return metadata.Spec{}, false, nil
+				}
+				return spec, true, nil
+			}
+		}
+	}
+
 	if token != "" {
 		for _, spec := range specs {
 			if spec.Name == token || containsString(spec.Aliases, token) {
+				if rawToken != "" && !tokenSupportsPort(rawToken, port) {
+					return metadata.Spec{}, false, nil
+				}
 				if port != 0 && requiresStrictPortMatch(spec.Name) && !containsPort(spec.Ports, port) {
 					return metadata.Spec{}, false, nil
 				}
@@ -645,7 +681,8 @@ func metadataSpecFromProtocolSpec(spec ProtocolSpec) metadata.Spec {
 			Enrichment:   spec.SupportsEnrichment,
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources: append([]string(nil), spec.DictNames...),
+			DefaultUsers:   append([]string(nil), spec.DefaultUsers...),
+			PasswordSource: spec.PasswordSource,
 		},
 		Results: metadata.ResultProfile{
 			CredentialSuccessType:   string(result.FindingTypeCredentialValid),

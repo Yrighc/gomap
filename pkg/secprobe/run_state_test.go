@@ -3,7 +3,6 @@ package secprobe
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -63,6 +62,26 @@ func TestRunWithRegistryInternalMarksUnsupportedProtocol(t *testing.T) {
 	}
 }
 
+func TestRunWithRegistryInternalRejectsSecureAliasOnWrongPort(t *testing.T) {
+	result := runWithRegistryInternal(context.Background(), DefaultRegistry(), []SecurityCandidate{{
+		Target:     "mail.local",
+		ResolvedIP: "127.0.0.1",
+		Port:       143,
+		Service:    "imaps",
+	}}, CredentialProbeOptions{})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	got := result.Results[0]
+	if got.SkipReason != core.SkipReasonUnsupportedProtocol {
+		t.Fatalf("expected unsupported-protocol skip reason for secure alias mismatch, got %+v", got)
+	}
+	if got.Error != "unsupported protocol" {
+		t.Fatalf("expected unsupported protocol error for secure alias mismatch, got %+v", got)
+	}
+}
+
 func TestRunWithRegistryMarksMissingCredentialsAsNoCredentials(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{
@@ -77,7 +96,6 @@ func TestRunWithRegistryMarksMissingCredentialsAsNoCredentials(t *testing.T) {
 		Port:       1234,
 		Service:    "customsvc",
 	}}, CredentialProbeOptions{
-		DictDir: filepath.Join(t.TempDir(), "missing"),
 	})
 
 	if len(result.Results) != 1 {

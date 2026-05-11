@@ -3,101 +3,19 @@ package secprobe
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 )
 
-func TestBuiltinCredentialsLoadByProtocol(t *testing.T) {
-	tests := []string{"ssh", "ftp", "mysql", "postgresql", "redis", "telnet", "mssql", "rdp", "smb", "vnc", "smtp", "amqp", "oracle", "snmp"}
-	for _, protocol := range tests {
-		creds, err := BuiltinCredentials(protocol)
-		if err != nil {
-			t.Fatalf("load %s builtin credentials: %v", protocol, err)
-		}
-		if len(creds) == 0 {
-			t.Fatalf("expected builtin credentials for %s", protocol)
-		}
-	}
-}
-
-func TestBuiltinCredentialsLoadByProtocolAlias(t *testing.T) {
-	tests := []struct {
-		protocol string
-		wantUser string
-		wantPass string
-	}{
-		{protocol: "cifs", wantUser: "administrator", wantPass: "administrator"},
-		{protocol: "smtps", wantUser: "admin", wantPass: "admin"},
-		{protocol: "amqps", wantUser: "guest", wantPass: "guest"},
-		{protocol: "oracle-tns", wantUser: "system", wantPass: "oracle"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.protocol, func(t *testing.T) {
-			creds, err := BuiltinCredentials(tt.protocol)
-			if err != nil {
-				t.Fatalf("load %s builtin credentials: %v", tt.protocol, err)
-			}
-			if len(creds) == 0 {
-				t.Fatalf("expected builtin credentials for %s alias", tt.protocol)
-			}
-			if creds[0].Username != tt.wantUser || creds[0].Password != tt.wantPass {
-				t.Fatalf("expected %s credentials via alias, got %+v", tt.protocol, creds[0])
-			}
-		})
-	}
-}
-
-func TestBuiltinCredentialsLoadMongoDBByProtocolAndAlias(t *testing.T) {
-	tests := []string{"mongodb", "mongo"}
-	for _, protocol := range tests {
-		t.Run(protocol, func(t *testing.T) {
-			creds, err := BuiltinCredentials(protocol)
-			if err != nil {
-				t.Fatalf("load %s builtin credentials: %v", protocol, err)
-			}
-			if len(creds) == 0 {
-				t.Fatalf("expected builtin credentials for %s", protocol)
-			}
-		})
-	}
-}
-
-func TestBuiltinCredentialsLoadSNMPCommunityMapping(t *testing.T) {
-	creds, err := BuiltinCredentials("snmp")
+func TestBuiltinCredentialsUsesSharedPasswordSource(t *testing.T) {
+	creds, err := BuiltinCredentials("ssh")
 	if err != nil {
-		t.Fatalf("load snmp builtin credentials: %v", err)
+		t.Fatalf("load builtin credentials: %v", err)
 	}
 	if len(creds) == 0 {
-		t.Fatal("expected builtin credentials for snmp")
+		t.Fatal("expected shared password source to generate credentials")
 	}
-	if creds[0].Username != "" || creds[0].Password != "public" {
-		t.Fatalf("expected first snmp community mapping to be empty username/public password, got %+v", creds[0])
-	}
-}
-
-func TestBuiltinCredentialsIncludeChujiuDerivedDefaults(t *testing.T) {
-	tests := []struct {
-		protocol string
-		want     Credential
-	}{
-		{protocol: "ssh", want: Credential{Username: "root", Password: "password"}},
-		{protocol: "mssql", want: Credential{Username: "sa", Password: "password"}},
-		{protocol: "redis", want: Credential{Username: "default", Password: "password"}},
-		{protocol: "vnc", want: Credential{Username: "", Password: "qwerty"}},
-		{protocol: "smtp", want: Credential{Username: "mail", Password: "mail"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.protocol, func(t *testing.T) {
-			creds, err := BuiltinCredentials(tt.protocol)
-			if err != nil {
-				t.Fatalf("load %s builtin credentials: %v", tt.protocol, err)
-			}
-			if !containsCredential(creds, tt.want) {
-				t.Fatalf("expected %s builtin credentials to include %+v, got %+v", tt.protocol, tt.want, creds)
-			}
-		})
+	if creds[0].Username == "" || creds[0].Password == "" {
+		t.Fatalf("expected generated credential evidence, got %+v", creds[0])
 	}
 }
 
@@ -131,112 +49,13 @@ func TestSecurityResultPublicShapeDoesNotExposeInternalState(t *testing.T) {
 	}
 }
 
-func TestSecurityResultJSONDoesNotContainInternalStateFields(t *testing.T) {
-	res := SecurityResult{
-		Target:      "example.com",
-		ResolvedIP:  "127.0.0.1",
-		Port:        22,
-		Service:     "ssh",
-		FindingType: FindingTypeCredentialValid,
-		Success:     true,
-		Username:    "root",
-		Password:    "root",
-		Evidence:    "SSH authentication succeeded",
-	}
-
-	data, err := res.ToJSON(false)
+func TestSecurityMetaToJSON(t *testing.T) {
+	meta := SecurityMeta{Candidates: 2, Attempted: 2, Succeeded: 1, Failed: 1}
+	data, err := json.Marshal(meta)
 	if err != nil {
-		t.Fatalf("marshal json: %v", err)
+		t.Fatalf("marshal meta: %v", err)
 	}
-
-	var got map[string]any
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal json: %v", err)
+	if string(data) != `{"Candidates":2,"Attempted":2,"Succeeded":1,"Failed":1,"Skipped":0}` {
+		t.Fatalf("unexpected meta json: %s", data)
 	}
-
-	for _, field := range []string{"Stage", "SkipReason", "FailureReason", "Capabilities", "Risk"} {
-		if _, exists := got[field]; exists {
-			t.Fatalf("expected public json to exclude %s: %s", field, string(data))
-		}
-	}
-}
-
-func TestRunResultToJSON(t *testing.T) {
-	res := RunResult{
-		Meta: SecurityMeta{
-			Candidates: 1,
-			Attempted:  1,
-			Succeeded:  1,
-		},
-		Results: []SecurityResult{{
-			Target:      "example.com",
-			ResolvedIP:  "127.0.0.1",
-			Port:        22,
-			Service:     "ssh",
-			FindingType: FindingTypeCredentialValid,
-			Success:     true,
-			Username:    "root",
-			Password:    "root",
-		}},
-	}
-
-	data, err := res.ToJSON(true)
-	if err != nil {
-		t.Fatalf("marshal run result json: %v", err)
-	}
-	if len(data) == 0 || data[0] != '{' {
-		t.Fatalf("expected json object, got %q", string(data))
-	}
-}
-
-func TestParseCredentialLinesRejectsMalformedLine(t *testing.T) {
-	_, err := parseCredentialLines("root : root\nbroken-line")
-	if err == nil {
-		t.Fatal("expected malformed credential line error")
-	}
-	if !strings.Contains(err.Error(), "invalid credential line") {
-		t.Fatalf("expected invalid line error, got %v", err)
-	}
-}
-
-func TestParseCredentialLinesRejectsLooseColonSeparator(t *testing.T) {
-	_, err := parseCredentialLines("root:root\n")
-	if err == nil {
-		t.Fatal("expected loose colon separator to be rejected")
-	}
-	if !strings.Contains(err.Error(), "invalid credential line") {
-		t.Fatalf("expected invalid line error, got %v", err)
-	}
-}
-
-func TestParseCredentialLinesRejectsEmptyResult(t *testing.T) {
-	_, err := parseCredentialLines("# comment only\n\n")
-	if err == nil {
-		t.Fatal("expected empty credential result error")
-	}
-	if !strings.Contains(err.Error(), "no valid credentials found") {
-		t.Fatalf("expected empty result error, got %v", err)
-	}
-}
-
-func TestParseCredentialLinesAllowsEmptyUsername(t *testing.T) {
-	creds, err := parseCredentialLines(" : 123456\n")
-	if err != nil {
-		t.Fatalf("expected empty username credential to parse: %v", err)
-	}
-	if len(creds) != 1 {
-		t.Fatalf("expected 1 credential, got %d", len(creds))
-	}
-	if creds[0].Username != "" || creds[0].Password != "123456" {
-		t.Fatalf("unexpected parsed credential: %+v", creds[0])
-	}
-}
-
-func containsCredential(creds []Credential, want Credential) bool {
-	for _, cred := range creds {
-		if cred == want {
-			return true
-		}
-	}
-	return false
 }

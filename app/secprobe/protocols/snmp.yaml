@@ -10,8 +10,16 @@ policy_tags:
   auth_family: community
   transport: udp
 dictionary:
-  default_sources:
-    - snmp
+  default_users:
+    - ""
+  password_source: builtin:passwords/global
+  extra_passwords:
+    - public
+    - private
+    - default
+  default_tiers:
+    - top
+    - common
   allow_empty_username: true
   allow_empty_password: false
   expansion_profile: static_basic

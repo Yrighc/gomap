@@ -14,8 +14,17 @@ policy_tags:
   auth_family: password
   transport: tcp
 dictionary:
-  default_sources:
+  default_users:
+    - admin
+    - root
+    - postmaster
+    - mail
     - smtp
+    - administrator
+  password_source: builtin:passwords/global
+  default_tiers:
+    - top
+    - common
   allow_empty_username: false
   allow_empty_password: false
   expansion_profile: static_basic

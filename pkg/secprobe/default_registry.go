@@ -1,13 +1,19 @@
 package secprobe
 
 import (
+	activemqprobe "github.com/yrighc/gomap/internal/secprobe/activemq"
 	amqpprobe "github.com/yrighc/gomap/internal/secprobe/amqp"
 	elasticsearchprobe "github.com/yrighc/gomap/internal/secprobe/elasticsearch"
 	ftpprobe "github.com/yrighc/gomap/internal/secprobe/ftp"
+	imapprobe "github.com/yrighc/gomap/internal/secprobe/imap"
+	kafkaprobe "github.com/yrighc/gomap/internal/secprobe/kafka"
+	ldapprobe "github.com/yrighc/gomap/internal/secprobe/ldap"
 	mongodbprobe "github.com/yrighc/gomap/internal/secprobe/mongodb"
 	mssqlprobe "github.com/yrighc/gomap/internal/secprobe/mssql"
 	mysqlprobe "github.com/yrighc/gomap/internal/secprobe/mysql"
+	neo4jprobe "github.com/yrighc/gomap/internal/secprobe/neo4j"
 	oracledbprobe "github.com/yrighc/gomap/internal/secprobe/oracle"
+	pop3probe "github.com/yrighc/gomap/internal/secprobe/pop3"
 	postgresqlprobe "github.com/yrighc/gomap/internal/secprobe/postgresql"
 	rdpprobe "github.com/yrighc/gomap/internal/secprobe/rdp"
 	redisprobe "github.com/yrighc/gomap/internal/secprobe/redis"
@@ -17,6 +23,7 @@ import (
 	sshprobe "github.com/yrighc/gomap/internal/secprobe/ssh"
 	telnetprobe "github.com/yrighc/gomap/internal/secprobe/telnet"
 	vncprobe "github.com/yrighc/gomap/internal/secprobe/vnc"
+	zabbixprobe "github.com/yrighc/gomap/internal/secprobe/zabbix"
 	zookeeperprobe "github.com/yrighc/gomap/internal/secprobe/zookeeper"
 	"github.com/yrighc/gomap/pkg/secprobe/template"
 )
@@ -26,13 +33,20 @@ func RegisterDefaultProbers(r *Registry) {
 		return
 	}
 
+	r.RegisterAtomicCredential("activemq", activemqprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ssh", sshprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("ftp", ftpprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("imap", imapprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("kafka", kafkaprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("ldap", ldapprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("pop3", pop3probe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mssql", mssqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("mysql", mysqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("postgresql", postgresqlprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("redis", redisprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("elasticsearch", elasticsearchprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("zabbix", zabbixprobe.NewAuthenticator(nil))
+	r.RegisterAtomicCredential("neo4j", neo4jprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("smtp", smtpprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("telnet", telnetprobe.NewAuthenticator(nil))
 	r.RegisterAtomicCredential("amqp", amqpprobe.NewAuthenticator(nil))

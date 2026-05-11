@@ -12,7 +12,6 @@ type CredentialSource string
 const (
 	CredentialSourceBuiltin   CredentialSource = "builtin"
 	CredentialSourceInline    CredentialSource = "inline"
-	CredentialSourceDirectory CredentialSource = "dict_dir"
 )
 
 type Plan struct {
@@ -38,7 +37,6 @@ type Credential struct {
 type CredentialSet struct {
 	Source           CredentialSource
 	InlineCount      int
-	Directory        string
 	Dictionaries     []string
 	ExpansionProfile string
 	AllowEmptyUser   bool

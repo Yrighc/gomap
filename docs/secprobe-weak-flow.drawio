@@ -108,7 +108,7 @@
         <mxCell id="b14" value="plan 含&lt;br&gt;credential？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
           <mxGeometry x="2060" y="980" width="150" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="b15" value="&lt;b&gt;加载凭证&lt;/b&gt;&lt;div&gt;优先级：inline &amp;gt; dict_dir &amp;gt; builtin&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
+        <mxCell id="b15" value="&lt;b&gt;加载凭证&lt;/b&gt;&lt;div&gt;优先级：inline &amp;gt; builtin shared source&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="2260" y="975" width="240" height="80" as="geometry" />
         </mxCell>
         <mxCell id="b16" value="加载失败？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">

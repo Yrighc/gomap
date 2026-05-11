@@ -72,7 +72,7 @@ func TestScanMapsServicesIntoCandidatesAndBuiltinOptions(t *testing.T) {
 		if candidates[0].Version != "OpenSSH_9.8" || candidates[1].Banner != "redis" {
 			t.Fatalf("expected version/banner to flow into candidates, got %+v", candidates)
 		}
-		if opts.DictDir != "" || len(opts.Credentials) != 0 {
+		if len(opts.Credentials) != 0 {
 			t.Fatalf("expected builtin dictionary mode, got %+v", opts)
 		}
 		if !opts.StopOnSuccess || opts.EnableUnauthorized || opts.EnableEnrichment {

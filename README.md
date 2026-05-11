@@ -112,7 +112,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
          | app/assetprobe/services/ |
          |   gomap-services         |
          | app/assetprobe/dicts/*.txt |
-         | app/secprobe/dicts/*.txt   |
+         | app/secprobe/dicts/passwords/global.txt |
          +---------------------------+
 ```
 
@@ -188,7 +188,6 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - `-protocols`: 限定 secprobe 协议，逗号分隔，例如 `ssh,redis,mssql,rdp,vnc,smb,smtp,amqp,oracle,snmp`
 - `-timeout`: 资产发现与 secprobe 共用超时秒数
 - `-weak-concurrency`: secprobe 并发数
-- `-dict-dir`: 自定义协议字典目录
 - `-up`: 内联凭证，格式 `admin : admin,root : root`
 - `-upf`: 凭证文件，一行一个 `username : password`
 - `-stop-on-success`: 单目标命中后停止继续尝试
@@ -198,7 +197,7 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 
 说明：
 - 默认仍只执行 credential 探测
-- 当前内置 `credential` 协议列表：`ftp, ssh, telnet, smtp, mysql, postgresql, redis, mssql, oracle, amqp, snmp, rdp, vnc, smb`
+- 当前内置 `credential` 协议列表：`activemq, ftp, ssh, imap, kafka, ldap, pop3, mssql, mysql, postgresql, redis, elasticsearch, zabbix, neo4j, smtp, telnet, amqp, oracle, rdp, vnc, smb, snmp, mongodb`
 - `snmp` 第一版按 `v2c community` 接入，内置字典使用兼容现有解析器的 `: community` 行格式
 - `weak` 子命令当前发现阶段固定使用 `TCP`，上述 `snmp` 能力不等价于已覆盖常规 `UDP/161` SNMP 发现
 - `-enable-enrichment` 仅对成功 finding 生效，补采失败不会改变主 finding 成败
@@ -208,10 +207,18 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 ### 5.4.1 secprobe v1.4 扩展模式说明
 
 - `secprobe` 当前采用“代码驱动协议执行 + metadata 驱动静态声明”的扩展模式，主链路为 `metadata -> planner -> engine -> provider`。
-- 协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中；协议名、别名、默认端口、能力、默认字典与模板引用等静态信息集中收敛在 `app/secprobe/protocols/*.yaml`。
+- 弱口令候选生成已进一步收口为 `metadata.dictionary -> credential profile -> generator -> engine`，默认不再把“前 N 条口令”当成隐藏扫描档位。
+- 协议握手、认证、未授权确认、补采等交互逻辑继续落在协议实现代码中；协议名、别名、默认端口、能力、默认用户、共享密码源与模板引用等静态信息集中收敛在 `app/secprobe/protocols/*.yaml`。
+- 内置弱口令默认只维护一份共享密码池 `app/secprobe/dicts/passwords/global.txt`；当前密码项参考 fscan `DefaultPasswords` 扩充，协议差异通过 `default_users`、`extra_passwords`、`default_pairs` 表达。
 - 新增协议不建议只改配置文件；仅补 metadata / 字典 / 模板并不能让协议自动可用，新增协议至少需要补充 `internal/secprobe/<protocol>/` 下的 atomic provider，并完成默认 registry 注册。
 - `memcached` 与 `zookeeper` 第一版按 `unauthorized` 协议接入，使用只读确认动作，不依赖凭证字典。
 - `memcached` / `zookeeper` 默认端口不在 `weak` 的默认端口列表中，使用时需要显式通过 `-ports` 指定。
+- 当前公开 `Run` / `RunWithRegistry` / `Scan` 主链路固定使用 `default` 档位；内部虽然已有 `fast/default/full` 抽象，但尚未作为 public 参数开放。
+- 自定义默认字典目录入口已移除；三方调用方如需完全指定候选，请通过 `Credentials`、`-up` 或 `-upf` 显式传入。
+- `activemq` 第一版按原子 `credential` 协议接入，使用 STOMP 单次认证模型。
+- `zabbix`、`neo4j` 第一版按 HTTP/API 登录型 `credential` 接入，复用 `internal/secprobe/httpauth`。
+- `httpauth` 是 provider 层 HTTP 传输复用助手，不是新的 capability，也不是 YAML DSL。
+- `rsync` 本轮只完成边界评估，不并入当前实现批次。
 - 协议扩展约束、接入步骤与结果语义请参考 [docs/secprobe-protocol-extension-guide.md](docs/secprobe-protocol-extension-guide.md)。
 - 三方库调用与历史扩展升级方式请参考 [docs/secprobe-third-party-migration-guide.md](docs/secprobe-third-party-migration-guide.md)。
 
@@ -222,6 +229,8 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 - 当前所有内置 `credential` 协议都已通过 atomic `AuthenticateOnce` 执行，默认 registry 不再直接依赖对应的 legacy credential core prober
 - builtin `credential` 能力仅通过 `lookupAtomicCredential(...)` / capability 路径表达，不再经由默认 registry 的 `Lookup(..., ProbeKindCredential)` 暴露成 batch prober
 - `credential` loop、`stop-on-success` 与 terminal-error 判定统一由 `pkg/secprobe/engine` 控制
+- 新增的 `imap` / `pop3` / `ldap` / `kafka` 已按同一模型接入：metadata 声明协议事实，provider 只做单次认证，registry 负责默认装配
+- `imap` / `pop3` / `ldap` 额外覆盖了显式 TLS 端口语义；`kafka` 第一版聚焦 `SASL/PLAIN` 用户名密码认证，支持 `9092` 明文与 `9093` TLS 常见部署
 - public-prober compatibility 仍暂时保留给外部扩展注册，以及当前仍需 code-backed 的 `zookeeper unauthorized` 默认路径
 - phase 2 已将历史内置协议目录迁移到 `app/secprobe/protocols/*.yaml`，保持既有 public API 与结果契约
 
@@ -269,7 +278,6 @@ gomap port -target example.com -ports 6379,27017,11211,2181 -weak -weak-enable-u
 - `-weak-protocols`: `port` 模式下仅探测指定协议，逗号分隔
 - `-weak-concurrency`: `port` 模式下 secprobe 并发数
 - `-weak-stop-on-success`: `port` 模式下单目标命中后停止继续尝试
-- `-weak-dict-dir`: `port` 模式下自定义协议字典目录
 - `-weak-enable-unauth`: `port -weak` 模式下启用未授权访问探测
 - `-weak-enable-enrichment`: `port -weak` 模式下对成功 finding 追加详情补采
 - `-dict`: `simple|normal|diff`

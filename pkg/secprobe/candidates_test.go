@@ -21,10 +21,10 @@ func TestBuildCandidatesFiltersSupportedOpenPorts(t *testing.T) {
 		},
 	}
 	candidates := BuildCandidates(res, CredentialProbeOptions{})
-	if len(candidates) != 2 {
-		t.Fatalf("expected 2 secprobe candidates, got %d", len(candidates))
+	if len(candidates) != 3 {
+		t.Fatalf("expected 3 secprobe candidates, got %d", len(candidates))
 	}
-	if candidates[0].Service != "ssh" || candidates[1].Service != "redis" {
+	if candidates[0].Service != "ssh" || candidates[1].Service != "zabbix" || candidates[2].Service != "redis" {
 		t.Fatalf("unexpected services: %#v", candidates)
 	}
 }

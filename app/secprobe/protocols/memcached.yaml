@@ -10,7 +10,6 @@ policy_tags:
   auth_family: none
   transport: tcp
 dictionary:
-  default_sources: []
   allow_empty_username: false
   allow_empty_password: false
   expansion_profile: none

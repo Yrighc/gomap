@@ -168,15 +168,14 @@ func TestCompileCredentialSourceSelection(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		in            CompileInput
-		wantSource    CredentialSource
-		wantInline    int
-		wantDirectory string
+		name       string
+		in         CompileInput
+		wantSource CredentialSource
+		wantInline int
 	}{
 		{
 			name:       "inline credentials override all other sources",
-			in:         CompileInput{Credentials: inline, DictDir: "/tmp/dicts"},
+			in:         CompileInput{Credentials: inline},
 			wantSource: CredentialSourceInline,
 			wantInline: len(inline),
 		},
@@ -185,18 +184,6 @@ func TestCompileCredentialSourceSelection(t *testing.T) {
 			in:         CompileInput{Credentials: inlineWithDuplicate},
 			wantSource: CredentialSourceInline,
 			wantInline: len(inline),
-		},
-		{
-			name:          "dict dir wins when inline credentials are absent",
-			in:            CompileInput{DictDir: "/tmp/dicts"},
-			wantSource:    CredentialSourceDirectory,
-			wantDirectory: "/tmp/dicts",
-		},
-		{
-			name:          "whitespace dict dir follows runtime non-empty check",
-			in:            CompileInput{DictDir: "   "},
-			wantSource:    CredentialSourceDirectory,
-			wantDirectory: "   ",
 		},
 		{
 			name:       "builtin dictionaries remain the fallback",
@@ -219,13 +206,22 @@ func TestCompileCredentialSourceSelection(t *testing.T) {
 			if plan.Credentials.InlineCount != tt.wantInline {
 				t.Fatalf("InlineCount = %d, want %d", plan.Credentials.InlineCount, tt.wantInline)
 			}
-			if plan.Credentials.Directory != tt.wantDirectory {
-				t.Fatalf("Directory = %q, want %q", plan.Credentials.Directory, tt.wantDirectory)
-			}
 			if !reflect.DeepEqual(plan.Credentials.Dictionaries, []string{"redis"}) {
 				t.Fatalf("Dictionaries = %v, want %v", plan.Credentials.Dictionaries, []string{"redis"})
 			}
 		})
+	}
+}
+
+func TestCompileDoesNotFallbackMissingPasswordSourceToProtocolName(t *testing.T) {
+	t.Parallel()
+
+	spec := testSpec()
+	spec.Dictionary.PasswordSource = ""
+
+	plan := Compile(spec, CompileInput{})
+	if len(plan.Credentials.Dictionaries) != 0 {
+		t.Fatalf("Dictionaries = %v, want empty when password source is missing", plan.Credentials.Dictionaries)
 	}
 }
 
@@ -243,7 +239,7 @@ func TestCompileConsumesSNMPMetadataFields(t *testing.T) {
 			Transport:   "udp",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"snmp"},
+			PasswordSource:     "snmp",
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: false,
 			ExpansionProfile:   "static_basic",
@@ -308,7 +304,7 @@ func TestCompileConsumesUnauthorizedOnlyMetadataFields(t *testing.T) {
 			Transport:   "tcp",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{},
+			PasswordSource:     "",
 			AllowEmptyUsername: false,
 			AllowEmptyPassword: false,
 			ExpansionProfile:   "none",
@@ -364,7 +360,7 @@ func testSpec() metadata.Spec {
 			LockoutRisk: "low",
 		},
 		Dictionary: metadata.Dictionary{
-			DefaultSources:     []string{"redis"},
+			PasswordSource:     "redis",
 			AllowEmptyUsername: true,
 			AllowEmptyPassword: true,
 			ExpansionProfile:   "static_basic",

@@ -2,26 +2,28 @@ package secprobe
 
 import (
 	"fmt"
-	"strings"
 
-	appassets "github.com/yrighc/gomap/app"
+	"github.com/yrighc/gomap/pkg/secprobe/credentials"
 )
 
 func BuiltinCredentials(protocol string) ([]Credential, error) {
-	dictNames := builtinCredentialDictNames(protocol)
-	var lastErr error
-	for _, name := range dictNames {
-		data, err := appassets.SecprobeDict(name)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return parseCredentialLines(string(data))
+	rawToken := rawProtocolToken(protocol)
+	normalizedToken := normalizeProtocolToken(protocol)
+	spec, ok, err := lookupRuntimeMetadataSpec(rawToken, normalizedToken, 0)
+	if err != nil {
+		return nil, fmt.Errorf("load secprobe metadata: %w", err)
 	}
-	if lastErr != nil {
-		return nil, lastErr
+	if !ok {
+		return nil, fmt.Errorf("unsupported secprobe credential protocol: %s", normalizedToken)
 	}
-	return nil, fmt.Errorf("unsupported secprobe dict protocol: %s", strings.ToLower(strings.TrimSpace(protocol)))
+
+	profile := credentials.ProfileFromMetadata(spec.Name, spec.Dictionary)
+	profile = profile.WithScanProfile(string(credentials.ScanProfileDefault))
+	generated, _, err := (credentials.Generator{}).Generate(credentials.GenerateInput{Profile: profile})
+	if err != nil {
+		return nil, translateCredentialGenerationError(protocol, err)
+	}
+	return coreCredentials(generated), nil
 }
 
 func CredentialsFor(protocol string, opts CredentialProbeOptions) ([]Credential, error) {
@@ -43,56 +45,4 @@ func dedupeCredentials(in []Credential) []Credential {
 		out = append(out, cred)
 	}
 	return out
-}
-
-func builtinCredentialDictNames(protocol string) []string {
-	normalized := strings.ToLower(strings.TrimSpace(protocol))
-	if normalized == "" {
-		return nil
-	}
-
-	if spec, ok := LookupProtocolSpec(normalized, 0); ok && len(spec.DictNames) > 0 {
-		names := make([]string, 0, len(spec.DictNames)+1)
-		seen := make(map[string]struct{}, len(spec.DictNames)+1)
-		for _, name := range spec.DictNames {
-			if _, ok := seen[name]; ok || strings.TrimSpace(name) == "" {
-				continue
-			}
-			seen[name] = struct{}{}
-			names = append(names, name)
-		}
-		if _, ok := seen[spec.Name]; !ok && strings.TrimSpace(spec.Name) != "" {
-			seen[spec.Name] = struct{}{}
-			names = append(names, spec.Name)
-		}
-		if _, ok := seen[normalized]; !ok {
-			names = append(names, normalized)
-		}
-		return names
-	}
-
-	return []string{normalized}
-}
-
-func parseCredentialLines(raw string) ([]Credential, error) {
-	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	out := make([]Credential, 0, len(lines))
-	for idx, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, " : ", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid credential line %d: %q", idx+1, line)
-		}
-		out = append(out, Credential{
-			Username: strings.TrimSpace(parts[0]),
-			Password: strings.TrimSpace(parts[1]),
-		})
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no valid credentials found")
-	}
-	return out, nil
 }

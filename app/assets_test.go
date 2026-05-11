@@ -1,6 +1,8 @@
 package appassets
 
 import (
+	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -61,42 +63,58 @@ func TestEmbeddedAssetprobeResourcesLoad(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSecprobeDictResourcesLoad(t *testing.T) {
-	tests := []struct {
-		protocol string
-		snippets []string
-	}{
-		{protocol: "smtp", snippets: []string{"admin : 123456", "postmaster : postmaster"}},
-		{protocol: "amqp", snippets: []string{"guest : guest", "rabbitmq : rabbitmq"}},
-		{protocol: "ftp", snippets: []string{"ftp : 123456", "anonymous : anonymous"}},
-		{protocol: "mssql", snippets: []string{"sa : 123456", "sa : P@ssw0rd"}},
-		{protocol: "mysql", snippets: []string{"root : 123456", "mysql : mysql"}},
-		{protocol: "postgresql", snippets: []string{"postgres : 123456", "test : test"}},
-		{protocol: "rdp", snippets: []string{"administrator : 123456", "admin : admin"}},
-		{protocol: "redis", snippets: []string{"default : redis", "redis : {{key}}"}},
-		{protocol: "smb", snippets: []string{"administrator : 123456", "guest : guest"}},
-		{protocol: "ssh", snippets: []string{"root : 123456", "admin : admin"}},
-		{protocol: "telnet", snippets: []string{"admin : admin", "user : user"}},
-		{protocol: "vnc", snippets: []string{" : 123456", " : password"}},
-		{protocol: "oracle", snippets: []string{"system : oracle", "scott : tiger"}},
-		{protocol: "snmp", snippets: []string{": public", ": private"}},
+func TestEmbeddedSecprobePasswordSourceResourcesLoad(t *testing.T) {
+	data, err := SecprobePasswordSource("builtin:passwords/global")
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.protocol, func(t *testing.T) {
-			data, err := SecprobeDict(tt.protocol)
-			if err != nil {
-				t.Fatalf("load failed: %v", err)
-			}
-			if len(data) == 0 {
-				t.Fatal("expected non-empty data")
-			}
-			for _, snippet := range tt.snippets {
-				if !strings.Contains(string(data), snippet) {
-					t.Fatalf("expected data to contain %q", snippet)
-				}
-			}
-		})
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 70 {
+		t.Fatalf("expected fscan-sized global password source, got %d entries", len(lines))
+	}
+	for _, want := range []string{
+		"123456",
+		"admin123",
+		"{user}@123",
+		"P@ssw0rd!",
+		"1qaz@WSX",
+		"Charge123",
+		"redis",
+		"elastic123",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Fatalf("expected global password source to contain %q", want)
+		}
+	}
+}
+
+func TestEmbeddedSecprobePasswordSourceRejectsUnsupportedSource(t *testing.T) {
+	_, err := SecprobePasswordSource("builtin:passwords/missing")
+	if err == nil {
+		t.Fatal("expected unsupported source error")
+	}
+}
+
+func TestSecprobeDictDirectoryOnlyContainsSharedPasswordPool(t *testing.T) {
+	allowed := map[string]struct{}{
+		filepath.Clean("secprobe/dicts/passwords/global.txt"): {},
+	}
+
+	err := filepath.WalkDir("secprobe/dicts", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := allowed[filepath.Clean(path)]; !ok {
+			t.Fatalf("unexpected legacy secprobe dictionary file: %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk secprobe dicts: %v", err)
 	}
 }
 

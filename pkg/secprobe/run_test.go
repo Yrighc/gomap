@@ -3,8 +3,6 @@ package secprobe
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -157,7 +155,6 @@ func TestRunWithRegistryFallsBackToUnauthorizedWhenCredentialSetupFails(t *testi
 		Port:       6379,
 		Service:    "redis",
 	}}, CredentialProbeOptions{
-		DictDir:            filepath.Join(t.TempDir(), "missing"),
 		EnableUnauthorized: true,
 	})
 
@@ -272,6 +269,7 @@ func TestRunWithRegistryFallsBackToCredentialAfterUnauthorizedFailure(t *testing
 		Service:    "redis",
 	}}, CredentialProbeOptions{
 		EnableUnauthorized: true,
+		StopOnSuccess:      true,
 		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
 	})
 
@@ -323,6 +321,7 @@ func TestRunWithRegistryFallsBackToAtomicCredentialAfterLegacyUnauthorizedFailur
 		Service:    "redis",
 	}}, CredentialProbeOptions{
 		EnableUnauthorized: true,
+		StopOnSuccess:      true,
 		Credentials:        []Credential{{Username: "admin", Password: "admin"}},
 	})
 
@@ -344,6 +343,42 @@ func TestRunWithRegistryFallsBackToAtomicCredentialAfterLegacyUnauthorizedFailur
 	}
 }
 
+func TestRunWithRegistryKeepsExplicitCredentialsLiteralWithoutExpansion(t *testing.T) {
+	registry := NewRegistry()
+	var atomicCalls int32
+
+	registry.RegisterAtomicCredential("redis", stubAtomicAuthenticator(func(context.Context, strategy.Target, strategy.Credential) registrybridge.Attempt {
+		atomic.AddInt32(&atomicCalls, 1)
+		return registrybridge.Attempt{Result: result.Attempt{
+			Success:     true,
+			Username:    "admin",
+			Password:    "admin",
+			FindingType: result.FindingTypeCredentialValid,
+			Evidence:    "atomic redis auth",
+		}}
+	}))
+
+	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Port:       6379,
+		Service:    "redis",
+	}}, CredentialProbeOptions{
+		StopOnSuccess: true,
+		Credentials:   []Credential{{Username: "admin", Password: "admin"}},
+	})
+
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if !result.Results[0].Success {
+		t.Fatalf("expected explicit credential success, got %+v", result.Results[0])
+	}
+	if atomic.LoadInt32(&atomicCalls) != 1 {
+		t.Fatalf("expected exactly one atomic credential attempt, got %d", atomicCalls)
+	}
+}
+
 func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(&stubKindedProber{
@@ -358,7 +393,6 @@ func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 		Port:       1234,
 		Service:    "customsvc",
 	}}, CredentialProbeOptions{
-		DictDir: filepath.Join(t.TempDir(), "missing"),
 	})
 
 	if result.Meta.Failed != 1 {
@@ -387,7 +421,6 @@ func TestRunWithRegistryPreservesPublicProberCredentialBatchContract(t *testing.
 		Timeout:            3 * time.Second,
 		StopOnSuccess:      false,
 		EnableUnauthorized: true,
-		DictDir:            "/tmp/dicts",
 		Credentials: []Credential{
 			{Username: "a", Password: "1"},
 			{Username: "b", Password: "2"},
@@ -638,7 +671,6 @@ func TestRunUsesDefaultRegistryForRedisUnauthorized(t *testing.T) {
 		Port:       container.Port,
 		Service:    "redis",
 	}}, CredentialProbeOptions{
-		DictDir:            filepath.Join(t.TempDir(), "missing"),
 		Timeout:            5 * time.Second,
 		EnableUnauthorized: true,
 	})
@@ -729,7 +761,6 @@ func TestRunUsesDefaultRegistryForMemcachedUnauthorized(t *testing.T) {
 		Port:       container.Port,
 		Service:    "memcached",
 	}}, CredentialProbeOptions{
-		DictDir:            filepath.Join(t.TempDir(), "missing"),
 		Timeout:            5 * time.Second,
 		EnableUnauthorized: true,
 	})
@@ -897,34 +928,6 @@ func TestApplyDefaultsFillsCredentialProbeOptions(t *testing.T) {
 	}
 	if opts.Timeout != 5*time.Second {
 		t.Fatalf("expected default timeout 5s, got %s", opts.Timeout)
-	}
-}
-
-func TestRunUsesDictDirBeforeBuiltinCredentials(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ssh.txt"), []byte("custom : secret\n"), 0o600); err != nil {
-		t.Fatalf("write dict file: %v", err)
-	}
-
-	registry := NewRegistry()
-	prober := &stubSuccessProber{name: "ssh"}
-	registry.Register(prober)
-
-	result := RunWithRegistry(context.Background(), registry, []SecurityCandidate{{
-		Target:     "demo",
-		ResolvedIP: "127.0.0.1",
-		Port:       22,
-		Service:    "ssh",
-	}}, CredentialProbeOptions{
-		Timeout: time.Second,
-		DictDir: dir,
-	})
-
-	if !result.Results[0].Success {
-		t.Fatalf("expected dict-dir credentials to succeed, got %+v", result.Results[0])
-	}
-	if result.Results[0].Username != "custom" || result.Results[0].Password != "secret" {
-		t.Fatalf("expected dict-dir credentials, got %+v", result.Results[0])
 	}
 }
 

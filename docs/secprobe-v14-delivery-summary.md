@@ -77,7 +77,7 @@
 
 本次新增 `pkg/secprobe/dictionaries.go`，统一弱口令字典候选路径计算逻辑。
 
-已完成：
+历史版本已完成：
 
 - `loadCredentialsFromDir` 统一通过 `CredentialDictionaryCandidates` 获取候选
 - catalog 命中时优先使用 `DictNames`
@@ -87,9 +87,11 @@
 - 未知协议仍保留原始输入，用于回退路径计算
 - 空协议名不再生成异常候选路径
 
+当前版本已进一步演进为共享密码池模型，上述 `CredentialDictionaryCandidates` / `DictNames` / 协议字典装配方式已不再作为推荐入口。
+
 这使后续新增协议时：
 
-- 字典装配逻辑不需要散落在多处
+- 默认密码装配逻辑不需要散落在多处
 - 别名、标准协议名、TLS 变体的兼容策略更一致
 - 协议扩展时的测试点也更集中
 
@@ -106,9 +108,9 @@
 
 - GoMap 的 `secprobe` 扩展模式更接近“内置插件 / registry 风格”
 - 新增协议仍需要在 `internal/secprobe/<protocol>/` 下实现代码
-- metadata 只能帮助声明别名、端口、字典名、能力等静态信息
+- metadata 只能帮助声明别名、端口、默认用户、共享密码源、能力等静态信息
 - 握手、认证、未授权确认、enrichment、失败分类仍必须由代码实现
-- 默认字典如需内置，还需要同步处理 `app/assets.go` / `SecprobeDict` 装配
+- 默认密码如需内置，应维护共享密码池 `app/secprobe/dicts/passwords/global.txt`，协议差异放入 metadata
 
 这意味着 `v1.4` 已经把“后续怎么扩”说清楚了，但没有把新增协议误简化成“只改配置文件”。
 

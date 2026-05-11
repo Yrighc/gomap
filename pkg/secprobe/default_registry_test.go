@@ -7,7 +7,12 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	RegisterDefaultProbers(r)
 
 	tests := []SecurityCandidate{
+		{Service: "activemq", Port: 61613},
 		{Service: "ftp", Port: 21},
+		{Service: "imap", Port: 143},
+		{Service: "kafka", Port: 9092},
+		{Service: "ldap", Port: 389},
+		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
 		{Service: "telnet", Port: 23},
 		{Service: "mysql", Port: 3306},
@@ -40,33 +45,35 @@ func TestRegisterDefaultProbersKeepsBuiltinCredentialsAtomicOnly(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryBuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
+func TestDefaultRegistry_activemq_zabbix_neo4j_BuiltinCredentialCapabilityIsAtomicOnly(t *testing.T) {
 	r := DefaultRegistry()
 
-	tests := []SecurityCandidate{
-		{Service: "ftp", Port: 21},
-		{Service: "ssh", Port: 22},
-		{Service: "telnet", Port: 23},
-		{Service: "mysql", Port: 3306},
-		{Service: "postgresql", Port: 5432},
-		{Service: "redis", Port: 6379},
-		{Service: "elasticsearch", Port: 9200},
-		{Service: "mssql", Port: 1433},
-		{Service: "smtp", Port: 587},
-		{Service: "oracle", Port: 1521},
-		{Service: "snmp", Port: 161},
-		{Service: "amqp", Port: 5672},
-		{Service: "rdp", Port: 3389},
-		{Service: "vnc", Port: 5900},
-		{Service: "smb", Port: 445},
-		{Service: "mongodb", Port: 27017},
-		{Service: "elasticsearch", Port: 9200},
-	}
-
-	for _, candidate := range tests {
+	registered := []SecurityCandidate{{Service: "activemq", Port: 61613}}
+	for _, candidate := range registered {
 		t.Run(candidate.Service, func(t *testing.T) {
 			if !r.hasCapability(candidate, ProbeKindCredential) {
 				t.Fatalf("expected credential capability for %+v", candidate)
+			}
+			if _, ok := r.lookupAtomicCredential(candidate); !ok {
+				t.Fatalf("expected atomic credential plugin for %+v", candidate)
+			}
+			if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential public lookup miss for %+v", candidate)
+			}
+			if _, ok := r.lookupCore(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential core lookup miss for %+v", candidate)
+			}
+		})
+	}
+
+	unregistered := []SecurityCandidate{
+		{Service: "zabbix", Port: 80},
+		{Service: "neo4j", Port: 7474},
+	}
+	for _, candidate := range unregistered {
+		t.Run(candidate.Service, func(t *testing.T) {
+			if !r.hasCapability(candidate, ProbeKindCredential) {
+				t.Fatalf("expected runtime credential capability for %+v after provider registration", candidate)
 			}
 			if _, ok := r.lookupAtomicCredential(candidate); !ok {
 				t.Fatalf("expected atomic credential plugin for %+v", candidate)
@@ -172,6 +179,11 @@ func TestDefaultRegistryDelegatesToRegisterDefaultProbers(t *testing.T) {
 			candidate: SecurityCandidate{Service: "mongodb", Port: 27017},
 			kind:      ProbeKindCredential,
 		},
+		{
+			name:      "memcached unauthorized capability parity",
+			candidate: SecurityCandidate{Service: "memcached", Port: 11211},
+			kind:      ProbeKindUnauthorized,
+		},
 	}
 
 	for _, tt := range tests {
@@ -208,6 +220,24 @@ func TestDefaultRegistryRegistersAtomicRedisAndSSHPlugins(t *testing.T) {
 	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "elasticsearch", Port: 9200}); !ok {
 		t.Fatal("expected elasticsearch atomic credential plugin")
 	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "imap", Port: 143}); !ok {
+		t.Fatal("expected imap atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "kafka", Port: 9092}); !ok {
+		t.Fatal("expected kafka atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "activemq", Port: 61613}); !ok {
+		t.Fatal("expected activemq atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "zabbix", Port: 80}); !ok {
+		t.Fatal("expected zabbix atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "neo4j", Port: 7474}); !ok {
+		t.Fatal("expected neo4j atomic credential plugin")
+	}
+	if _, ok := r.lookupAtomicCredential(SecurityCandidate{Service: "pop3", Port: 110}); !ok {
+		t.Fatal("expected pop3 atomic credential plugin")
+	}
 	if _, ok := r.lookupAtomicUnauthorized(SecurityCandidate{Service: "redis", Port: 6379}); !ok {
 		t.Fatal("expected redis atomic unauthorized plugin")
 	}
@@ -235,7 +265,12 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 	r := DefaultRegistry()
 
 	tests := []SecurityCandidate{
+		{Service: "activemq", Port: 61613},
 		{Service: "ftp", Port: 21},
+		{Service: "imap", Port: 143},
+		{Service: "kafka", Port: 9092},
+		{Service: "ldap", Port: 389},
+		{Service: "pop3", Port: 110},
 		{Service: "ssh", Port: 22},
 		{Service: "mssql", Port: 1433},
 		{Service: "mysql", Port: 3306},
@@ -244,9 +279,11 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 		{Service: "smtp", Port: 25},
 		{Service: "telnet", Port: 23},
 		{Service: "amqp", Port: 5672},
+		{Service: "neo4j", Port: 7474},
 		{Service: "oracle", Port: 1521},
 		{Service: "rdp", Port: 3389},
 		{Service: "vnc", Port: 5900},
+		{Service: "zabbix", Port: 80},
 		{Service: "smb", Port: 445},
 		{Service: "snmp", Port: 161},
 		{Service: "mongodb", Port: 27017},
@@ -256,6 +293,49 @@ func TestDefaultRegistryRegistersAtomicCredentialPluginsForAllBuiltinCredentialP
 		if _, ok := r.lookupAtomicCredential(candidate); !ok {
 			t.Fatalf("expected atomic credential plugin for %+v", candidate)
 		}
+	}
+}
+
+func TestDefaultRegistryRegistersZabbixAndNeo4jAtomicCredential(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []SecurityCandidate{
+		{Service: "zabbix", Port: 80},
+		{Service: "neo4j", Port: 7474},
+	}
+
+	for _, candidate := range tests {
+		t.Run(candidate.Service, func(t *testing.T) {
+			if _, ok := r.lookupAtomicCredential(candidate); !ok {
+				t.Fatalf("expected atomic credential plugin for %+v", candidate)
+			}
+		})
+	}
+}
+
+func TestDefaultRegistryBuiltinCredentialCapabilityIncludesIMAPAndPOP3(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []SecurityCandidate{
+		{Service: "imap", Port: 143},
+		{Service: "pop3", Port: 110},
+	}
+
+	for _, candidate := range tests {
+		t.Run(candidate.Service, func(t *testing.T) {
+			if !r.hasCapability(candidate, ProbeKindCredential) {
+				t.Fatalf("expected credential capability for %+v", candidate)
+			}
+			if _, ok := r.lookupAtomicCredential(candidate); !ok {
+				t.Fatalf("expected atomic credential plugin for %+v", candidate)
+			}
+			if _, ok := r.Lookup(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential public lookup miss for %+v", candidate)
+			}
+			if _, ok := r.lookupCore(candidate, ProbeKindCredential); ok {
+				t.Fatalf("expected builtin credential core lookup miss for %+v", candidate)
+			}
+		})
 	}
 }
 
