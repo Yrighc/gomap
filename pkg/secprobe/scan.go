@@ -15,7 +15,7 @@ func Scan(ctx context.Context, req ScanRequest) ScanResult {
 	if strings.TrimSpace(req.Target) == "" {
 		return ScanResult{Error: "target is required"}
 	}
-	candidates, err := buildScanCandidates(req)
+	candidates, unsupported, err := buildScanCandidates(req)
 	if err != nil {
 		return ScanResult{
 			Target:     req.Target,
@@ -39,29 +39,35 @@ func Scan(ctx context.Context, req ScanRequest) ScanResult {
 	}
 
 	run := scanRun(ctx, candidates, opts)
+	results := mergeScanResults(req, run.Results, unsupported)
+	meta := run.Meta
+	meta.Candidates = len(req.Services)
+	meta.Skipped += len(unsupported)
 	return ScanResult{
 		Target:     req.Target,
 		ResolvedIP: req.ResolvedIP,
-		Meta:       run.Meta,
-		Results:    run.Results,
+		Meta:       meta,
+		Results:    results,
 	}
 }
 
-func buildScanCandidates(req ScanRequest) ([]SecurityCandidate, error) {
+func buildScanCandidates(req ScanRequest) ([]SecurityCandidate, map[int]SecurityResult, error) {
 	if len(req.Services) == 0 {
-		return nil, fmt.Errorf("services is required")
+		return nil, nil, fmt.Errorf("services is required")
 	}
 
 	host := scanHost(req.Target, req.ResolvedIP)
 	out := make([]SecurityCandidate, 0, len(req.Services))
-	for _, item := range req.Services {
+	unsupported := make(map[int]SecurityResult)
+	for i, item := range req.Services {
 		if item.Port <= 0 {
-			return nil, fmt.Errorf("invalid service port %d", item.Port)
+			return nil, nil, fmt.Errorf("invalid service port %d", item.Port)
 		}
 
 		service := NormalizeServiceName(item.Service, item.Port)
 		if service == "" {
-			return nil, fmt.Errorf("unsupported service %q on port %d", item.Service, item.Port)
+			unsupported[i] = unsupportedScanResult(req, host, item)
+			continue
 		}
 
 		out = append(out, SecurityCandidate{
@@ -73,7 +79,7 @@ func buildScanCandidates(req ScanRequest) ([]SecurityCandidate, error) {
 			Banner:     item.Banner,
 		})
 	}
-	return out, nil
+	return out, unsupported, nil
 }
 
 func scanHost(target, resolvedIP string) string {
@@ -81,6 +87,40 @@ func scanHost(target, resolvedIP string) string {
 		return resolvedIP
 	}
 	return target
+}
+
+func mergeScanResults(req ScanRequest, supported []SecurityResult, unsupported map[int]SecurityResult) []SecurityResult {
+	if len(req.Services) == 0 {
+		return nil
+	}
+
+	results := make([]SecurityResult, len(req.Services))
+	supportedIndex := 0
+	for i := range req.Services {
+		if item, ok := unsupported[i]; ok {
+			results[i] = item
+			continue
+		}
+		if supportedIndex >= len(supported) {
+			results[i] = unsupportedScanResult(req, scanHost(req.Target, req.ResolvedIP), req.Services[i])
+			continue
+		}
+		results[i] = supported[supportedIndex]
+		supportedIndex++
+	}
+	return results
+}
+
+func unsupportedScanResult(req ScanRequest, resolvedIP string, item ScanService) SecurityResult {
+	return SecurityResult{
+		Target:      req.Target,
+		ResolvedIP:  resolvedIP,
+		Port:        item.Port,
+		Service:     strings.TrimSpace(item.Service),
+		ProbeKind:   ProbeKindCredential,
+		FindingType: FindingTypeCredentialValid,
+		Error:       fmt.Sprintf("unsupported service %q on port %d", item.Service, item.Port),
+	}
 }
 
 func stubScanRunner(fn func(context.Context, []SecurityCandidate, CredentialProbeOptions) RunResult) func() {
