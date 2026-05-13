@@ -313,6 +313,90 @@ func TestRunWeakDefaultsToCredentialOnly(t *testing.T) {
 	}
 }
 
+func TestRunWeakDefaultsTimeoutToOneSecond(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 22, Open: true, Service: "ssh"}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	var gotOpts secprobe.CredentialProbeOptions
+	runWeakProbe = func(_ context.Context, _ []secprobe.SecurityCandidate, opts secprobe.CredentialProbeOptions) secprobe.RunResult {
+		gotOpts = opts
+		return secprobe.RunResult{Meta: secprobe.SecurityMeta{}}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "22"})
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if stdout == "" {
+		t.Fatal("expected stdout output")
+	}
+	if gotOpts.Timeout != time.Second {
+		t.Fatalf("expected weak default timeout 1s, got %s", gotOpts.Timeout)
+	}
+}
+
+func TestRunWeakBuildsCandidateFromExplicitProtocolOnCustomPort(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:     "demo",
+					ResolvedIP: "192.0.2.10",
+					Protocol:   assetprobe.ProtocolTCP,
+					Ports:      []assetprobe.PortResult{{Port: 10033, Open: true, Service: ""}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	var gotCandidates []secprobe.SecurityCandidate
+	runWeakProbe = func(_ context.Context, candidates []secprobe.SecurityCandidate, _ secprobe.CredentialProbeOptions) secprobe.RunResult {
+		gotCandidates = append([]secprobe.SecurityCandidate(nil), candidates...)
+		return secprobe.RunResult{Meta: secprobe.SecurityMeta{Candidates: len(candidates)}}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "10033", "-protocols", "ssh", "-up", "root:secret"})
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if stdout == "" {
+		t.Fatal("expected stdout output")
+	}
+	if len(gotCandidates) != 1 {
+		t.Fatalf("expected one ssh candidate from explicit protocol on custom port, got %#v", gotCandidates)
+	}
+	if gotCandidates[0].Service != "ssh" || gotCandidates[0].Port != 10033 {
+		t.Fatalf("expected explicit ssh candidate on port 10033, got %#v", gotCandidates[0])
+	}
+}
+
 func TestRunWeakForwardsUnauthorizedAndEnrichment(t *testing.T) {
 	scanner := &stubWeakScanner{
 		batch: &assetprobe.BatchScanResult{

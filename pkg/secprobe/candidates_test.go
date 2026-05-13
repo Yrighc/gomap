@@ -201,6 +201,26 @@ func TestBuildCandidatesUsesRegistryLookup(t *testing.T) {
 	}
 }
 
+func TestBuildCandidatesFallsBackToExplicitProtocolOnCustomPortWithoutFingerprint(t *testing.T) {
+	res := &assetprobe.ScanResult{
+		Target:     "demo",
+		ResolvedIP: "127.0.0.1",
+		Ports: []assetprobe.PortResult{
+			{Port: 10033, Open: true, Service: ""},
+		},
+	}
+
+	candidates := BuildCandidates(res, CredentialProbeOptions{
+		Protocols: []string{"ssh"},
+	})
+	if len(candidates) != 1 {
+		t.Fatalf("expected explicit ssh candidate on custom port, got %#v", candidates)
+	}
+	if candidates[0].Service != "ssh" || candidates[0].Port != 10033 {
+		t.Fatalf("expected ssh candidate on 10033, got %#v", candidates[0])
+	}
+}
+
 func TestBuildCandidatesWithRegistryIncludesCatalogProtocolWhenProberRegistered(t *testing.T) {
 	res := &assetprobe.ScanResult{
 		Target:     "demo",

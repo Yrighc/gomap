@@ -926,8 +926,8 @@ func TestApplyDefaultsFillsCredentialProbeOptions(t *testing.T) {
 	if opts.Concurrency != 10 {
 		t.Fatalf("expected default concurrency 10, got %d", opts.Concurrency)
 	}
-	if opts.Timeout != 5*time.Second {
-		t.Fatalf("expected default timeout 5s, got %s", opts.Timeout)
+	if opts.Timeout != time.Second {
+		t.Fatalf("expected default timeout 1s, got %s", opts.Timeout)
 	}
 }
 

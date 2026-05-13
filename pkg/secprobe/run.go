@@ -35,7 +35,7 @@ func applyDefaults(opts *CredentialProbeOptions) {
 		opts.Concurrency = 10
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 5 * time.Second
+		opts.Timeout = time.Second
 	}
 }
 

@@ -99,7 +99,7 @@ func runWeak(args []string) {
 	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
 	ports := fs.String("ports", "21,22,23,3306,5432,6379", "[可选] 端口表达式，例如 21,22,3306")
 	protocols := fs.String("protocols", "", "[可选] 仅探测指定协议，逗号分隔")
-	timeout := fs.Int("timeout", 3, "[可选] 资产发现与 secprobe 超时秒数")
+	timeout := fs.Int("timeout", 1, "[可选] 资产发现与 secprobe 超时秒数")
 	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] secprobe 并发数")
 	inlineCreds := fs.String("up", "", "[可选] 内联凭证，格式 'admin : admin,root : root'")
 	credFile := fs.String("upf", "", "[可选] 凭证文件，一行一个 'admin : admin'")

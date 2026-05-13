@@ -35,7 +35,7 @@ func Scan(ctx context.Context, req ScanRequest) ScanResult {
 		opts.Concurrency = 10
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 5 * time.Second
+		opts.Timeout = time.Second
 	}
 
 	run := scanRun(ctx, candidates, opts)

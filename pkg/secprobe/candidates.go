@@ -24,20 +24,47 @@ func buildCandidatesWithRegistry(res *assetprobe.ScanResult, opts CredentialProb
 	}
 
 	allowed := make(map[string]struct{}, len(opts.Protocols))
+	allowedList := make([]string, 0, len(opts.Protocols))
 	for _, protocol := range opts.Protocols {
 		p := NormalizeServiceName(protocol, 0)
 		if p != "" {
 			allowed[p] = struct{}{}
+			allowedList = append(allowedList, p)
 		}
 	}
 
 	out := make([]SecurityCandidate, 0, len(res.Ports))
+	seen := make(map[string]struct{}, len(res.Ports))
+	appendCandidate := func(candidate SecurityCandidate) {
+		key := candidate.Target + "\x00" + candidate.ResolvedIP + "\x00" + candidate.Service + "\x00" + string(rune(candidate.Port))
+		if _, ok := seen[key]; ok {
+			return
+		}
+		if !registrySupportsCandidate(registry, candidate) {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, candidate)
+	}
 	for _, p := range res.Ports {
 		if !p.Open {
 			continue
 		}
 		service := NormalizeServiceName(p.Service, p.Port)
 		if service == "" {
+			if len(allowedList) == 0 {
+				continue
+			}
+			for _, explicit := range allowedList {
+				appendCandidate(SecurityCandidate{
+					Target:     res.Target,
+					ResolvedIP: res.ResolvedIP,
+					Port:       p.Port,
+					Service:    explicit,
+					Version:    p.Version,
+					Banner:     p.Banner,
+				})
+			}
 			continue
 		}
 		if len(allowed) > 0 {
@@ -53,10 +80,7 @@ func buildCandidatesWithRegistry(res *assetprobe.ScanResult, opts CredentialProb
 			Version:    p.Version,
 			Banner:     p.Banner,
 		}
-		if !registrySupportsCandidate(registry, candidate) {
-			continue
-		}
-		out = append(out, candidate)
+		appendCandidate(candidate)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
