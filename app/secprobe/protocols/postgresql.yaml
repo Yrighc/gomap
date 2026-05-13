@@ -16,6 +16,7 @@ dictionary:
   default_users:
     - postgres
     - admin
+    - root
   password_source: builtin:passwords/global
   default_tiers:
     - top
