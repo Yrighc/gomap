@@ -2,6 +2,7 @@ package elasticsearch
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +22,11 @@ const authenticatePath = "/_security/_authenticate"
 var (
 	errElasticsearchAuthenticationFailed = errors.New("elasticsearch authentication failed")
 	errElasticsearchConfirmMissingUser   = errors.New("authenticate response missing username")
-	doHTTP                               = func(req *http.Request) (*http.Response, error) {
-		return http.DefaultClient.Do(req)
+	doHTTP                               = func(req *http.Request, client *http.Client) (*http.Response, error) {
+		if client == nil {
+			client = http.DefaultClient
+		}
+		return client.Do(req)
 	}
 )
 
@@ -141,17 +145,30 @@ func classifyElasticsearchCredentialFailure(err error) result.ErrorCode {
 	}
 }
 
-type requestOption func(*http.Request)
+type requestConfig struct {
+	transport http.RoundTripper
+}
+
+type requestOption func(*requestConfig)
 
 func doAuthenticateRequest(ctx context.Context, rawURL string, cred strategy.Credential, opts ...requestOption) (*http.Response, error) {
 	req, err := newAuthenticateRequest(ctx, rawURL, cred)
 	if err != nil {
 		return nil, err
 	}
+
+	cfg := requestConfig{}
 	for _, opt := range opts {
-		opt(req)
+		opt(&cfg)
 	}
-	return doHTTP(req)
+
+	client := http.DefaultClient
+	if cfg.transport != nil {
+		client = &http.Client{
+			Transport: cfg.transport,
+		}
+	}
+	return doHTTP(req, client)
 }
 
 func interpretAuthenticateResponse(resp *http.Response, cred strategy.Credential) (registrybridge.Attempt, error) {
@@ -206,9 +223,9 @@ func shouldRetryHTTPSInsecure(err error) bool {
 }
 
 func withInsecureTLS() requestOption {
-	return func(req *http.Request) {
-		// 这个头只是为了让测试能感知“当前是放宽证书校验的重试分支”，
-		// 真正的 TLS 行为仍由 doHTTP 背后的 HTTP client 控制。
-		req.Header.Set("X-Secprobe-Insecure-TLS", "true")
+	return func(cfg *requestConfig) {
+		cfg.transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // 仅用于证书校验失败后的明确重试分支
+		}
 	}
 }

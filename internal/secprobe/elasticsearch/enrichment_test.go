@@ -60,7 +60,7 @@ func TestEnrichUsesAuthenticatePathWithHTTPSFallback(t *testing.T) {
 	})
 
 	var urls []string
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		urls = append(urls, req.URL.String())
 		if len(urls) == 1 {
 			return nil, errors.New("http: server gave HTTP response to HTTPS client")
@@ -105,7 +105,7 @@ func TestEnrichReturnsErrorPayloadForAuthenticateFailure(t *testing.T) {
 		doHTTP = originalDo
 	})
 
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusUnauthorized,
 			Status:     "401 Unauthorized",

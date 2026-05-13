@@ -3,6 +3,7 @@ package secprobe
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/yrighc/gomap/pkg/secprobe/metadata"
@@ -43,6 +44,26 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 			}
 			if spec.SupportsEnrichment != tt.enrich {
 				t.Fatalf("expected SupportsEnrichment=%v, got %v", tt.enrich, spec.SupportsEnrichment)
+			}
+		})
+	}
+}
+
+func TestLookupProtocolSpecPostgreSQLAliasesIncludeRootUser(t *testing.T) {
+	for _, service := range []string{"postgres", "pgsql"} {
+		t.Run(service, func(t *testing.T) {
+			spec, ok := LookupProtocolSpec(service, 0)
+			if !ok {
+				t.Fatalf("expected protocol spec for %q", service)
+			}
+			if spec.Name != "postgresql" {
+				t.Fatalf("expected postgresql spec, got %+v", spec)
+			}
+			if !spec.SupportsEnrichment {
+				t.Fatalf("expected postgresql enrichment support, got %+v", spec)
+			}
+			if !slices.Contains(spec.DefaultUsers, "root") {
+				t.Fatalf("expected postgresql default users to include root, got %v", spec.DefaultUsers)
 			}
 		})
 	}

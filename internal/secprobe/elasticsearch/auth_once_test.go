@@ -2,6 +2,7 @@ package elasticsearch
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
@@ -91,6 +92,50 @@ func TestElasticsearchAuthenticatorAuthenticateOnceMapsConnectionFailure(t *test
 	}
 }
 
+func TestDoAuthenticateRequestEnablesInsecureSkipVerifyWhenRequested(t *testing.T) {
+	originalDo := doHTTP
+	t.Cleanup(func() {
+		doHTTP = originalDo
+	})
+
+	called := false
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
+		called = true
+		if req.URL.String() != "https://127.0.0.1:9200/_security/_authenticate" {
+			t.Fatalf("unexpected request url: %s", req.URL.String())
+		}
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok || transport == nil {
+			t.Fatalf("expected *http.Transport, got %#v", client.Transport)
+		}
+		if transport.TLSClientConfig == nil {
+			t.Fatal("expected TLS client config to be set")
+		}
+		if !transport.TLSClientConfig.InsecureSkipVerify {
+			t.Fatalf("expected InsecureSkipVerify=true, got %+v", transport.TLSClientConfig)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"username":"elastic"}`)),
+			Header:     make(http.Header),
+		}, nil
+	}
+
+	resp, err := doAuthenticateRequest(
+		context.Background(),
+		"https://127.0.0.1:9200/_security/_authenticate",
+		strategy.Credential{Username: "elastic", Password: "secret"},
+		withInsecureTLS(),
+	)
+	if err != nil {
+		t.Fatalf("doAuthenticateRequest() error = %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if !called {
+		t.Fatal("expected doHTTP to be called")
+	}
+}
+
 func TestElasticsearchAuthenticatorAuthenticateOnceUsesRealAuthenticatePath(t *testing.T) {
 	originalDo := doHTTP
 	t.Cleanup(func() {
@@ -98,10 +143,13 @@ func TestElasticsearchAuthenticatorAuthenticateOnceUsesRealAuthenticatePath(t *t
 	})
 
 	called := false
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		called = true
 		if req.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if client == nil {
+			t.Fatal("expected http client")
 		}
 		if req.URL.String() != "https://127.0.0.1:9200/_security/_authenticate" {
 			t.Fatalf("unexpected request url: %s", req.URL.String())
@@ -150,7 +198,7 @@ func TestElasticsearchAuthenticatorAuthenticateOnceMapsMissingUsernameToInsuffic
 		doHTTP = originalDo
 	})
 
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(`{"roles":["superuser"]}`)),
@@ -183,7 +231,7 @@ func TestElasticsearchAuthenticatorAuthenticateOnceUsesHTTPSPathFirst(t *testing
 	})
 
 	called := false
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		called = true
 		if req.URL.String() != "https://127.0.0.1:9200/_security/_authenticate" {
 			t.Fatalf("unexpected request url: %s", req.URL.String())
@@ -220,7 +268,7 @@ func TestElasticsearchAuthenticatorAuthenticateOnceFallsBackToHTTPWhenHTTPSGetsP
 	})
 
 	var urls []string
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		urls = append(urls, req.URL.String())
 		if len(urls) == 1 {
 			return nil, errors.New("http: server gave HTTP response to HTTPS client")
@@ -263,7 +311,7 @@ func TestElasticsearchAuthenticatorAuthenticateOnceDoesNotFallbackToHTTPOnAuthen
 	})
 
 	var urls []string
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		urls = append(urls, req.URL.String())
 		return &http.Response{
 			StatusCode: http.StatusUnauthorized,
@@ -297,13 +345,17 @@ func TestElasticsearchAuthenticatorAuthenticateOnceRetriesHTTPSWithInsecureTLSOn
 	})
 
 	var urls []string
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		urls = append(urls, req.URL.String())
 		if len(urls) == 1 {
 			return nil, errors.New("tls: failed to verify certificate: x509: certificate signed by unknown authority")
 		}
-		if got := req.Header.Get("X-Secprobe-Insecure-TLS"); got != "true" {
-			t.Fatalf("expected insecure tls retry marker, got %q", got)
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok || transport == nil {
+			t.Fatalf("expected *http.Transport, got %#v", client.Transport)
+		}
+		if transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
+			t.Fatalf("expected insecure tls transport on retry, got %+v", transport.TLSClientConfig)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -340,8 +392,11 @@ func TestElasticsearchAuthenticatorAuthenticateOnceDoesNotFallbackToHTTPOnGeneri
 	})
 
 	var urls []string
-	doHTTP = func(req *http.Request) (*http.Response, error) {
+	doHTTP = func(req *http.Request, client *http.Client) (*http.Response, error) {
 		urls = append(urls, req.URL.String())
+		if transport, ok := client.Transport.(*http.Transport); ok && transport != nil && transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+			t.Fatalf("did not expect insecure tls retry on generic handshake failure, got %+v", transport.TLSClientConfig)
+		}
 		return nil, errors.New("remote error: tls handshake failure")
 	}
 
@@ -362,3 +417,24 @@ func TestElasticsearchAuthenticatorAuthenticateOnceDoesNotFallbackToHTTPOnGeneri
 		t.Fatalf("expected connection error code, got %+v", out)
 	}
 }
+
+func TestWithInsecureTLSConfiguresTransport(t *testing.T) {
+	cfg := requestConfig{}
+	withInsecureTLS()(&cfg)
+
+	if cfg.transport == nil {
+		t.Fatal("expected transport to be configured")
+	}
+	transport, ok := cfg.transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %#v", cfg.transport)
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("expected TLS client config")
+	}
+	if !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("expected InsecureSkipVerify=true, got %+v", transport.TLSClientConfig)
+	}
+}
+
+var _ = tls.VersionTLS13
