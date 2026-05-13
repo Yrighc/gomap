@@ -10,8 +10,8 @@ const (
 type CredentialSource string
 
 const (
-	CredentialSourceBuiltin   CredentialSource = "builtin"
-	CredentialSourceInline    CredentialSource = "inline"
+	CredentialSourceBuiltin CredentialSource = "builtin"
+	CredentialSourceInline  CredentialSource = "inline"
 )
 
 type Plan struct {

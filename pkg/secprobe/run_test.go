@@ -392,8 +392,7 @@ func TestRunWithRegistryCountsMissingCredentialsAsFailed(t *testing.T) {
 		ResolvedIP: "127.0.0.1",
 		Port:       1234,
 		Service:    "customsvc",
-	}}, CredentialProbeOptions{
-	})
+	}}, CredentialProbeOptions{})
 
 	if result.Meta.Failed != 1 {
 		t.Fatalf("expected missing credentials to count as failed, got %+v", result.Meta)

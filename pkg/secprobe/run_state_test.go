@@ -95,8 +95,7 @@ func TestRunWithRegistryMarksMissingCredentialsAsNoCredentials(t *testing.T) {
 		ResolvedIP: "127.0.0.1",
 		Port:       1234,
 		Service:    "customsvc",
-	}}, CredentialProbeOptions{
-	})
+	}}, CredentialProbeOptions{})
 
 	if len(result.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(result.Results))

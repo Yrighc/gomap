@@ -21,7 +21,7 @@ type CredentialProfile struct {
 	DefaultUsers       []string
 	PasswordSource     string
 	ExtraPasswords     []string
-	DefaultPairs        []CredentialPair
+	DefaultPairs       []CredentialPair
 	DefaultTiers       []Tier
 	ScanProfile        ScanProfile
 	AllowEmptyUsername bool
