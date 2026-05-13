@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -101,7 +102,7 @@ func buildAuthenticateURL(target strategy.Target, scheme string) string {
 	if strings.TrimSpace(host) == "" {
 		host = target.Host
 	}
-	return scheme + "://" + host + ":" + strconv.Itoa(target.Port) + authenticatePath
+	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(target.Port)) + authenticatePath
 }
 
 func newAuthenticateRequest(ctx context.Context, rawURL string, cred strategy.Credential) (*http.Request, error) {

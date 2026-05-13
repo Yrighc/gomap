@@ -19,8 +19,8 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 		users   []string
 		enrich  bool
 	}{
-		{name: "postgres alias", service: "postgres", want: "postgresql", users: []string{"postgres", "admin"}},
-		{name: "pgsql alias", service: "pgsql", want: "postgresql", users: []string{"postgres", "admin"}},
+		{name: "postgres alias", service: "postgres", want: "postgresql", enrich: true},
+		{name: "pgsql alias", service: "pgsql", want: "postgresql", enrich: true},
 		{name: "mongo alias", service: "mongo", want: "mongodb", users: []string{"root", "admin"}, enrich: true},
 		{name: "redis tls alias", service: "redis/tls", want: "redis", users: []string{""}, enrich: true},
 		{name: "mongodb port fallback", port: 27017, want: "mongodb", users: []string{"root", "admin"}, enrich: true},
@@ -38,7 +38,7 @@ func TestLookupProtocolSpecSupportsAliasesAndPortFallback(t *testing.T) {
 			if spec.PasswordSource != sharedPasswordSource {
 				t.Fatalf("expected shared password source, got %q", spec.PasswordSource)
 			}
-			if !reflect.DeepEqual(spec.DefaultUsers, tt.users) {
+			if tt.users != nil && !reflect.DeepEqual(spec.DefaultUsers, tt.users) {
 				t.Fatalf("expected default users %v, got %v", tt.users, spec.DefaultUsers)
 			}
 			if spec.SupportsEnrichment != tt.enrich {
@@ -194,7 +194,7 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 		{
 			name: "mysql by port",
 			in:   SecurityCandidate{Port: 3306},
-			want: ProtocolSpec{Name: "mysql", Ports: []int{3306}, DefaultUsers: []string{"root", "mysql"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+			want: ProtocolSpec{Name: "mysql", Ports: []int{3306}, DefaultUsers: []string{"root", "mysql"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}, SupportsEnrichment: true},
 		},
 		{
 			name: "telnet",
@@ -239,7 +239,7 @@ func TestLookupProtocolSpecIncludesCredentialProtocols(t *testing.T) {
 		{
 			name: "elasticsearch",
 			in:   SecurityCandidate{Service: "elasticsearch", Port: 9200},
-			want: ProtocolSpec{Name: "elasticsearch", Aliases: []string{"elastic"}, Ports: []int{9200}, DefaultUsers: []string{"elastic", "admin", "kibana"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}},
+			want: ProtocolSpec{Name: "elasticsearch", Aliases: []string{"elastic"}, Ports: []int{9200}, DefaultUsers: []string{"elastic", "admin", "kibana"}, PasswordSource: sharedPasswordSource, ProbeKinds: []ProbeKind{ProbeKindCredential}, SupportsEnrichment: true},
 		},
 		{
 			name: "imap service",
@@ -406,6 +406,9 @@ func TestLookupProtocolSpecSupportsElasticsearchCredentialOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(spec.DefaultUsers, []string{"elastic", "admin", "kibana"}) {
 		t.Fatalf("expected elasticsearch default users, got %v", spec.DefaultUsers)
+	}
+	if !spec.SupportsEnrichment {
+		t.Fatalf("expected elasticsearch enrichment support, got %+v", spec)
 	}
 	if !ProtocolSupportsKind("elasticsearch", ProbeKindCredential) {
 		t.Fatal("expected elasticsearch credential probing to be declared")

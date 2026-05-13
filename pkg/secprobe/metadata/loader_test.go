@@ -66,11 +66,11 @@ func TestLoadBuiltinIncludesPlannedPhaseNextProtocols(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		aliases          []string
-		ports            []int
-		users            []string
-		evidenceProfile  string
+		name            string
+		aliases         []string
+		ports           []int
+		users           []string
+		evidenceProfile string
 	}{
 		{
 			name:            "activemq",
@@ -264,6 +264,23 @@ func TestLoadBuiltinUsesFscanExpandedProtocolUsers(t *testing.T) {
 		}
 		if !slices.Equal(spec.Dictionary.DefaultUsers, tt.users) {
 			t.Fatalf("%s default users = %v, want %v", tt.protocol, spec.Dictionary.DefaultUsers, tt.users)
+		}
+	}
+}
+
+func TestLoadBuiltinEnablesEnrichmentForBatch1Protocols(t *testing.T) {
+	specs, err := LoadBuiltin()
+	if err != nil {
+		t.Fatalf("LoadBuiltin() error = %v", err)
+	}
+
+	for _, name := range []string{"postgresql", "mysql", "elasticsearch"} {
+		spec, ok := specs[name]
+		if !ok {
+			t.Fatalf("expected %s spec, got keys %v", name, slices.Sorted(maps.Keys(specs)))
+		}
+		if !spec.Capabilities.Enrichment {
+			t.Fatalf("expected %s enrichment enabled, got %+v", name, spec.Capabilities)
 		}
 	}
 }
