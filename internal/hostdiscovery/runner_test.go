@@ -56,3 +56,31 @@ func TestRunReturnsErrorWhenAllModesUnavailable(t *testing.T) {
 		t.Fatalf("expected ErrNoUsableModes, got %v", err)
 	}
 }
+
+func TestRunContinuesAfterNoSignalMode(t *testing.T) {
+	orig := modeFactories
+	t.Cleanup(func() { modeFactories = orig })
+
+	modeFactories = map[string]func(Options) Runner{
+		"icmp-echo": func(Options) Runner {
+			return RunnerFunc(func(context.Context, string) (Result, error) {
+				return Result{}, nil
+			})
+		},
+		"tcp-connect": func(Options) Runner {
+			return RunnerFunc(func(context.Context, string) (Result, error) {
+				return Result{Matched: true, Method: "tcp-connect"}, nil
+			})
+		},
+	}
+
+	result, err := Run(context.Background(), "127.0.0.1", Options{
+		Modes: []string{"icmp-echo", "tcp-connect"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Matched || result.Method != "tcp-connect" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
