@@ -132,6 +132,12 @@ go run ./cmd \
   -max-fp 50
 ```
 
+批量目标也支持 CIDR 输入：
+
+```bash
+go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
+```
+
 默认行为说明：
 - `port` 模式默认会先执行 HostDiscovery，再进入正式 TCP 端口扫描
 - `-Pn` 会跳过 HostDiscovery，直接扫描端口，语义与 Nmap `-Pn` 对齐
@@ -195,7 +201,8 @@ gomap weak -target example.com -ports 6379,27017,11211,2181 -enable-unauth -enab
 ```
 
 常用参数：
-- `-target` / `-ips`: 单目标或多目标输入
+- `-target`: 单个目标 IP 或域名
+- `-ips`: 多目标输入，逗号分隔，支持 IP/域名/CIDR
 - `-ports`: 探测端口范围，默认 `21,22,23,3306,5432,6379`
 - `-protocols`: 限定 secprobe 协议，逗号分隔，例如 `ssh,redis,mssql,rdp,vnc,smb,smtp,amqp,oracle,snmp`
 - `-timeout`: 资产发现与 secprobe 共用超时秒数
@@ -276,7 +283,8 @@ gomap port -target example.com -ports 6379,27017,11211,2181 -weak -weak-enable-u
 
 参数说明：
 - `-proto`: `tcp` 或 `udp`
-- `-ips`: 多目标，逗号分隔（与 `-target` 二选一）
+- `-target`: 单个目标 IP 或域名（与 `-ips` 二选一）
+- `-ips`: 多目标，逗号分隔，支持 IP/域名/CIDR（与 `-target` 二选一）
 - `-c`, `-concurrency`: 端口扫描并发数
 - `-rate`, `-ratelimit`: 端口扫描全局速率限制（每秒）
 - `-Pn`: 跳过 HostDiscovery，直接进入端口扫描
@@ -352,7 +360,7 @@ func main() {
 ```go
 batch, err := scanner.ScanTargets(context.Background(), []string{
     "192.168.1.10",
-    "192.168.1.11",
+    "192.168.1.0/30",
     "example.com",
 }, assetprobe.ScanCommonOptions{
     PortSpec:        "80,443",
@@ -371,6 +379,8 @@ for _, item := range batch.Results {
     fmt.Println(item.Result.Target, item.Result.Meta.OpenPorts)
 }
 ```
+
+`ScanTargets` 会在批量入口展开 CIDR 目标，并保持去重后的输入顺序返回结果。
 
 ### 6.3 首页识别调用
 

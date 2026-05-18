@@ -93,10 +93,11 @@ func runWeak(args []string) {
 		fmt.Println()
 		fmt.Println("示例:")
 		fmt.Println("  gomap weak -target example.com -ports 21,22,3306,5432,6379")
+		fmt.Println("  gomap weak -ips 192.168.1.10,192.168.1.0/30,example.com -ports 21,22,3306")
 	}
 
-	target := fs.String("target", "", "[必选，和 -ips 二选一] 扫描目标 IP 或域名")
-	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
+	target := fs.String("target", "", "[必选，和 -ips 二选一] 单个扫描目标 IP 或域名")
+	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔，支持 IP/域名/CIDR")
 	ports := fs.String("ports", "21,22,23,3306,5432,6379", "[可选] 端口表达式，例如 21,22,3306")
 	protocols := fs.String("protocols", "", "[可选] 仅探测指定协议，逗号分隔")
 	timeout := fs.Int("timeout", 1, "[可选] 资产发现与 secprobe 超时秒数")
@@ -202,11 +203,12 @@ func runPort(args []string) {
 		fmt.Println()
 		fmt.Println("示例:")
 		fmt.Println("  gomap port -target example.com -ports 1-1024")
+		fmt.Println("  gomap port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443")
 		fmt.Println("  gomap port -target example.com -ports 1-65535 -Pn")
 		fmt.Println("  gomap port -target example.com -ports 80,443,1-1024 -c 200 -rate 3000")
 	}
-	target := fs.String("target", "", "[必选，和 -ips 二选一] 扫描目标 IP 或域名")
-	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔")
+	target := fs.String("target", "", "[必选，和 -ips 二选一] 单个扫描目标 IP 或域名")
+	ips := fs.String("ips", "", "[必选，和 -target 二选一] 多个目标用逗号分隔，支持 IP/域名/CIDR")
 	ports := fs.String("ports", "80,443", "[可选] 端口表达式，例如 80,443,1-1024")
 	proto := fs.String("proto", "tcp", "[可选] 扫描协议: tcp|udp")
 	portConcurrency := fs.Int("concurrency", 200, "[可选] 端口扫描并发数")

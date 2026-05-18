@@ -44,7 +44,7 @@ if err != nil {
 // 多目标端口扫描
 batch, err := scanner.ScanTargets(context.Background(), []string{
     "192.168.1.10",
-    "192.168.1.11",
+    "192.168.1.0/30",
     "example.com",
 }, assetprobe.ScanCommonOptions{
     PortSpec:        "80,443,1-1024",
@@ -60,6 +60,9 @@ batch, err := scanner.ScanTargets(context.Background(), []string{
 if err != nil {
     panic(err)
 }
+
+// ScanTargets 支持在批量目标里混合传入 IP、域名和 CIDR，
+// CIDR 会在入口处展开为具体 IP 后再继续后续扫描流程。
 
 // 首页识别
 web, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -152,6 +153,14 @@ func TestNormalizeTargets(t *testing.T) {
 	}
 }
 
+func TestNormalizeTargetsExpandsCIDRAndDeduplicates(t *testing.T) {
+	got := normalizeTargets([]string{"127.0.0.0/30", "127.0.0.2", " example.com "})
+	want := []string{"127.0.0.0", "127.0.0.1", "127.0.0.2", "127.0.0.3", "example.com"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected targets:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
 func TestScanSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -252,6 +261,41 @@ func TestScanTargetsReturnsResultsInInputOrder(t *testing.T) {
 	}
 	if result.Results[0].Target != "example.com" || result.Results[1].Target != "127.0.0.1" {
 		t.Fatalf("unexpected result order: %#v", result.Results)
+	}
+}
+
+func TestScanTargetsExpandsCIDRTargets(t *testing.T) {
+	scanner, err := NewScanner(Options{Timeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{
+		"127.0.0.0/30",
+		"127.0.0.2",
+	}, ScanCommonOptions{
+		PortSpec:      "1",
+		Protocol:      ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{Disabled: true},
+	})
+	if err != nil {
+		t.Fatalf("unexpected batch error: %v", err)
+	}
+
+	wantTargets := []string{"127.0.0.0", "127.0.0.1", "127.0.0.2", "127.0.0.3"}
+	if len(result.Results) != len(wantTargets) {
+		t.Fatalf("expected %d results, got %d", len(wantTargets), len(result.Results))
+	}
+	for i, want := range wantTargets {
+		if result.Results[i].Target != want {
+			t.Fatalf("unexpected target at index %d: want %s, got %s", i, want, result.Results[i].Target)
+		}
+		if result.Results[i].Error != "" {
+			t.Fatalf("expected no error for %s, got %s", want, result.Results[i].Error)
+		}
+		if result.Results[i].Result == nil {
+			t.Fatalf("expected result for %s", want)
+		}
 	}
 }
 

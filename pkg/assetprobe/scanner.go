@@ -1470,18 +1470,54 @@ func normalizeTargets(targets []string) []string {
 
 	out := make([]string, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
+	add := func(target string) {
+		if _, ok := seen[target]; ok {
+			return
+		}
+		seen[target] = struct{}{}
+		out = append(out, target)
+	}
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
 		}
-		if _, ok := seen[target]; ok {
+		expanded := expandCIDRTarget(target)
+		if len(expanded) == 0 {
+			add(target)
 			continue
 		}
-		seen[target] = struct{}{}
-		out = append(out, target)
+		for _, item := range expanded {
+			add(item)
+		}
 	}
 	return out
+}
+
+func expandCIDRTarget(target string) []string {
+	if !strings.Contains(target, "/") {
+		return nil
+	}
+	ip, ipNet, err := net.ParseCIDR(target)
+	if err != nil {
+		return nil
+	}
+	current := append(net.IP(nil), ip.Mask(ipNet.Mask)...)
+	out := make([]string, 0, 8)
+	for ipNet.Contains(current) {
+		out = append(out, current.String())
+		incrementIP(current)
+	}
+	return out
+}
+
+func incrementIP(ip net.IP) {
+	for i := len(ip) - 1; i >= 0; i-- {
+		ip[i]++
+		if ip[i] != 0 {
+			return
+		}
+	}
 }
 
 func shuffleBatchJobs(jobs []batchJob) {
