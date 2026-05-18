@@ -141,7 +141,6 @@ go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
 默认行为说明：
 - `port` 模式默认会先执行 HostDiscovery，再进入正式 TCP 端口扫描
 - `-Pn` 会跳过 HostDiscovery，直接扫描端口，语义与 Nmap `-Pn` 对齐
-- `--host-discovery-mode` 支持 `icmp-echo,tcp-connect,tcp-syn,tcp-ack,arp`
 - 如果 HostDiscovery 没有获取到任何存活信号，则该目标会被跳过，不会继续执行完整端口扫描
 
 全端口直扫示例：
@@ -288,10 +287,6 @@ gomap port -target example.com -ports 6379,27017,11211,2181 -weak -weak-enable-u
 - `-c`, `-concurrency`: 端口扫描并发数
 - `-rate`, `-ratelimit`: 端口扫描全局速率限制（每秒）
 - `-Pn`: 跳过 HostDiscovery，直接进入端口扫描
-- `-host-discovery-mode`: 主机存活验证模式，支持 `icmp-echo,tcp-connect,tcp-syn,tcp-ack,arp`
-- `-host-discovery-timeout`: 主机存活验证超时秒数
-- `-host-discovery-retries`: 主机存活验证重试次数
-- `-host-discovery-ports`: TCP 类主机存活验证端口列表
 - `-include-headers`: `web` 模式返回响应头
 - `-max-body`: `web` 模式返回体最大字节数，`0` 表示完整 body
 - `-max-fp`: 最多做服务识别的开放端口数（默认 `50`，也支持 `-max-fingerprint-ports`）

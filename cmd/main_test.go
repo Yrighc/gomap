@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,8 +271,8 @@ func TestRunPortDefaultsToHostDiscovery(t *testing.T) {
 	if scanner.gotOpts.HostDiscovery.Disabled {
 		t.Fatal("expected host discovery enabled by default")
 	}
-	if len(scanner.gotOpts.HostDiscovery.Modes) == 0 {
-		t.Fatal("expected default host discovery modes to be forwarded")
+	if len(scanner.gotOpts.HostDiscovery.Modes) != 0 {
+		t.Fatalf("expected CLI to rely on scanner defaults for host discovery modes, got %v", scanner.gotOpts.HostDiscovery.Modes)
 	}
 }
 
@@ -298,6 +299,82 @@ func TestRunPortPnDisablesHostDiscovery(t *testing.T) {
 	}
 	if !scanner.gotOpts.HostDiscovery.Disabled {
 		t.Fatal("expected -Pn to disable host discovery")
+	}
+}
+
+func TestRunPortRejectsLegacyHostDiscoveryFlags(t *testing.T) {
+	_, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80", "-host-discovery-timeout", "2"})
+	})
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2 for unknown flag, got %d with stderr %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "flag provided but not defined") {
+		t.Fatalf("expected unknown flag error, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "host-discovery-timeout") {
+		t.Fatalf("expected stderr to mention removed host-discovery flag, got %s", stderr)
+	}
+}
+
+func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "192.108.0.1",
+				Result: &assetprobe.ScanResult{
+					Target:     "192.108.0.1",
+					ResolvedIP: "192.108.0.1",
+					Protocol:   assetprobe.ProtocolTCP,
+					Meta: assetprobe.ScanMeta{
+						OpenPorts: 0,
+					},
+					Ports: nil,
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWD)
+	}()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "192.108.0.1", "-ports", "443", "-csv", "-csv-mode", "overwrite"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if !strings.Contains(stdout, `"Target": "192.108.0.1"`) {
+		t.Fatalf("expected stdout to include target result, got %s", stdout)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "logs", "port.csv"))
+	if err != nil {
+		t.Fatalf("read port.csv: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected header plus one data row, got %d lines:\n%s", len(lines), string(data))
+	}
+	if !strings.Contains(lines[1], "192.108.0.1") {
+		t.Fatalf("expected csv row to contain target, got %s", lines[1])
+	}
+	if !strings.Contains(lines[1], ",0,0,0,false,") {
+		t.Fatalf("expected csv row to record zero-open-port meta, got %s", lines[1])
 	}
 }
 

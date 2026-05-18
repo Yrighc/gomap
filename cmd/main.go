@@ -217,10 +217,6 @@ func runPort(args []string) {
 	portRateLimitShort := fs.Int("rate", 0, "[可选] 端口扫描全局速率限制（每秒）")
 	timeout := fs.Int("timeout", 2, "[可选] 超时秒数")
 	disableHostDiscovery := fs.Bool("Pn", false, "[可选] 跳过 HostDiscovery，直接扫描端口（兼容 Nmap -Pn 语义）")
-	hostDiscoveryModes := fs.String("host-discovery-mode", "icmp-echo,tcp-connect", "[可选] 主机存活验证模式，支持 icmp-echo,tcp-connect,tcp-syn,tcp-ack,arp")
-	hostDiscoveryTimeout := fs.Int("host-discovery-timeout", 1, "[可选] 主机存活验证超时秒数")
-	hostDiscoveryRetries := fs.Int("host-discovery-retries", 1, "[可选] 主机存活验证重试次数")
-	hostDiscoveryPorts := fs.String("host-discovery-ports", "80,443,22,445,3389", "[可选] TCP 类主机存活验证端口，供 tcp-connect/tcp-syn/tcp-ack 使用")
 	maxFingerprintPorts := fs.Int("max-fp", 50, "[可选] 最多做服务识别的开放端口数")
 	maxFingerprintPortsLong := fs.Int("max-fingerprint-ports", 50, "[可选] 最多做服务识别的开放端口数")
 	honeypotOpenThreshold := fs.Int("honeypot-open-threshold", 100, "[可选] 疑似蜜罐判定最小开放端口数阈值")
@@ -275,25 +271,12 @@ func runPort(args []string) {
 		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
 		exitPort(1)
 	}
-	if *hostDiscoveryTimeout <= 0 {
-		fmt.Fprintln(os.Stderr, "host-discovery-timeout 必须大于 0")
-		exitPort(1)
-	}
-	if *hostDiscoveryRetries < 0 {
-		fmt.Fprintln(os.Stderr, "host-discovery-retries 不能小于 0")
-		exitPort(1)
-	}
-
 	protocol, err := resolvePortProtocol(*proto, *enableWeak)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		exitPort(1)
 	}
-	hostDiscovery, err := buildHostDiscoveryOptions(*disableHostDiscovery, *hostDiscoveryModes, *hostDiscoveryTimeout, *hostDiscoveryRetries, *hostDiscoveryPorts)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		exitPort(1)
-	}
+	hostDiscovery := assetprobe.HostDiscoveryOptions{Disabled: *disableHostDiscovery}
 
 	scanner, err := newPortTargetScanner(assetprobe.Options{
 		PortConcurrency: finalPortConcurrency,
@@ -372,6 +355,29 @@ func runPort(args []string) {
 
 		if csvWriter != nil {
 			now := time.Now().Format(csvTimeLayout)
+			if len(res.Ports) == 0 {
+				row := []string{
+					now,
+					res.Target,
+					res.ResolvedIP,
+					string(res.Protocol),
+					"",
+					"false",
+					"",
+					"",
+					"",
+					"",
+					"",
+					strconv.Itoa(res.Meta.OpenPorts),
+					strconv.Itoa(res.Meta.FingerprintedOpenPorts),
+					strconv.Itoa(res.Meta.SkippedFingerprintPorts),
+					strconv.FormatBool(res.Meta.SuspectedHoneypot),
+					res.Meta.HoneypotReason,
+				}
+				if err := csvWriter.Write(row); err != nil {
+					fmt.Fprintf(os.Stderr, "写入 port.csv 失败: %v\n", err)
+				}
+			}
 			for _, p := range res.Ports {
 				row := []string{
 					now,
@@ -816,80 +822,6 @@ func resolvePortProtocol(proto string, enableWeak bool) (assetprobe.Protocol, er
 	return protocol, nil
 }
 
-func buildHostDiscoveryOptions(disabled bool, modes string, timeoutSeconds int, retries int, ports string) (assetprobe.HostDiscoveryOptions, error) {
-	parsedPorts, err := parsePortList(ports)
-	if err != nil {
-		return assetprobe.HostDiscoveryOptions{}, err
-	}
-	modeValues := splitComma(modes)
-	parsedModes := make([]assetprobe.HostDiscoveryMode, 0, len(modeValues))
-	for _, mode := range modeValues {
-		parsedModes = append(parsedModes, assetprobe.HostDiscoveryMode(mode))
-	}
-	return assetprobe.HostDiscoveryOptions{
-		Disabled: disabled,
-		Modes:    parsedModes,
-		Timeout:  time.Duration(timeoutSeconds) * time.Second,
-		Retries:  retries,
-		Ports:    parsedPorts,
-	}, nil
-}
-
-func parsePortList(spec string) ([]int, error) {
-	if strings.TrimSpace(spec) == "" {
-		return nil, nil
-	}
-	segments := strings.Split(spec, ",")
-	seen := make(map[int]struct{}, len(segments))
-	out := make([]int, 0, len(segments))
-	for _, segment := range segments {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			continue
-		}
-		if strings.Contains(segment, "-") {
-			parts := strings.Split(segment, "-")
-			if len(parts) != 2 {
-				return nil, fmt.Errorf("invalid port range: %s", segment)
-			}
-			start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-			if err != nil {
-				return nil, fmt.Errorf("invalid start port: %s", segment)
-			}
-			end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-			if err != nil {
-				return nil, fmt.Errorf("invalid end port: %s", segment)
-			}
-			if start > end {
-				start, end = end, start
-			}
-			for p := start; p <= end; p++ {
-				if p < 1 || p > 65535 {
-					continue
-				}
-				if _, ok := seen[p]; ok {
-					continue
-				}
-				seen[p] = struct{}{}
-				out = append(out, p)
-			}
-			continue
-		}
-		p, err := strconv.Atoi(segment)
-		if err != nil {
-			return nil, fmt.Errorf("invalid port: %s", segment)
-		}
-		if p < 1 || p > 65535 {
-			continue
-		}
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		seen[p] = struct{}{}
-		out = append(out, p)
-	}
-	return out, nil
-}
 
 func marshalPortOutput(asset *assetprobe.ScanResult, security *secprobe.RunResult, pretty bool) ([]byte, error) {
 	if security == nil {
