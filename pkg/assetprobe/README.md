@@ -30,6 +30,12 @@ res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
     Protocol:        assetprobe.ProtocolTCP,
     PortConcurrency: 100,
     PortRateLimit:   1000,
+    HostDiscovery: assetprobe.HostDiscoveryOptions{
+        Modes:   []assetprobe.HostDiscoveryMode{"icmp-echo", "tcp-connect"},
+        Timeout: 1 * time.Second,
+        Retries: 1,
+        Ports:   "80,443,22,445,3389",
+    },
 })
 if err != nil {
     panic(err)
@@ -44,6 +50,12 @@ batch, err := scanner.ScanTargets(context.Background(), []string{
     PortSpec:        "80,443,1-1024",
     Protocol:        assetprobe.ProtocolTCP,
     PortConcurrency: 300, // 多目标时表示全局总并发
+    HostDiscovery: assetprobe.HostDiscoveryOptions{
+        Modes:   []assetprobe.HostDiscoveryMode{"icmp-echo", "tcp-connect"},
+        Timeout: 1 * time.Second,
+        Retries: 1,
+        Ports:   "80,443,22,445,3389",
+    },
 })
 if err != nil {
     panic(err)
