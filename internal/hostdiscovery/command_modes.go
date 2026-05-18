@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var execLookPath = exec.LookPath
@@ -23,10 +24,16 @@ func newNpingRunner(method string, baseArgs []string, opts Options) Runner {
 		if _, err := execLookPath("nping"); err != nil {
 			return Result{}, ErrModeUnavailable
 		}
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = time.Second
+		}
 		for _, port := range opts.Ports {
 			args := append([]string{}, baseArgs...)
 			args = append(args, "-c", "1", "-p", strconv.Itoa(port), ip)
-			out, err := execCommandContext(ctx, "nping", args...).CombinedOutput()
+			runCtx, cancel := context.WithTimeout(ctx, timeout)
+			out, err := execCommandContext(runCtx, "nping", args...).CombinedOutput()
+			cancel()
 			if err == nil && strings.Contains(string(out), "RCVD") {
 				return Result{Matched: true, Method: method}, nil
 			}
@@ -35,12 +42,18 @@ func newNpingRunner(method string, baseArgs []string, opts Options) Runner {
 	})
 }
 
-func newARPRunner(_ Options) Runner {
+func newARPRunner(opts Options) Runner {
 	return RunnerFunc(func(ctx context.Context, ip string) (Result, error) {
 		if _, err := execLookPath("arping"); err != nil {
 			return Result{}, ErrModeUnavailable
 		}
-		out, err := execCommandContext(ctx, "arping", "-c", "1", ip).CombinedOutput()
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = time.Second
+		}
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		out, err := execCommandContext(runCtx, "arping", "-c", "1", ip).CombinedOutput()
+		cancel()
 		if err != nil {
 			return Result{}, nil
 		}

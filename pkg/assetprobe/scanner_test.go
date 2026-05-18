@@ -23,6 +23,34 @@ func TestApplyDefaults(t *testing.T) {
 	if opts.Timeout != 2*time.Second {
 		t.Fatalf("unexpected default timeout: %s", opts.Timeout)
 	}
+	if opts.HostDiscovery.Disabled {
+		t.Fatal("expected host discovery enabled by default")
+	}
+	if len(opts.HostDiscovery.Modes) == 0 {
+		t.Fatal("expected default host discovery modes")
+	}
+	if len(opts.HostDiscovery.Ports) == 0 {
+		t.Fatal("expected default host discovery ports")
+	}
+}
+
+func TestZeroConfigScannerCanScanTCPWithoutHostDiscoveryConfigError(t *testing.T) {
+	scanner, err := NewScanner(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = scanner.Scan(context.Background(), ScanRequest{
+		Target:   "127.0.0.1",
+		PortSpec: "65001",
+		Protocol: ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{
+			Disabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected zero-config tcp scan error: %v", err)
+	}
 }
 
 func TestGetPortRateLimiterSharedByRate(t *testing.T) {

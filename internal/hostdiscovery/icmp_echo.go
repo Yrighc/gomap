@@ -2,20 +2,33 @@ package hostdiscovery
 
 import (
 	"context"
+	"time"
 
 	"github.com/yrighc/gomap/internal/achieve"
 )
 
-func newICMPEchoRunner(_ Options) Runner {
+func newICMPEchoRunner(opts Options) Runner {
 	return RunnerFunc(func(ctx context.Context, ip string) (Result, error) {
-		select {
-		case <-ctx.Done():
-			return Result{}, ctx.Err()
-		default:
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = time.Second
 		}
-		if achieve.PingHost(ip) {
+		pingCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		resultCh := make(chan bool, 1)
+		go func() {
+			resultCh <- achieve.PingHost(ip)
+		}()
+
+		select {
+		case <-pingCtx.Done():
+			return Result{}, pingCtx.Err()
+		case ok := <-resultCh:
+			if !ok {
+				return Result{}, nil
+			}
 			return Result{Matched: true, Method: "icmp-echo"}, nil
 		}
-		return Result{}, nil
 	})
 }

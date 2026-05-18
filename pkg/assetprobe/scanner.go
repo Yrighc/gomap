@@ -972,6 +972,18 @@ func applyDefaults(opts *Options) {
 	if opts.HoneypotOpenRatio <= 0 {
 		opts.HoneypotOpenRatio = 0.85
 	}
+	if len(opts.HostDiscovery.Modes) == 0 {
+		opts.HostDiscovery.Modes = []HostDiscoveryMode{HostDiscoveryICMPEcho, HostDiscoveryTCPConnect}
+	}
+	if opts.HostDiscovery.Timeout <= 0 {
+		opts.HostDiscovery.Timeout = time.Second
+	}
+	if opts.HostDiscovery.Retries <= 0 {
+		opts.HostDiscovery.Retries = 1
+	}
+	if len(opts.HostDiscovery.Ports) == 0 {
+		opts.HostDiscovery.Ports = []int{80, 443, 22, 445, 3389}
+	}
 }
 
 func getPortRateLimiter(rate int) *portRateLimiter {
