@@ -246,6 +246,61 @@ func TestMarshalPortOutputWithoutWeakKeepsAssetShape(t *testing.T) {
 	}
 }
 
+func TestRunPortDefaultsToHostDiscovery(t *testing.T) {
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s and stdout %s", exitCode, stderr, stdout)
+	}
+	if scanner.gotOpts.HostDiscovery.Disabled {
+		t.Fatal("expected host discovery enabled by default")
+	}
+	if len(scanner.gotOpts.HostDiscovery.Modes) == 0 {
+		t.Fatal("expected default host discovery modes to be forwarded")
+	}
+}
+
+func TestRunPortPnDisablesHostDiscovery(t *testing.T) {
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+
+	_, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80", "-Pn"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if !scanner.gotOpts.HostDiscovery.Disabled {
+		t.Fatal("expected -Pn to disable host discovery")
+	}
+}
+
 func TestResolvePortProtocolRejectsWeakOnUDP(t *testing.T) {
 	_, err := resolvePortProtocol("udp", true)
 	if err == nil {

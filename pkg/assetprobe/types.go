@@ -9,6 +9,29 @@ const (
 	ProtocolUDP Protocol = "udp"
 )
 
+type HostDiscoveryMode string
+
+const (
+	HostDiscoveryICMPEcho   HostDiscoveryMode = "icmp-echo"
+	HostDiscoveryTCPSYN     HostDiscoveryMode = "tcp-syn"
+	HostDiscoveryTCPACK     HostDiscoveryMode = "tcp-ack"
+	HostDiscoveryARP        HostDiscoveryMode = "arp"
+	HostDiscoveryTCPConnect HostDiscoveryMode = "tcp-connect"
+)
+
+type HostDiscoveryOptions struct {
+	// Disabled controls whether host discovery is skipped before TCP port scanning.
+	Disabled bool
+	// Modes defines the ordered host discovery probes to try.
+	Modes []HostDiscoveryMode
+	// Timeout is the per-mode discovery timeout.
+	Timeout time.Duration
+	// Retries controls mode-specific retry attempts.
+	Retries int
+	// Ports defines TCP-family discovery ports.
+	Ports []int
+}
+
 type Options struct {
 	// PortConcurrency 控制端口扫描阶段的并发 worker 数量。
 	PortConcurrency int
@@ -32,6 +55,8 @@ type Options struct {
 	ServicesFile string
 	// DisableLogging 控制是否完全关闭日志输出。
 	DisableLogging bool
+	// HostDiscovery 控制端口扫描前的主机存活验证行为。
+	HostDiscovery HostDiscoveryOptions
 }
 
 type ScanRequest struct {
@@ -55,6 +80,8 @@ type ScanRequest struct {
 	HoneypotOpenThreshold int
 	// HoneypotOpenRatio 用于覆盖疑似蜜罐判定的开放占比阈值。
 	HoneypotOpenRatio float64
+	// HostDiscovery 用于覆盖 Scanner 默认主机存活验证配置。
+	HostDiscovery HostDiscoveryOptions
 }
 
 // ScanCommonOptions 定义批量目标扫描时共享的一组扫描参数。
@@ -78,6 +105,8 @@ type ScanCommonOptions struct {
 	HoneypotOpenThreshold int
 	// HoneypotOpenRatio 用于覆盖疑似蜜罐判定的开放占比阈值。
 	HoneypotOpenRatio float64
+	// HostDiscovery 用于覆盖 Scanner 默认主机存活验证配置。
+	HostDiscovery HostDiscoveryOptions
 }
 
 type ScanResult struct {
