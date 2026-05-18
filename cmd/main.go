@@ -36,8 +36,8 @@ type weakTargetScanner interface {
 }
 
 type verboseEventWriter struct {
-	mu                         sync.Mutex
-	w                          io.Writer
+	mu                        sync.Mutex
+	w                         io.Writer
 	suppressHostDiscoveryLogs bool
 }
 

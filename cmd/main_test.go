@@ -422,24 +422,52 @@ func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
 }
 
 func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
-	scanner := &stubPortScanner{
-		batch: &assetprobe.BatchScanResult{
-			Results: []assetprobe.TargetScanResult{{
-				Target: "demo",
-				Result: &assetprobe.ScanResult{
-					Target:     "demo",
-					ResolvedIP: "127.0.0.1",
-					Protocol:   assetprobe.ProtocolTCP,
-					Ports: []assetprobe.PortResult{
-						{Port: 80, Open: true, Service: "http", Version: "nginx"},
-						{Port: 443, Open: true},
+	oldFactory := newPortTargetScanner
+	defer func() { newPortTargetScanner = oldFactory }()
+
+	newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
+		if opts.OnEvent != nil {
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventOpenPort,
+				Target:     "demo",
+				ResolvedIP: "127.0.0.1",
+				Protocol:   assetprobe.ProtocolTCP,
+				Port:       80,
+			})
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventServiceMatch,
+				Target:     "demo",
+				ResolvedIP: "127.0.0.1",
+				Protocol:   assetprobe.ProtocolTCP,
+				Port:       80,
+				Service:    "http",
+				Version:    "nginx",
+			})
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventOpenPort,
+				Target:     "demo",
+				ResolvedIP: "127.0.0.1",
+				Protocol:   assetprobe.ProtocolTCP,
+				Port:       443,
+			})
+		}
+		return &stubPortScanner{
+			batch: &assetprobe.BatchScanResult{
+				Results: []assetprobe.TargetScanResult{{
+					Target: "demo",
+					Result: &assetprobe.ScanResult{
+						Target:     "demo",
+						ResolvedIP: "127.0.0.1",
+						Protocol:   assetprobe.ProtocolTCP,
+						Ports: []assetprobe.PortResult{
+							{Port: 80, Open: true, Service: "http", Version: "nginx"},
+							{Port: 443, Open: true},
+						},
 					},
-				},
-			}},
-		},
+				}},
+			},
+		}, nil
 	}
-	restoreScanner := stubPortScannerFactory(scanner)
-	defer restoreScanner()
 
 	stdout, stderr, exitCode := capturePortRun(t, func() {
 		runPort([]string{"-target", "demo", "-ports", "80,443", "-v"})
@@ -450,7 +478,10 @@ func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
 	if !strings.Contains(stdout, `"Target": "demo"`) {
 		t.Fatalf("expected stdout to include json result, got %s", stdout)
 	}
-	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80 service=http version=nginx") {
+	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80") {
+		t.Fatalf("expected stderr to include localized open port log, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "发现服务命中 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80 service=http version=nginx") {
 		t.Fatalf("expected stderr to include localized service hit log, got %s", stderr)
 	}
 	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=443") {
