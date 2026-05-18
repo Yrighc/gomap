@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,10 +312,25 @@ func TestScanTargetsRunsHostDiscoveryConcurrentlyAndKeepsOrder(t *testing.T) {
 
 	started := make(chan string, 2)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseDiscovery := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(releaseDiscovery)
 	runHostDiscovery = func(ctx context.Context, ip string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
 		started <- ip
 		<-release
 		return hostdiscovery.Result{}, nil
+	}
+	waitForStarted := func(label string) string {
+		t.Helper()
+		select {
+		case ip := <-started:
+			return ip
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s host discovery to start", label)
+			return ""
+		}
 	}
 
 	scanner, err := NewScanner(Options{
@@ -340,12 +356,12 @@ func TestScanTargetsRunsHostDiscoveryConcurrentlyAndKeepsOrder(t *testing.T) {
 		done <- result
 	}()
 
-	first := <-started
-	second := <-started
+	first := waitForStarted("first")
+	second := waitForStarted("second")
 	if first == second {
 		t.Fatalf("expected two distinct targets to start discovery, got %q and %q", first, second)
 	}
-	close(release)
+	releaseDiscovery()
 
 	select {
 	case err := <-errCh:
