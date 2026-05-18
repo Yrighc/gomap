@@ -38,18 +38,6 @@ func Run(ctx context.Context, ip string, opts Options) (Result, error) {
 	return Result{}, nil
 }
 
-func newTCPSYNRunner(Options) Runner {
-	return unavailableRunner()
-}
-
-func newTCPACKRunner(Options) Runner {
-	return unavailableRunner()
-}
-
-func newARPRunner(Options) Runner {
-	return unavailableRunner()
-}
-
 func unavailableRunner() Runner {
 	return RunnerFunc(func(context.Context, string) (Result, error) {
 		return Result{}, ErrModeUnavailable
