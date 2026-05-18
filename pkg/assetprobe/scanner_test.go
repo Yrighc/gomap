@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/yrighc/gomap/internal/hostdiscovery"
 )
 
 func TestApplyDefaults(t *testing.T) {
@@ -300,5 +302,65 @@ func TestScanTargetsSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) 
 	}
 	if len(result.Results[0].Result.Ports) != 0 {
 		t.Fatalf("expected no ports after host discovery skip, got %+v", result.Results[0].Result.Ports)
+	}
+}
+
+func TestScanTargetsRunsHostDiscoveryConcurrentlyAndKeepsOrder(t *testing.T) {
+	origRunHostDiscovery := runHostDiscovery
+	t.Cleanup(func() { runHostDiscovery = origRunHostDiscovery })
+
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	runHostDiscovery = func(ctx context.Context, ip string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		started <- ip
+		<-release
+		return hostdiscovery.Result{}, nil
+	}
+
+	scanner, err := NewScanner(Options{
+		Timeout:         50 * time.Millisecond,
+		PortConcurrency: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan *BatchScanResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1", "127.0.0.2"}, ScanCommonOptions{
+			PortSpec:        "65001",
+			Protocol:        ProtocolTCP,
+			PortConcurrency: 2,
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		done <- result
+	}()
+
+	first := <-started
+	second := <-started
+	if first == second {
+		t.Fatalf("expected two distinct targets to start discovery, got %q and %q", first, second)
+	}
+	close(release)
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case result := <-done:
+		if len(result.Results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(result.Results))
+		}
+		if result.Results[0].Target != "127.0.0.1" || result.Results[1].Target != "127.0.0.2" {
+			t.Fatalf("unexpected result order: %#v", result.Results)
+		}
+		if result.Results[0].Result == nil || result.Results[1].Result == nil {
+			t.Fatalf("expected skipped targets to have empty results: %#v", result.Results)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ScanTargets")
 	}
 }

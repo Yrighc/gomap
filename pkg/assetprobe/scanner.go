@@ -234,35 +234,16 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	hostDiscovery := mergeHostDiscoveryOptions(s.opts.HostDiscovery, opts.HostDiscovery)
 
 	results := make([]TargetScanResult, len(normalized))
-	contexts := make([]*batchTargetContext, len(normalized))
-	for i, target := range normalized {
-		results[i].Target = target
-		resolvedIP, resolveErr := resolveTarget(target)
-		if resolveErr != nil {
-			results[i].Error = resolveErr.Error()
-			continue
-		}
-		if opts.Protocol == ProtocolTCP && !hostDiscovery.Disabled {
-			discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
-			if err != nil {
-				results[i].Error = err.Error()
-				continue
-			}
-			if !discoveryResult.Matched {
-				results[i].Result = emptyScanResult(target, resolvedIP, opts.Protocol)
-				continue
-			}
-		}
-
-		contexts[i] = &batchTargetContext{
-			index:      i,
-			target:     target,
-			resolvedIP: resolvedIP,
-			protocol:   opts.Protocol,
-			timeout:    timeout,
-			totalPorts: len(ports),
-		}
-	}
+	contexts := prepareBatchTargetContexts(
+		ctx,
+		normalized,
+		opts.Protocol,
+		hostDiscovery,
+		timeout,
+		len(ports),
+		portConcurrency,
+		results,
+	)
 
 	jobs := make([]batchJob, 0, len(normalized)*len(ports))
 	for idx, targetCtx := range contexts {
@@ -318,6 +299,72 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	}
 
 	return &BatchScanResult{Results: results}, nil
+}
+
+func prepareBatchTargetContexts(
+	ctx context.Context,
+	targets []string,
+	protocol Protocol,
+	hostDiscovery HostDiscoveryOptions,
+	timeout time.Duration,
+	totalPorts int,
+	concurrency int,
+	results []TargetScanResult,
+) []*batchTargetContext {
+	contexts := make([]*batchTargetContext, len(targets))
+	if len(targets) == 0 {
+		return contexts
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	if concurrency > len(targets) {
+		concurrency = len(targets)
+	}
+
+	jobs := make(chan int, len(targets))
+	for i := range targets {
+		jobs <- i
+	}
+	close(jobs)
+
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				target := targets[idx]
+				results[idx].Target = target
+				resolvedIP, resolveErr := resolveTarget(target)
+				if resolveErr != nil {
+					results[idx].Error = resolveErr.Error()
+					continue
+				}
+				if protocol == ProtocolTCP && !hostDiscovery.Disabled {
+					discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
+					if err != nil {
+						results[idx].Error = err.Error()
+						continue
+					}
+					if !discoveryResult.Matched {
+						results[idx].Result = emptyScanResult(target, resolvedIP, protocol)
+						continue
+					}
+				}
+				contexts[idx] = &batchTargetContext{
+					index:      idx,
+					target:     target,
+					resolvedIP: resolvedIP,
+					protocol:   protocol,
+					timeout:    timeout,
+					totalPorts: totalPorts,
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return contexts
 }
 
 // Probe 是单端口便捷封装，内部复用 Scan。
@@ -1058,7 +1105,7 @@ func toInternalHostDiscoveryOptions(opts HostDiscoveryOptions) hostdiscovery.Opt
 	}
 }
 
-func runHostDiscovery(ctx context.Context, resolvedIP string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
+var runHostDiscovery = func(ctx context.Context, resolvedIP string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
 	return hostdiscovery.Run(ctx, resolvedIP, toInternalHostDiscoveryOptions(opts))
 }
 
