@@ -38,14 +38,6 @@ func Run(ctx context.Context, ip string, opts Options) (Result, error) {
 	return Result{}, nil
 }
 
-func newTCPConnectRunner(Options) Runner {
-	return unavailableRunner()
-}
-
-func newICMPEchoRunner(Options) Runner {
-	return unavailableRunner()
-}
-
 func newTCPSYNRunner(Options) Runner {
 	return unavailableRunner()
 }
