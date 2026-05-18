@@ -4,6 +4,40 @@ import "time"
 
 type Protocol string
 
+type ScanEventKind string
+
+const (
+	ScanEventHostDiscoveryMatched    ScanEventKind = "host_discovery_matched"
+	ScanEventHostDiscoveryNotMatched ScanEventKind = "host_discovery_not_matched"
+	ScanEventHostDiscoverySummary    ScanEventKind = "host_discovery_summary"
+	ScanEventOpenPort                ScanEventKind = "open_port"
+	ScanEventServiceMatch            ScanEventKind = "service_match"
+)
+
+type ScanEvent struct {
+	Kind       ScanEventKind
+	Target     string
+	ResolvedIP string
+	Protocol   Protocol
+	Port       int
+	Service    string
+	Version    string
+	Method     string
+	Summary    *HostDiscoverySummary
+}
+
+type HostDiscoverySummary struct {
+	Total   int
+	Alive   []HostDiscoveryTarget
+	Skipped []HostDiscoveryTarget
+}
+
+type HostDiscoveryTarget struct {
+	Target     string
+	ResolvedIP string
+	Method     string
+}
+
 const (
 	ProtocolTCP Protocol = "tcp"
 	ProtocolUDP Protocol = "udp"
@@ -49,6 +83,8 @@ type Options struct {
 	HoneypotOpenRatio float64
 	// ConsoleLog 控制日志是否同时输出到控制台。
 	ConsoleLog bool
+	// OnEvent 在扫描过程中实时接收开放端口/服务命中等事件。
+	OnEvent func(ScanEvent)
 	// ProbesFile 是自定义服务探针文件路径，留空时使用仓库内默认探针。
 	ProbesFile string
 	// ServicesFile 是自定义服务映射文件路径，留空时使用仓库内默认映射。

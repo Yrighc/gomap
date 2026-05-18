@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strconv"
 	"sync"
@@ -110,6 +111,121 @@ func TestDiscoverTCPPortReturnsTrueForListeningPort(t *testing.T) {
 	}
 
 	<-done
+}
+
+func TestScanEmitsOpenPortEventBeforeReturning(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	doneAccept := make(chan struct{})
+	go func() {
+		defer close(doneAccept)
+		conn, err := ln.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+
+	events := make(chan ScanEvent, 1)
+	scanner, err := NewScanner(Options{
+		Timeout: 2 * time.Second,
+		OnEvent: func(evt ScanEvent) {
+			events <- evt
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		_, _ = scanner.Scan(context.Background(), ScanRequest{
+			Target:   "127.0.0.1",
+			Ports:    []int{ln.Addr().(*net.TCPAddr).Port},
+			Protocol: ProtocolTCP,
+			HostDiscovery: HostDiscoveryOptions{
+				Disabled: true,
+			},
+		})
+	}()
+
+	select {
+	case evt := <-events:
+		if evt.Kind != ScanEventOpenPort {
+			t.Fatalf("expected open port event, got %#v", evt)
+		}
+		if evt.Port != ln.Addr().(*net.TCPAddr).Port {
+			t.Fatalf("expected event port %d, got %d", ln.Addr().(*net.TCPAddr).Port, evt.Port)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected open port event before scan completion")
+	}
+
+	<-scanDone
+	<-doneAccept
+}
+
+func TestScanEmitsServiceMatchEventForHTTPServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "scanner-test")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan ScanEvent, 8)
+	scanner, err := NewScanner(Options{
+		Timeout: 2 * time.Second,
+		OnEvent: func(evt ScanEvent) {
+			events <- evt
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = scanner.Scan(context.Background(), ScanRequest{
+		Target:   u.Hostname(),
+		Ports:    []int{port},
+		Protocol: ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{
+			Disabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	found := false
+	for {
+		select {
+		case evt := <-events:
+			if evt.Kind == ScanEventServiceMatch && evt.Port == port {
+				found = true
+				if evt.Service == "" || evt.Service == "unknown" || evt.Service == "open" {
+					t.Fatalf("expected concrete service match, got %#v", evt)
+				}
+				return
+			}
+		default:
+			if !found {
+				t.Fatal("expected service match event")
+			}
+			return
+		}
+	}
 }
 
 func TestDetectHomepageWithOptions(t *testing.T) {
@@ -422,5 +538,48 @@ func TestScanTargetsRunsHostDiscoveryConcurrentlyAndKeepsOrder(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ScanTargets")
+	}
+}
+
+func TestScanEmitsHostDiscoveryMatchedEvent(t *testing.T) {
+	origRunHostDiscovery := runHostDiscovery
+	t.Cleanup(func() { runHostDiscovery = origRunHostDiscovery })
+
+	runHostDiscovery = func(ctx context.Context, ip string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		return hostdiscovery.Result{Matched: true, Method: "tcp-connect"}, nil
+	}
+
+	events := make(chan ScanEvent, 4)
+	scanner, err := NewScanner(Options{
+		Timeout: 100 * time.Millisecond,
+		OnEvent: func(evt ScanEvent) {
+			events <- evt
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = scanner.Scan(context.Background(), ScanRequest{
+		Target:   "127.0.0.1",
+		PortSpec: "1",
+		Protocol: ProtocolTCP,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for {
+		select {
+		case evt := <-events:
+			if evt.Kind == ScanEventHostDiscoveryMatched {
+				if evt.Method != "tcp-connect" {
+					t.Fatalf("expected method tcp-connect, got %#v", evt)
+				}
+				return
+			}
+		default:
+			t.Fatal("expected host discovery matched event")
+		}
 	}
 }

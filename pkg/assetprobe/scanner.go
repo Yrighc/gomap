@@ -62,6 +62,11 @@ type batchJob struct {
 	port        int
 }
 
+type batchPreparationResult struct {
+	contexts             []*batchTargetContext
+	hostDiscoverySummary *HostDiscoverySummary
+}
+
 // NewScanner 初始化探测所需资源（nmap 探针与服务字典），
 // 每个进程只加载一次，并返回可复用的扫描器实例。
 func NewScanner(opts Options) (*Scanner, error) {
@@ -75,6 +80,41 @@ func NewScanner(opts Options) (*Scanner, error) {
 		return nil, initErr
 	}
 	return &Scanner{opts: opts}, nil
+}
+
+func (s *Scanner) emitEvent(evt ScanEvent) {
+	if s == nil || s.opts.OnEvent == nil {
+		return
+	}
+	s.opts.OnEvent(evt)
+}
+
+func (s *Scanner) emitHostDiscoveryEvent(target, resolvedIP string, protocol Protocol, result hostdiscovery.Result) {
+	evt := ScanEvent{
+		Target:     target,
+		ResolvedIP: resolvedIP,
+		Protocol:   protocol,
+		Method:     result.Method,
+	}
+	if result.Matched {
+		evt.Kind = ScanEventHostDiscoveryMatched
+	} else {
+		evt.Kind = ScanEventHostDiscoveryNotMatched
+	}
+	s.emitEvent(evt)
+}
+
+func shouldEmitServiceMatch(service string) bool {
+	service = strings.TrimSpace(service)
+	if service == "" {
+		return false
+	}
+	switch service {
+	case "open", "unknown":
+		return false
+	default:
+		return true
+	}
 }
 
 // Scan 是资产探测的主流程入口：
@@ -140,6 +180,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		if err != nil {
 			return nil, err
 		}
+		s.emitHostDiscoveryEvent(targetHost, resolvedIP, req.Protocol, discoveryResult)
 		if !discoveryResult.Matched {
 			return emptyScanResult(targetHost, resolvedIP, req.Protocol), nil
 		}
@@ -158,7 +199,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		), nil
 	}
 
-	collected, discoveredOpen := scanTCPDiscoveryStage(ctx, resolvedIP, ports, timeout, portConcurrency, portRateLimit)
+	collected, discoveredOpen := s.scanTCPDiscoveryStage(ctx, targetHost, resolvedIP, ports, timeout, portConcurrency, portRateLimit)
 	fingerprintedCount := s.runTCPFingerprintStage(
 		ctx,
 		targetHost,
@@ -234,8 +275,9 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	hostDiscovery := mergeHostDiscoveryOptions(s.opts.HostDiscovery, opts.HostDiscovery)
 
 	results := make([]TargetScanResult, len(normalized))
-	contexts := prepareBatchTargetContexts(
+	prepared := prepareBatchTargetContexts(
 		ctx,
+		s,
 		normalized,
 		opts.Protocol,
 		hostDiscovery,
@@ -244,6 +286,13 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 		portConcurrency,
 		results,
 	)
+	contexts := prepared.contexts
+	if prepared.hostDiscoverySummary != nil && len(normalized) > 1 {
+		s.emitEvent(ScanEvent{
+			Kind:    ScanEventHostDiscoverySummary,
+			Summary: prepared.hostDiscoverySummary,
+		})
+	}
 
 	jobs := make([]batchJob, 0, len(normalized)*len(ports))
 	for idx, targetCtx := range contexts {
@@ -272,7 +321,7 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	if opts.Protocol == ProtocolUDP {
 		runBatchUDPStage(ctx, s, contexts, jobCh, timeout, portConcurrency, portRateLimit)
 	} else {
-		runBatchTCPDiscoveryStage(ctx, contexts, jobCh, timeout, portConcurrency, portRateLimit)
+		runBatchTCPDiscoveryStage(ctx, s, contexts, jobCh, timeout, portConcurrency, portRateLimit)
 		runBatchTCPFingerprintStage(ctx, s, contexts, timeout, portConcurrency, maxFingerprintPorts)
 	}
 
@@ -303,6 +352,7 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 
 func prepareBatchTargetContexts(
 	ctx context.Context,
+	s *Scanner,
 	targets []string,
 	protocol Protocol,
 	hostDiscovery HostDiscoveryOptions,
@@ -310,10 +360,11 @@ func prepareBatchTargetContexts(
 	totalPorts int,
 	concurrency int,
 	results []TargetScanResult,
-) []*batchTargetContext {
+) batchPreparationResult {
 	contexts := make([]*batchTargetContext, len(targets))
+	summary := &HostDiscoverySummary{Total: len(targets)}
 	if len(targets) == 0 {
-		return contexts
+		return batchPreparationResult{contexts: contexts, hostDiscoverySummary: summary}
 	}
 	if concurrency <= 0 {
 		concurrency = 1
@@ -329,6 +380,7 @@ func prepareBatchTargetContexts(
 	close(jobs)
 
 	var wg sync.WaitGroup
+	var resultsMu sync.Mutex
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -347,6 +399,21 @@ func prepareBatchTargetContexts(
 						results[idx].Error = err.Error()
 						continue
 					}
+					s.emitHostDiscoveryEvent(target, resolvedIP, protocol, discoveryResult)
+					targetSummary := HostDiscoveryTarget{
+						Target:     target,
+						ResolvedIP: resolvedIP,
+						Method:     discoveryResult.Method,
+					}
+					if discoveryResult.Matched {
+						resultsMu.Lock()
+						summary.Alive = append(summary.Alive, targetSummary)
+						resultsMu.Unlock()
+					} else {
+						resultsMu.Lock()
+						summary.Skipped = append(summary.Skipped, targetSummary)
+						resultsMu.Unlock()
+					}
 					if !discoveryResult.Matched {
 						results[idx].Result = emptyScanResult(target, resolvedIP, protocol)
 						continue
@@ -364,7 +431,7 @@ func prepareBatchTargetContexts(
 		}()
 	}
 	wg.Wait()
-	return contexts
+	return batchPreparationResult{contexts: contexts, hostDiscoverySummary: summary}
 }
 
 // Probe 是单端口便捷封装，内部复用 Scan。
@@ -508,6 +575,17 @@ func (s *Scanner) fingerprintTCPPort(
 	if dns != "" {
 		result.DNSNames = splitAndCleanDNS(dns)
 	}
+	if shouldEmitServiceMatch(result.Service) {
+		s.emitEvent(ScanEvent{
+			Kind:       ScanEventServiceMatch,
+			Target:     targetHost,
+			ResolvedIP: resolvedIP,
+			Protocol:   ProtocolTCP,
+			Port:       port,
+			Service:    result.Service,
+			Version:    result.Version,
+		})
+	}
 
 	return result
 }
@@ -558,8 +636,9 @@ func (s *Scanner) scanAllUDPPorts(
 	return collected
 }
 
-func scanTCPDiscoveryStage(
+func (s *Scanner) scanTCPDiscoveryStage(
 	ctx context.Context,
+	targetHost string,
 	resolvedIP string,
 	ports []int,
 	timeout time.Duration,
@@ -584,7 +663,17 @@ func scanTCPDiscoveryStage(
 				if err := waitPortRateLimit(ctx, portLimiter); err != nil {
 					return
 				}
-				results <- PortResult{Port: p, Open: discoverTCPPort(resolvedIP, p, timeout)}
+				open := discoverTCPPort(resolvedIP, p, timeout)
+				if open {
+					s.emitEvent(ScanEvent{
+						Kind:       ScanEventOpenPort,
+						Target:     targetHost,
+						ResolvedIP: resolvedIP,
+						Protocol:   ProtocolTCP,
+						Port:       p,
+					})
+				}
+				results <- PortResult{Port: p, Open: open}
 			}
 		}()
 	}
@@ -827,6 +916,7 @@ func runBatchUDPStage(
 
 func runBatchTCPDiscoveryStage(
 	ctx context.Context,
+	s *Scanner,
 	contexts []*batchTargetContext,
 	jobCh <-chan batchJob,
 	timeout time.Duration,
@@ -852,7 +942,17 @@ func runBatchTCPDiscoveryStage(
 				if targetCtx == nil {
 					continue
 				}
-				portResult := PortResult{Port: job.port, Open: discoverTCPPort(targetCtx.resolvedIP, job.port, timeout)}
+				open := discoverTCPPort(targetCtx.resolvedIP, job.port, timeout)
+				if open {
+					s.emitEvent(ScanEvent{
+						Kind:       ScanEventOpenPort,
+						Target:     targetCtx.target,
+						ResolvedIP: targetCtx.resolvedIP,
+						Protocol:   ProtocolTCP,
+						Port:       job.port,
+					})
+				}
+				portResult := PortResult{Port: job.port, Open: open}
 				targetCtx.mu.Lock()
 				targetCtx.collected = append(targetCtx.collected, portResult)
 				if portResult.Open {
@@ -936,7 +1036,7 @@ func runBatchTCPFingerprintStage(
 
 // scanUDPPort 基于 UDP 探针与匹配规则做服务识别。
 // UDP 不像 TCP 那样有稳定的建连语义，因此这里只要探针有有效响应，就视为开放并输出识别结果。
-func (s *Scanner) scanUDPPort(_ string, resolvedIP string, port int, timeout time.Duration) PortResult {
+func (s *Scanner) scanUDPPort(targetHost string, resolvedIP string, port int, timeout time.Duration) PortResult {
 	result := PortResult{Port: port}
 	address := net.JoinHostPort(resolvedIP, strconv.Itoa(port))
 	conn, err := net.DialTimeout("udp", address, timeout)
@@ -961,6 +1061,24 @@ func (s *Scanner) scanUDPPort(_ string, resolvedIP string, port int, timeout tim
 	result.Subject = achieve.SanitizeUTF8(subject)
 	if dns != "" {
 		result.DNSNames = splitAndCleanDNS(dns)
+	}
+	s.emitEvent(ScanEvent{
+		Kind:       ScanEventOpenPort,
+		Target:     targetHost,
+		ResolvedIP: resolvedIP,
+		Protocol:   ProtocolUDP,
+		Port:       port,
+	})
+	if shouldEmitServiceMatch(result.Service) {
+		s.emitEvent(ScanEvent{
+			Kind:       ScanEventServiceMatch,
+			Target:     targetHost,
+			ResolvedIP: resolvedIP,
+			Protocol:   ProtocolUDP,
+			Port:       port,
+			Service:    result.Service,
+			Version:    result.Version,
+		})
 	}
 	return result
 }

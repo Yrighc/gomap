@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +25,9 @@ type stubPortScanner struct {
 }
 
 type portExitCode int
+type weakExitCode int
+type webExitCode int
+type dirExitCode int
 
 func (s *stubPortScanner) ScanTargets(_ context.Context, targets []string, opts assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error) {
 	s.gotTargets = append([]string(nil), targets...)
@@ -247,6 +252,44 @@ func TestMarshalPortOutputWithoutWeakKeepsAssetShape(t *testing.T) {
 	}
 }
 
+func TestRunPortJLPrintsSingleLineJSON(t *testing.T) {
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 80, Open: true}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80", "-jl"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if strings.Contains(stdout, "\n  ") {
+		t.Fatalf("expected jsonl single-line output, got %q", stdout)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly one jsonl line, got %d in %q", len(lines), stdout)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &payload); err != nil {
+		t.Fatalf("expected valid single-line json, got %v in %q", err, stdout)
+	}
+}
+
 func TestRunPortDefaultsToHostDiscovery(t *testing.T) {
 	scanner := &stubPortScanner{
 		batch: &assetprobe.BatchScanResult{
@@ -378,6 +421,291 @@ func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
 	}
 }
 
+func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:     "demo",
+					ResolvedIP: "127.0.0.1",
+					Protocol:   assetprobe.ProtocolTCP,
+					Ports: []assetprobe.PortResult{
+						{Port: 80, Open: true, Service: "http", Version: "nginx"},
+						{Port: 443, Open: true},
+					},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "80,443", "-v"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, `"Target": "demo"`) {
+		t.Fatalf("expected stdout to include json result, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80 service=http version=nginx") {
+		t.Fatalf("expected stderr to include localized service hit log, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=443") {
+		t.Fatalf("expected stderr to include localized open port hit log, got %s", stderr)
+	}
+}
+
+func TestRunPortVerboseEmitsRealtimeOpenPortLog(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		conn, err := ln.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	oldExit := exitPort
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		exitPort = oldExit
+	}()
+
+	done := make(chan int, 1)
+	go func() {
+		exitCode := 0
+		defer func() {
+			if r := recover(); r != nil {
+				code, ok := r.(portExitCode)
+				if !ok {
+					panic(r)
+				}
+				exitCode = int(code)
+			}
+			done <- exitCode
+		}()
+		exitPort = func(code int) {
+			panic(portExitCode(code))
+		}
+		runPort([]string{
+			"-target", "127.0.0.1",
+			"-ports", strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
+			"-timeout", "1",
+			"-Pn",
+			"-v",
+		})
+	}()
+
+	stderrReady := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		n, _ := stderrR.Read(buf)
+		stderrReady <- string(buf[:n])
+	}()
+
+	select {
+	case firstChunk := <-stderrReady:
+		if !strings.Contains(firstChunk, "发现开放端口 target=127.0.0.1") {
+			t.Fatalf("expected realtime open port log, got %s", firstChunk)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected realtime stderr log before command completion")
+	}
+
+	exitCode := <-done
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if !strings.Contains(string(stdout), `"Target": "127.0.0.1"`) {
+		t.Fatalf("expected stdout json result, got %s", string(stdout))
+	}
+	<-accepted
+}
+
+func TestRunPortVerbosePrintsHostDiscoverySummaryForMultipleTargets(t *testing.T) {
+	oldFactory := newPortTargetScanner
+	defer func() { newPortTargetScanner = oldFactory }()
+
+	newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
+		if opts.OnEvent != nil {
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventHostDiscoveryMatched,
+				Target:     "127.0.0.1",
+				ResolvedIP: "127.0.0.1",
+				Method:     "tcp-connect",
+			})
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventOpenPort,
+				Target:     "127.0.0.1",
+				ResolvedIP: "127.0.0.1",
+				Protocol:   assetprobe.ProtocolTCP,
+				Port:       80,
+			})
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind: assetprobe.ScanEventHostDiscoverySummary,
+				Summary: &assetprobe.HostDiscoverySummary{
+					Total: 2,
+					Alive: []assetprobe.HostDiscoveryTarget{{
+						Target:     "127.0.0.1",
+						ResolvedIP: "127.0.0.1",
+						Method:     "tcp-connect",
+					}},
+					Skipped: []assetprobe.HostDiscoveryTarget{{
+						Target:     "127.0.0.2",
+						ResolvedIP: "127.0.0.2",
+					}},
+				},
+			})
+		}
+		return &stubPortScanner{
+			batch: &assetprobe.BatchScanResult{
+				Results: []assetprobe.TargetScanResult{
+					{
+						Target: "127.0.0.1",
+						Result: &assetprobe.ScanResult{
+							Target:     "127.0.0.1",
+							ResolvedIP: "127.0.0.1",
+							Protocol:   assetprobe.ProtocolTCP,
+						},
+					},
+					{
+						Target: "127.0.0.2",
+						Result: &assetprobe.ScanResult{
+							Target:     "127.0.0.2",
+							ResolvedIP: "127.0.0.2",
+							Protocol:   assetprobe.ProtocolTCP,
+						},
+					},
+				},
+			},
+		}, nil
+	}
+
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{
+			"-ips", "127.0.0.1,127.0.0.2",
+			"-ports", "1",
+			"-timeout", "1",
+			"-v",
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "主机存活校验完成：总数=2，存活=1，未存活=1") {
+		t.Fatalf("expected host discovery summary, got %s", stderr)
+	}
+	if strings.Contains(stderr, "发现主机存活") || strings.Contains(stderr, "未发现主机存活信号") {
+		t.Fatalf("expected multi-target verbose mode to suppress host discovery process logs, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "发现开放端口 target=127.0.0.1 resolved_ip=127.0.0.1 protocol=tcp port=80") {
+		t.Fatalf("expected open port logs to remain visible in multi-target mode, got %s", stderr)
+	}
+	if strings.Contains(stderr, "存活目标:") || strings.Contains(stderr, "未存活目标:") {
+		t.Fatalf("expected summary-only output without target detail lines, got %s", stderr)
+	}
+	if !strings.Contains(stdout, `"Target": "127.0.0.1"`) {
+		t.Fatalf("expected stdout json result, got %s", stdout)
+	}
+}
+
+func TestRunPortVerboseTreatsCIDRInputAsSummaryOnlyMode(t *testing.T) {
+	oldFactory := newPortTargetScanner
+	defer func() { newPortTargetScanner = oldFactory }()
+
+	newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
+		if opts.OnEvent != nil {
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind:       assetprobe.ScanEventHostDiscoveryNotMatched,
+				Target:     "192.168.0.250",
+				ResolvedIP: "192.168.0.250",
+			})
+			opts.OnEvent(assetprobe.ScanEvent{
+				Kind: assetprobe.ScanEventHostDiscoverySummary,
+				Summary: &assetprobe.HostDiscoverySummary{
+					Total: 256,
+					Alive: []assetprobe.HostDiscoveryTarget{{
+						Target:     "192.168.0.182",
+						ResolvedIP: "192.168.0.182",
+						Method:     "tcp-connect",
+					}},
+					Skipped: []assetprobe.HostDiscoveryTarget{{
+						Target:     "192.168.0.250",
+						ResolvedIP: "192.168.0.250",
+					}},
+				},
+			})
+		}
+		return &stubPortScanner{
+			batch: &assetprobe.BatchScanResult{
+				Results: []assetprobe.TargetScanResult{{
+					Target: "192.168.0.0/24",
+					Result: &assetprobe.ScanResult{
+						Target:     "192.168.0.0/24",
+						ResolvedIP: "192.168.0.182",
+						Protocol:   assetprobe.ProtocolTCP,
+					},
+				}},
+			},
+		}, nil
+	}
+
+	_, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{
+			"-target", "192.168.0.0/24",
+			"-ports", "1",
+			"-timeout", "1",
+			"-v",
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
+	}
+	if strings.Contains(stderr, "未发现主机存活信号 target=192.168.0.250") {
+		t.Fatalf("expected CIDR input to suppress per-target process logs, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "主机存活校验完成：总数=256，存活=1，未存活=1") {
+		t.Fatalf("expected CIDR summary log, got %s", stderr)
+	}
+	if strings.Contains(stderr, "存活目标:") || strings.Contains(stderr, "未存活目标:") {
+		t.Fatalf("expected CIDR summary-only output without target detail lines, got %s", stderr)
+	}
+}
+
 func TestResolvePortProtocolRejectsWeakOnUDP(t *testing.T) {
 	_, err := resolvePortProtocol("udp", true)
 	if err == nil {
@@ -397,6 +725,141 @@ func TestRunPortRejectsWeakOnUDP(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(stderr), []byte("weak 仅支持 tcp 扫描")) {
 		t.Fatalf("expected udp rejection message, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsInvalidPortRangeWithoutPanic(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "1--65535"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "ports 参数无效") {
+		t.Fatalf("expected friendly validation message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "端口范围格式错误") {
+		t.Fatalf("expected localized validation reason, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "1--65535") {
+		t.Fatalf("expected stderr to include invalid input, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "示例: 80,443,1-1024") {
+		t.Fatalf("expected stderr to include valid example, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsOutOfRangePortInChinese(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-ports", "70000"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "端口超出范围") {
+		t.Fatalf("expected localized out-of-range message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "70000") {
+		t.Fatalf("expected stderr to include invalid input, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsMissingTargetWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-ports", "80"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "target 参数缺失") {
+		t.Fatalf("expected unified missing-target message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "gomap port -target example.com") {
+		t.Fatalf("expected target example, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsInvalidTimeoutWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-timeout", "0"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "timeout 参数无效") {
+		t.Fatalf("expected unified timeout message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "必须大于 0") {
+		t.Fatalf("expected timeout reason, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "示例: -timeout 2") {
+		t.Fatalf("expected timeout example, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsInvalidCSVModeWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-csv", "-csv-mode", "bad"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "csv-mode 参数无效") {
+		t.Fatalf("expected unified csv-mode message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "append|overwrite") {
+		t.Fatalf("expected allowed values, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsInvalidProtoWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-proto", "bad"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "proto 参数无效") {
+		t.Fatalf("expected unified proto message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "tcp|udp") {
+		t.Fatalf("expected allowed proto values, got %s", stderr)
+	}
+}
+
+func TestRunPortRejectsInvalidHoneypotRatioWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-target", "demo", "-honeypot-open-ratio", "2"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "honeypot-open-ratio 参数无效") {
+		t.Fatalf("expected unified ratio message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "(0,1]") {
+		t.Fatalf("expected valid range hint, got %s", stderr)
 	}
 }
 
@@ -572,6 +1035,239 @@ func TestRunWeakForwardsUnauthorizedAndEnrichment(t *testing.T) {
 	}
 }
 
+func TestRunWeakJLPrintsSingleLineJSON(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:   "demo",
+					Protocol: assetprobe.ProtocolTCP,
+					Ports:    []assetprobe.PortResult{{Port: 6379, Open: true, Service: "redis"}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	runWeakProbe = func(_ context.Context, _ []secprobe.SecurityCandidate, _ secprobe.CredentialProbeOptions) secprobe.RunResult {
+		return secprobe.RunResult{Meta: secprobe.SecurityMeta{Candidates: 1}}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "6379", "-jl"})
+	})
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %s", stderr)
+	}
+	if strings.Contains(stdout, "\n  ") {
+		t.Fatalf("expected jsonl single-line output, got %q", stdout)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly one jsonl line, got %d in %q", len(lines), stdout)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &payload); err != nil {
+		t.Fatalf("expected valid single-line json, got %v in %q", err, stdout)
+	}
+}
+
+func TestRunWeakVerboseLogsMatchedFindingsToStderr(t *testing.T) {
+	scanner := &stubWeakScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "demo",
+				Result: &assetprobe.ScanResult{
+					Target:     "demo",
+					ResolvedIP: "127.0.0.1",
+					Protocol:   assetprobe.ProtocolTCP,
+					Ports:      []assetprobe.PortResult{{Port: 6379, Open: true, Service: "redis"}},
+				},
+			}},
+		},
+	}
+	restoreScanner := stubWeakScannerFactory(scanner)
+	defer restoreScanner()
+
+	oldWeakRunner := runWeakProbe
+	runWeakProbe = func(_ context.Context, _ []secprobe.SecurityCandidate, _ secprobe.CredentialProbeOptions) secprobe.RunResult {
+		return secprobe.RunResult{
+			Meta: secprobe.SecurityMeta{Candidates: 1, Attempted: 1, Succeeded: 1},
+			Results: []secprobe.SecurityResult{{
+				Target:      "demo",
+				ResolvedIP:  "127.0.0.1",
+				Port:        6379,
+				Service:     "redis",
+				ProbeKind:   secprobe.ProbeKindCredential,
+				FindingType: secprobe.FindingTypeCredentialValid,
+				Success:     true,
+				Username:    "default",
+				Password:    "default",
+			}},
+		}
+	}
+	defer func() {
+		runWeakProbe = oldWeakRunner
+	}()
+
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "6379", "-v"})
+	})
+	if !strings.Contains(stdout, `"Succeeded": 1`) {
+		t.Fatalf("expected stdout to include json result, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "发现弱口令命中 target=demo resolved_ip=127.0.0.1 service=redis port=6379 用户名=default 密码=default") {
+		t.Fatalf("expected stderr to include localized weak hit log, got %s", stderr)
+	}
+}
+
+func TestRunWeakRejectsInvalidPortRangeWithoutPanic(t *testing.T) {
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-ports", "1--65535"})
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "ports 参数无效") {
+		t.Fatalf("expected friendly validation message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "端口范围格式错误") {
+		t.Fatalf("expected localized validation reason, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "1--65535") {
+		t.Fatalf("expected stderr to include invalid input, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "示例: 80,443,1-1024") {
+		t.Fatalf("expected stderr to include valid example, got %s", stderr)
+	}
+}
+
+func TestRunWeakRejectsInvalidTimeoutWithUnifiedMessage(t *testing.T) {
+	stdout, stderr := captureWeakRun(t, func() {
+		runWeak([]string{"-target", "demo", "-timeout", "0"})
+	})
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "timeout 参数无效") {
+		t.Fatalf("expected unified timeout message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "必须大于 0") {
+		t.Fatalf("expected timeout reason, got %s", stderr)
+	}
+}
+
+func TestRunWebRejectsMissingURLWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := captureWebRun(t, func() {
+		runWeb([]string{})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "url 参数缺失") {
+		t.Fatalf("expected unified missing-url message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "gomap web -url https://example.com") {
+		t.Fatalf("expected URL example, got %s", stderr)
+	}
+}
+
+func TestRunDirRejectsMissingURLWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := captureDirRun(t, func() {
+		runDir([]string{})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "url 参数缺失") {
+		t.Fatalf("expected unified missing-url message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "gomap dir -url https://example.com") {
+		t.Fatalf("expected URL example, got %s", stderr)
+	}
+}
+
+func TestRunDirRejectsInvalidDictLevelWithUnifiedMessage(t *testing.T) {
+	stdout, stderr, exitCode := captureDirRun(t, func() {
+		runDir([]string{"-url", "https://example.com", "-dict", "bad"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d with stderr %s", exitCode, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
+	}
+	if !strings.Contains(stderr, "dict 参数无效") {
+		t.Fatalf("expected unified dict message, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "simple|normal|diff") {
+		t.Fatalf("expected allowed dict values, got %s", stderr)
+	}
+}
+
+func TestMarshalCLIJSONJLProducesSingleLine(t *testing.T) {
+	raw, err := marshalCLIJSON(map[string]any{
+		"target": "demo",
+		"ports":  []int{80, 443},
+	}, false)
+	if err != nil {
+		t.Fatalf("marshal cli json: %v", err)
+	}
+	if strings.Contains(string(raw), "\n") {
+		t.Fatalf("expected single-line json output, got %q", string(raw))
+	}
+}
+
+func TestRunWebJLPrintsSingleLineJSON(t *testing.T) {
+	page := &assetprobe.HomepageResult{
+		URL:   "https://example.com",
+		Title: "Example",
+		Response: assetprobe.HomepageResponse{
+			Header: assetprobe.HomepageResponseHeader{
+				StatusCode: 200,
+			},
+		},
+	}
+	raw, err := marshalCLIJSON(page, false)
+	if err != nil {
+		t.Fatalf("marshal homepage json: %v", err)
+	}
+	if strings.Contains(string(raw), "\n") {
+		t.Fatalf("expected single-line homepage json, got %q", string(raw))
+	}
+}
+
+func TestRunDirJLPrintsSingleLineJSON(t *testing.T) {
+	res := &assetprobe.DirResult{
+		Target:     "example.com",
+		ResolvedIP: "93.184.216.34",
+		Port:       443,
+		Paths: []assetprobe.PathResult{{
+			URL:        "https://example.com/admin",
+			StatusCode: 200,
+		}},
+	}
+	raw, err := marshalCLIJSON(res, false)
+	if err != nil {
+		t.Fatalf("marshal dir json: %v", err)
+	}
+	if strings.Contains(string(raw), "\n") {
+		t.Fatalf("expected single-line dir json, got %q", string(raw))
+	}
+}
+
 func capturePortRun(t *testing.T, fn func()) (string, string, int) {
 	t.Helper()
 
@@ -659,6 +1355,7 @@ func captureWeakRun(t *testing.T, fn func()) (string, string) {
 
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
+	oldExit := exitWeak
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
@@ -673,9 +1370,23 @@ func captureWeakRun(t *testing.T, fn func()) (string, string) {
 	defer func() {
 		os.Stdout = oldStdout
 		os.Stderr = oldStderr
+		exitWeak = oldExit
 	}()
 
-	fn()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_, ok := r.(weakExitCode)
+				if !ok {
+					panic(r)
+				}
+			}
+		}()
+		exitWeak = func(code int) {
+			panic(weakExitCode(code))
+		}
+		fn()
+	}()
 
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
@@ -692,6 +1403,120 @@ func captureWeakRun(t *testing.T, fn func()) (string, string) {
 		t.Fatalf("read stderr: %v", err)
 	}
 	return string(stdout), string(stderr)
+}
+
+func captureWebRun(t *testing.T, fn func()) (string, string, int) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	oldExit := exitWeb
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	exitCode := 0
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		exitWeb = oldExit
+	}()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				code, ok := r.(webExitCode)
+				if !ok {
+					panic(r)
+				}
+				exitCode = int(code)
+			}
+		}()
+		exitWeb = func(code int) {
+			panic(webExitCode(code))
+		}
+		fn()
+	}()
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	stderr, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(stdout), string(stderr), exitCode
+}
+
+func captureDirRun(t *testing.T, fn func()) (string, string, int) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	oldExit := exitDir
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	exitCode := 0
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		exitDir = oldExit
+	}()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				code, ok := r.(dirExitCode)
+				if !ok {
+					panic(r)
+				}
+				exitCode = int(code)
+			}
+		}()
+		exitDir = func(code int) {
+			panic(dirExitCode(code))
+		}
+		fn()
+	}()
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	stdout, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	stderr, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(stdout), string(stderr), exitCode
 }
 
 func stubWeakScannerFactory(scanner weakTargetScanner) func() {

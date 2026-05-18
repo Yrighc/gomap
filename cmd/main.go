@@ -7,11 +7,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yrighc/gomap/pkg/assetprobe"
@@ -33,6 +35,12 @@ type weakTargetScanner interface {
 	ScanTargets(context.Context, []string, assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error)
 }
 
+type verboseEventWriter struct {
+	mu                         sync.Mutex
+	w                          io.Writer
+	suppressHostDiscoveryLogs bool
+}
+
 var newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
 	return assetprobe.NewScanner(opts)
 }
@@ -52,6 +60,86 @@ var runWeakProbe = func(ctx context.Context, candidates []secprobe.SecurityCandi
 }
 
 var exitPort = os.Exit
+var exitWeak = os.Exit
+var exitWeb = os.Exit
+var exitDir = os.Exit
+
+func newVerboseEventWriter(w io.Writer, suppressHostDiscoveryLogs bool) *verboseEventWriter {
+	if w == nil {
+		return nil
+	}
+	return &verboseEventWriter{w: w, suppressHostDiscoveryLogs: suppressHostDiscoveryLogs}
+}
+
+func (v *verboseEventWriter) handleAssetEvent(evt assetprobe.ScanEvent) {
+	if v == nil || v.w == nil {
+		return
+	}
+	if v.suppressHostDiscoveryLogs {
+		switch evt.Kind {
+		case assetprobe.ScanEventHostDiscoveryMatched, assetprobe.ScanEventHostDiscoveryNotMatched:
+			return
+		}
+	}
+	line := formatAssetEventLog(evt)
+	if line == "" {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	fmt.Fprintln(v.w, line)
+}
+
+func formatAssetEventLog(evt assetprobe.ScanEvent) string {
+	switch evt.Kind {
+	case assetprobe.ScanEventHostDiscoveryMatched:
+		return fmt.Sprintf(
+			"发现主机存活 target=%s resolved_ip=%s method=%s",
+			evt.Target,
+			evt.ResolvedIP,
+			evt.Method,
+		)
+	case assetprobe.ScanEventHostDiscoveryNotMatched:
+		return fmt.Sprintf(
+			"未发现主机存活信号 target=%s resolved_ip=%s，跳过端口扫描",
+			evt.Target,
+			evt.ResolvedIP,
+		)
+	case assetprobe.ScanEventHostDiscoverySummary:
+		if evt.Summary == nil {
+			return ""
+		}
+		return fmt.Sprintf(
+			"主机存活校验完成：总数=%d，存活=%d，未存活=%d",
+			evt.Summary.Total,
+			len(evt.Summary.Alive),
+			len(evt.Summary.Skipped),
+		)
+	case assetprobe.ScanEventOpenPort:
+		return fmt.Sprintf(
+			"发现开放端口 target=%s resolved_ip=%s protocol=%s port=%d",
+			evt.Target,
+			evt.ResolvedIP,
+			evt.Protocol,
+			evt.Port,
+		)
+	case assetprobe.ScanEventServiceMatch:
+		line := fmt.Sprintf(
+			"发现服务命中 target=%s resolved_ip=%s protocol=%s port=%d service=%s",
+			evt.Target,
+			evt.ResolvedIP,
+			evt.Protocol,
+			evt.Port,
+			evt.Service,
+		)
+		if evt.Version != "" {
+			line += fmt.Sprintf(" version=%s", evt.Version)
+		}
+		return line
+	default:
+		return ""
+	}
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -108,42 +196,53 @@ func runWeak(args []string) {
 	enableUnauthorized := fs.Bool("enable-unauth", false, "[可选] 启用未授权访问探测")
 	enableEnrichment := fs.Bool("enable-enrichment", false, "[可选] 为命中结果追加补充信息")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	jsonLines := fs.Bool("jl", false, "[可选] 最终结果按单行 JSON 输出（JSONL）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		exitWeak(2)
 	}
 
 	targets := collectTargets(*target, *ips)
 	if len(targets) == 0 {
-		fmt.Fprintln(os.Stderr, "target 不能为空，例如: gomap weak -target example.com 或 -ips 1.1.1.1,example.com")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, formatRequiredArgError("target", "gomap weak -target example.com 或 -ips 1.1.1.1,example.com"))
+		exitWeak(1)
+	}
+	if err := validatePortFlag(*ports); err != nil {
+		fmt.Fprintln(os.Stderr, formatPortValidationError(err))
+		exitWeak(1)
 	}
 	if *timeout <= 0 {
-		fmt.Fprintln(os.Stderr, "timeout 必须大于 0")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("timeout", *timeout, "-timeout 1"))
+		exitWeak(1)
 	}
 	if *weakConcurrency <= 0 {
-		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("weak-concurrency", *weakConcurrency, "-weak-concurrency 10"))
+		exitWeak(1)
 	}
 
 	creds, err := collectCredentials(*inlineCreds, *credFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWeak(1)
 	}
 
 	discoveryTimeout := time.Duration(*timeout) * time.Second
+	eventWriter := newVerboseEventWriter(os.Stderr, isBatchTargetInput(*target, *ips))
 	scanner, err := newWeakTargetScanner(assetprobe.Options{
 		Timeout:    discoveryTimeout,
 		ConsoleLog: *verbose,
+		OnEvent: func(evt assetprobe.ScanEvent) {
+			if *verbose {
+				eventWriter.handleAssetEvent(evt)
+			}
+		},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWeak(1)
 	}
 
 	batchRes, err := scanner.ScanTargets(context.Background(), targets, assetprobe.ScanCommonOptions{
@@ -153,6 +252,13 @@ func runWeak(args []string) {
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "batch scan finished with error: %v\n", err)
+		if batchRes == nil {
+			exitWeak(1)
+		}
+	}
+	if batchRes == nil {
+		fmt.Fprintln(os.Stderr, "batch scan finished with no results")
+		exitWeak(1)
 	}
 
 	secprobeOpts := secprobe.CredentialProbeOptions{
@@ -179,10 +285,13 @@ func runWeak(args []string) {
 	}
 
 	result := runWeakProbe(context.Background(), candidates, secprobeOpts)
-	output, err := result.ToJSON(true)
+	if *verbose {
+		printVerboseWeakFindings(os.Stderr, result.Results)
+	}
+	output, err := result.ToJSON(!*jsonLines)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWeak(1)
 	}
 	fmt.Println(string(output))
 }
@@ -224,6 +333,7 @@ func runPort(args []string) {
 	enableCSV := fs.Bool("csv", false, "[可选] 将扫描结果写入 logs/port.csv")
 	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	jsonLines := fs.Bool("jl", false, "[可选] 最终结果按单行 JSON 输出（JSONL）")
 	enableWeak := fs.Bool("weak", false, "[可选] 在端口扫描后执行账号口令探测")
 	weakProtocols := fs.String("weak-protocols", "", "[可选] 限定 weak 探测协议，逗号分隔")
 	weakConcurrency := fs.Int("weak-concurrency", 10, "[可选] weak 探测并发数")
@@ -240,15 +350,23 @@ func runPort(args []string) {
 
 	targets := collectTargets(*target, *ips)
 	if len(targets) == 0 {
-		fmt.Fprintln(os.Stderr, "target 不能为空，例如: gomap port -target example.com 或 -ips 1.1.1.1,example.com")
+		fmt.Fprintln(os.Stderr, formatRequiredArgError("target", "gomap port -target example.com 或 -ips 1.1.1.1,example.com"))
+		exitPort(1)
+	}
+	if err := validatePortFlag(*ports); err != nil {
+		fmt.Fprintln(os.Stderr, formatPortValidationError(err))
+		exitPort(1)
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("timeout", *timeout, "-timeout 2"))
 		exitPort(1)
 	}
 	if *honeypotOpenThreshold <= 0 {
-		fmt.Fprintln(os.Stderr, "honeypot-open-threshold 必须大于 0")
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("honeypot-open-threshold", *honeypotOpenThreshold, "-honeypot-open-threshold 100"))
 		exitPort(1)
 	}
 	if *honeypotOpenRatio <= 0 || *honeypotOpenRatio > 1 {
-		fmt.Fprintln(os.Stderr, "honeypot-open-ratio 必须在 (0,1] 范围内，例如 0.85")
+		fmt.Fprintln(os.Stderr, formatRangeArgError("honeypot-open-ratio", fmt.Sprintf("%g", *honeypotOpenRatio), "(0,1]", "-honeypot-open-ratio 0.85"))
 		exitPort(1)
 	}
 	finalPortConcurrency := *portConcurrency
@@ -256,7 +374,7 @@ func runPort(args []string) {
 		finalPortConcurrency = *portConcurrencyShort
 	}
 	if finalPortConcurrency <= 0 {
-		fmt.Fprintln(os.Stderr, "concurrency 必须大于 0")
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("concurrency", finalPortConcurrency, "-concurrency 200"))
 		exitPort(1)
 	}
 	finalPortRateLimit := *portRateLimit
@@ -264,11 +382,15 @@ func runPort(args []string) {
 		finalPortRateLimit = *portRateLimitShort
 	}
 	if finalPortRateLimit < 0 {
-		fmt.Fprintln(os.Stderr, "ratelimit 不能小于 0")
+		fmt.Fprintln(os.Stderr, formatNonNegativeArgError("ratelimit", finalPortRateLimit, "-ratelimit 3000"))
 		exitPort(1)
 	}
 	if *enableWeak && *weakConcurrency <= 0 {
-		fmt.Fprintln(os.Stderr, "weak-concurrency 必须大于 0")
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("weak-concurrency", *weakConcurrency, "-weak-concurrency 10"))
+		exitPort(1)
+	}
+	if err := validateEnumArg("proto", *proto, []string{"tcp", "udp"}, "-proto tcp"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		exitPort(1)
 	}
 	protocol, err := resolvePortProtocol(*proto, *enableWeak)
@@ -277,6 +399,7 @@ func runPort(args []string) {
 		exitPort(1)
 	}
 	hostDiscovery := assetprobe.HostDiscoveryOptions{Disabled: *disableHostDiscovery}
+	eventWriter := newVerboseEventWriter(os.Stderr, isBatchTargetInput(*target, *ips))
 
 	scanner, err := newPortTargetScanner(assetprobe.Options{
 		PortConcurrency: finalPortConcurrency,
@@ -284,6 +407,11 @@ func runPort(args []string) {
 		Timeout:         time.Duration(*timeout) * time.Second,
 		ConsoleLog:      *verbose,
 		HostDiscovery:   hostDiscovery,
+		OnEvent: func(evt assetprobe.ScanEvent) {
+			if *verbose {
+				eventWriter.handleAssetEvent(evt)
+			}
+		},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -301,7 +429,7 @@ func runPort(args []string) {
 		csvFile, csvWriter, err = openCSVWriter(filepath.Join("logs", "port.csv"), *csvMode, header)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			exitPort(1)
 		}
 		defer csvFile.Close()
 		defer csvWriter.Flush()
@@ -325,6 +453,13 @@ func runPort(args []string) {
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "batch scan finished with error: %v\n", err)
+		if batchRes == nil {
+			exitPort(1)
+		}
+	}
+	if batchRes == nil {
+		fmt.Fprintln(os.Stderr, "batch scan finished with no results")
+		exitPort(1)
 	}
 
 	for _, item := range batchRes.Results {
@@ -349,8 +484,7 @@ func runPort(args []string) {
 			)
 			security = runPortWeakProbe(context.Background(), res, weakOpts)
 		}
-
-		output, _ := marshalPortOutput(res, security, true)
+		output, _ := marshalPortOutput(res, security, !*jsonLines)
 		fmt.Println(string(output))
 
 		if csvWriter != nil {
@@ -428,21 +562,26 @@ func runWeb(args []string) {
 	enableCSV := fs.Bool("csv", false, "[可选] 将识别结果写入 logs/web.csv")
 	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	jsonLines := fs.Bool("jl", false, "[可选] 最终结果按单行 JSON 输出（JSONL）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		exitWeb(2)
 	}
 
 	if strings.TrimSpace(*rawURL) == "" {
-		fmt.Fprintln(os.Stderr, "url 不能为空，例如: gomap web -url https://example.com")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, formatRequiredArgError("url", "gomap web -url https://example.com"))
+		exitWeb(1)
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("timeout", *timeout, "-timeout 5"))
+		exitWeb(1)
 	}
 	if *maxBodyBytes < 0 {
-		fmt.Fprintln(os.Stderr, "max-body 不能小于 0")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, formatNonNegativeArgError("max-body", *maxBodyBytes, "-max-body 0"))
+		exitWeb(1)
 	}
 
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
@@ -451,7 +590,7 @@ func runWeb(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWeb(1)
 	}
 
 	page, err := scanner.DetectHomepageWithOptions(context.Background(), *rawURL, assetprobe.HomepageOptions{
@@ -460,10 +599,10 @@ func runWeb(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitWeb(1)
 	}
 
-	output, _ := json.MarshalIndent(page, "", "  ")
+	output, _ := marshalCLIJSON(page, !*jsonLines)
 	fmt.Println(string(output))
 
 	if *enableCSV {
@@ -471,7 +610,7 @@ func runWeb(args []string) {
 		csvFile, csvWriter, err := openCSVWriter(filepath.Join("logs", "web.csv"), *csvMode, header)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			exitWeb(1)
 		}
 		defer csvFile.Close()
 
@@ -517,12 +656,25 @@ func runDir(args []string) {
 	enableCSV := fs.Bool("csv", false, "[可选] 将目录爆破结果写入 logs/dir.csv")
 	csvMode := fs.String("csv-mode", "append", "[可选] CSV 写入模式: append|overwrite")
 	verbose := fs.Bool("v", false, "[可选] 控制台实时打印日志（同时保留 logs 文件）")
+	jsonLines := fs.Bool("jl", false, "[可选] 最终结果按单行 JSON 输出（JSONL）")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		exitDir(2)
+	}
+	if strings.TrimSpace(*rawURL) == "" {
+		fmt.Fprintln(os.Stderr, formatRequiredArgError("url", "gomap dir -url https://example.com"))
+		exitDir(1)
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("timeout", *timeout, "-timeout 3"))
+		exitDir(1)
+	}
+	if err := validateEnumArg("dict", *dictLevel, []string{"simple", "normal", "diff"}, "-dict normal"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		exitDir(1)
 	}
 
 	scanner, err := assetprobe.NewScanner(assetprobe.Options{
@@ -531,7 +683,7 @@ func runDir(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitDir(1)
 	}
 
 	res, err := scanner.ScanDirectories(context.Background(), *rawURL, assetprobe.DirBruteOptions{
@@ -543,10 +695,10 @@ func runDir(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitDir(1)
 	}
 
-	output, _ := json.MarshalIndent(res, "", "  ")
+	output, _ := marshalCLIJSON(res, !*jsonLines)
 	fmt.Println(string(output))
 
 	if *enableCSV {
@@ -557,7 +709,7 @@ func runDir(args []string) {
 		csvFile, csvWriter, err := openCSVWriter(filepath.Join("logs", "dir.csv"), *csvMode, header)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			exitDir(1)
 		}
 		defer csvFile.Close()
 
@@ -619,7 +771,7 @@ func openCSVWriter(path, mode string, header []string) (*os.File, *csv.Writer, e
 		mode = "append"
 	}
 	if mode != "append" && mode != "overwrite" {
-		return nil, nil, fmt.Errorf("无效 csv-mode: %s（仅支持 append|overwrite）", mode)
+		return nil, nil, fmt.Errorf("csv-mode 参数无效: 仅支持 append|overwrite，当前值: %s。示例: -csv-mode append", mode)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -691,6 +843,143 @@ func parseURLTarget(raw string) (string, int, error) {
 	}
 }
 
+func printVerboseWeakFindings(w io.Writer, results []secprobe.SecurityResult) {
+	if w == nil {
+		return
+	}
+	for _, item := range results {
+		if !item.Success {
+			continue
+		}
+		prefix := "发现弱口令命中"
+		if item.FindingType == secprobe.FindingTypeUnauthorizedAccess || item.ProbeKind == secprobe.ProbeKindUnauthorized {
+			prefix = "发现未授权访问命中"
+		}
+		line := fmt.Sprintf(
+			"%s target=%s resolved_ip=%s service=%s port=%d",
+			prefix,
+			item.Target,
+			item.ResolvedIP,
+			item.Service,
+			item.Port,
+		)
+		if item.Username != "" {
+			line += fmt.Sprintf(" 用户名=%s", item.Username)
+		}
+		if item.Password != "" {
+			line += fmt.Sprintf(" 密码=%s", item.Password)
+		}
+		if item.Evidence != "" {
+			line += fmt.Sprintf(" 证据=%s", item.Evidence)
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+func validatePortFlag(spec string) error {
+	for _, segment := range strings.Split(spec, ",") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if strings.Contains(segment, "-") {
+			parts := strings.Split(segment, "-")
+			if len(parts) != 2 {
+				return newPortValidationError("端口范围格式错误", segment)
+			}
+			if _, err := validatePortBoundary(parts[0], "start", segment); err != nil {
+				return err
+			}
+			if _, err := validatePortBoundary(parts[1], "end", segment); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := validatePortBoundary(segment, "", segment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePortBoundary(raw, position, segment string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		switch position {
+		case "start":
+			return 0, newPortValidationError("起始端口格式错误", segment)
+		case "end":
+			return 0, newPortValidationError("结束端口格式错误", segment)
+		default:
+			return 0, newPortValidationError("端口格式错误", segment)
+		}
+	}
+	if port < 1 || port > 65535 {
+		if position == "" {
+			return 0, newPortValidationError("端口超出范围", segment)
+		}
+		switch position {
+		case "start":
+			return 0, newPortValidationError("起始端口超出范围", segment)
+		case "end":
+			return 0, newPortValidationError("结束端口超出范围", segment)
+		default:
+			return 0, newPortValidationError("端口超出范围", segment)
+		}
+	}
+	return port, nil
+}
+
+func formatPortValidationError(err error) string {
+	var portErr *portValidationError
+	if errors.As(err, &portErr) {
+		return fmt.Sprintf("ports 参数无效: %s：%s。示例: 80,443,1-1024", portErr.Reason, portErr.Input)
+	}
+	return fmt.Sprintf("ports 参数无效: %v。示例: 80,443,1-1024", err)
+}
+
+func formatRequiredArgError(name, example string) string {
+	return fmt.Sprintf("%s 参数缺失。示例: %s", name, example)
+}
+
+func formatPositiveArgError(name string, value int, example string) string {
+	return fmt.Sprintf("%s 参数无效: 必须大于 0，当前值: %d。示例: %s", name, value, example)
+}
+
+func formatNonNegativeArgError(name string, value int, example string) string {
+	return fmt.Sprintf("%s 参数无效: 不能小于 0，当前值: %d。示例: %s", name, value, example)
+}
+
+func formatRangeArgError(name, value, validRange, example string) string {
+	return fmt.Sprintf("%s 参数无效: 必须在 %s 范围内，当前值: %s。示例: %s", name, validRange, value, example)
+}
+
+func validateEnumArg(name, value string, allowed []string, example string) error {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, item := range allowed {
+		if normalized == item {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s 参数无效: 仅支持 %s，当前值: %s。示例: %s", name, strings.Join(allowed, "|"), value, example)
+}
+
+type portValidationError struct {
+	Reason string
+	Input  string
+}
+
+func (e *portValidationError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Reason, e.Input)
+}
+
+func newPortValidationError(reason, input string) error {
+	return &portValidationError{
+		Reason: reason,
+		Input:  input,
+	}
+}
+
 func printRootUsage() {
 	fmt.Println("GoMap 资产探测 CLI")
 	fmt.Println()
@@ -730,6 +1019,14 @@ func collectTargets(target, ips string) []string {
 		add(item)
 	}
 	return out
+}
+
+func isBatchTargetInput(target, ips string) bool {
+	if strings.TrimSpace(ips) != "" {
+		return true
+	}
+	target = strings.TrimSpace(target)
+	return strings.Contains(target, "/")
 }
 
 func collectCredentials(inline, file string) ([]secprobe.Credential, error) {
@@ -821,7 +1118,6 @@ func resolvePortProtocol(proto string, enableWeak bool) (assetprobe.Protocol, er
 	}
 	return protocol, nil
 }
-
 
 func marshalPortOutput(asset *assetprobe.ScanResult, security *secprobe.RunResult, pretty bool) ([]byte, error) {
 	if security == nil {
