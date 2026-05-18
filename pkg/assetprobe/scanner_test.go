@@ -56,6 +56,30 @@ func TestWaitPortRateLimitRespectsContext(t *testing.T) {
 	}
 }
 
+func TestDiscoverTCPPortReturnsTrueForListeningPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+
+	addr := ln.Addr().(*net.TCPAddr)
+	if !discoverTCPPort("127.0.0.1", addr.Port, time.Second) {
+		t.Fatal("expected listening port to be discovered as open")
+	}
+
+	<-done
+}
+
 func TestDetectHomepageWithOptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
