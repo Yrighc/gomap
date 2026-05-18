@@ -24,6 +24,7 @@ import (
 	"github.com/yrighc/gomap/config/service"
 	"github.com/yrighc/gomap/internal/achieve"
 	"github.com/yrighc/gomap/internal/crawlweb"
+	"github.com/yrighc/gomap/internal/hostdiscovery"
 	"github.com/yrighc/gomap/internal/tcpservices"
 	"github.com/yrighc/gomap/internal/updservices"
 )
@@ -131,6 +132,16 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	honeypotOpenRatio := s.opts.HoneypotOpenRatio
 	if req.HoneypotOpenRatio > 0 {
 		honeypotOpenRatio = req.HoneypotOpenRatio
+	}
+	hostDiscovery := mergeHostDiscoveryOptions(s.opts.HostDiscovery, req.HostDiscovery)
+	if req.Protocol == ProtocolTCP && !hostDiscovery.Disabled {
+		discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
+		if err != nil {
+			return nil, err
+		}
+		if !discoveryResult.Matched {
+			return emptyScanResult(targetHost, resolvedIP, req.Protocol), nil
+		}
 	}
 	// 为 TCP 指纹识别准备“令牌桶”。
 	// 端口连通后，只有拿到令牌的开放端口才会继续做深度服务识别。
@@ -285,6 +296,7 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	if opts.HoneypotOpenRatio > 0 {
 		honeypotOpenRatio = opts.HoneypotOpenRatio
 	}
+	hostDiscovery := mergeHostDiscoveryOptions(s.opts.HostDiscovery, opts.HostDiscovery)
 
 	results := make([]TargetScanResult, len(normalized))
 	contexts := make([]*batchTargetContext, len(normalized))
@@ -294,6 +306,17 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 		if resolveErr != nil {
 			results[i].Error = resolveErr.Error()
 			continue
+		}
+		if opts.Protocol == ProtocolTCP && !hostDiscovery.Disabled {
+			discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
+			if err != nil {
+				results[i].Error = err.Error()
+				continue
+			}
+			if !discoveryResult.Matched {
+				results[i].Result = emptyScanResult(target, resolvedIP, opts.Protocol)
+				continue
+			}
 		}
 
 		var fingerprintSlots chan struct{}
@@ -383,7 +406,10 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	wg.Wait()
 
 	for i, targetCtx := range contexts {
-		if results[i].Error != "" || targetCtx == nil {
+		if results[i].Error != "" || results[i].Result != nil {
+			continue
+		}
+		if targetCtx == nil {
 			if results[i].Error == "" {
 				results[i].Error = "target context not initialized"
 			}
@@ -713,6 +739,60 @@ func waitPortRateLimit(ctx context.Context, limiter *portRateLimiter) error {
 		return ctx.Err()
 	case <-limiter.ticker.C:
 		return nil
+	}
+}
+
+func mergeHostDiscoveryOptions(base, override HostDiscoveryOptions) HostDiscoveryOptions {
+	merged := base
+	if override.Disabled {
+		merged.Disabled = true
+	}
+	if len(override.Modes) > 0 {
+		merged.Modes = append([]HostDiscoveryMode(nil), override.Modes...)
+	}
+	if override.Timeout > 0 {
+		merged.Timeout = override.Timeout
+	}
+	if override.Retries > 0 {
+		merged.Retries = override.Retries
+	}
+	if len(override.Ports) > 0 {
+		merged.Ports = append([]int(nil), override.Ports...)
+	}
+	if len(merged.Modes) > 0 {
+		merged.Modes = append([]HostDiscoveryMode(nil), merged.Modes...)
+	}
+	if len(merged.Ports) > 0 {
+		merged.Ports = append([]int(nil), merged.Ports...)
+	}
+	return merged
+}
+
+func toInternalHostDiscoveryOptions(opts HostDiscoveryOptions) hostdiscovery.Options {
+	modes := make([]string, 0, len(opts.Modes))
+	for _, mode := range opts.Modes {
+		modes = append(modes, string(mode))
+	}
+	ports := append([]int(nil), opts.Ports...)
+	return hostdiscovery.Options{
+		Modes:   modes,
+		Timeout: opts.Timeout,
+		Retries: opts.Retries,
+		Ports:   ports,
+	}
+}
+
+func runHostDiscovery(ctx context.Context, resolvedIP string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
+	return hostdiscovery.Run(ctx, resolvedIP, toInternalHostDiscoveryOptions(opts))
+}
+
+func emptyScanResult(target, resolvedIP string, protocol Protocol) *ScanResult {
+	return &ScanResult{
+		Target:     target,
+		ResolvedIP: resolvedIP,
+		Protocol:   protocol,
+		Meta:       ScanMeta{},
+		Ports:      nil,
 	}
 }
 

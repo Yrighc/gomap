@@ -2,8 +2,10 @@ package assetprobe
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -95,6 +97,49 @@ func TestNormalizeTargets(t *testing.T) {
 	}
 }
 
+func TestScanSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	scanner, err := NewScanner(Options{
+		Timeout: 100 * time.Millisecond,
+		HostDiscovery: HostDiscoveryOptions{
+			Modes: []HostDiscoveryMode{HostDiscoveryTCPConnect},
+			Ports: []int{65001},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.Scan(context.Background(), ScanRequest{
+		Target:   "127.0.0.1",
+		PortSpec: strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
+		Protocol: ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{
+			Modes:   []HostDiscoveryMode{HostDiscoveryTCPConnect},
+			Timeout: 20 * time.Millisecond,
+			Ports:   []int{65001},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Ports) != 0 {
+		t.Fatalf("expected no ports after host discovery skip, got %+v", result.Ports)
+	}
+}
+
 func TestScanTargetsKeepsOrderAndPerTargetErrors(t *testing.T) {
 	scanner, err := NewScanner(Options{Timeout: 500 * time.Millisecond})
 	if err != nil {
@@ -105,8 +150,9 @@ func TestScanTargetsKeepsOrderAndPerTargetErrors(t *testing.T) {
 		"127.0.0.1",
 		"invalid.invalid",
 	}, ScanCommonOptions{
-		PortSpec: "1",
-		Protocol: ProtocolTCP,
+		PortSpec:      "1",
+		Protocol:      ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{Disabled: true},
 	})
 	if err != nil {
 		t.Fatalf("unexpected batch error: %v", err)
@@ -141,6 +187,7 @@ func TestScanTargetsReturnsResultsInInputOrder(t *testing.T) {
 		PortSpec:        "1",
 		Protocol:        ProtocolTCP,
 		PortConcurrency: 4,
+		HostDiscovery:   HostDiscoveryOptions{Disabled: true},
 	})
 	if err != nil {
 		t.Fatalf("unexpected batch error: %v", err)
@@ -150,5 +197,56 @@ func TestScanTargetsReturnsResultsInInputOrder(t *testing.T) {
 	}
 	if result.Results[0].Target != "example.com" || result.Results[1].Target != "127.0.0.1" {
 		t.Fatalf("unexpected result order: %#v", result.Results)
+	}
+}
+
+func TestScanTargetsSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	scanner, err := NewScanner(Options{
+		Timeout: 100 * time.Millisecond,
+		HostDiscovery: HostDiscoveryOptions{
+			Modes: []HostDiscoveryMode{HostDiscoveryTCPConnect},
+			Ports: []int{65001},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1"}, ScanCommonOptions{
+		PortSpec: strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
+		Protocol: ProtocolTCP,
+		HostDiscovery: HostDiscoveryOptions{
+			Modes:   []HostDiscoveryMode{HostDiscoveryTCPConnect},
+			Timeout: 20 * time.Millisecond,
+			Ports:   []int{65001},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected batch error: %v", err)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 batch result, got %d", len(result.Results))
+	}
+	if result.Results[0].Error != "" {
+		t.Fatalf("expected no per-target error, got %s", result.Results[0].Error)
+	}
+	if result.Results[0].Result == nil {
+		t.Fatal("expected target result")
+	}
+	if len(result.Results[0].Result.Ports) != 0 {
+		t.Fatalf("expected no ports after host discovery skip, got %+v", result.Results[0].Result.Ports)
 	}
 }
