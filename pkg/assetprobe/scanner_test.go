@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,6 +56,197 @@ func TestZeroConfigScannerCanScanTCPWithoutHostDiscoveryConfigError(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("unexpected zero-config tcp scan error: %v", err)
+	}
+}
+
+func TestScanCanDisableServiceFingerprint(t *testing.T) {
+	port, accepted := startControlledTCPListener(t)
+	scanner, err := NewScanner(Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.Scan(context.Background(), ScanRequest{
+		Target:                    "127.0.0.1",
+		Ports:                     []int{port},
+		Protocol:                  ProtocolTCP,
+		DisableServiceFingerprint: true,
+		HostDiscovery:             controlledHostDiscovery(port),
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	assertPortOnlyResult(t, result, port)
+	waitForAcceptedConnections(t, accepted, 2)
+	if got := accepted.Load(); got != 2 {
+		t.Fatalf("expected host and port discovery to open 2 connections, got %d", got)
+	}
+}
+
+func TestScanDefaultsToServiceFingerprint(t *testing.T) {
+	port, accepted := startControlledTCPListener(t)
+	scanner, err := NewScanner(Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.Scan(context.Background(), ScanRequest{
+		Target:        "127.0.0.1",
+		Ports:         []int{port},
+		Protocol:      ProtocolTCP,
+		HostDiscovery: controlledHostDiscovery(port),
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	assertFingerprintResult(t, result, port)
+	waitForAcceptedConnections(t, accepted, 3)
+}
+
+func TestScanTargetsCanDisableServiceFingerprint(t *testing.T) {
+	port, accepted := startControlledTCPListener(t)
+	scanner, err := NewScanner(Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1", "localhost"}, ScanCommonOptions{
+		Ports:                     []int{port},
+		Protocol:                  ProtocolTCP,
+		PortConcurrency:           2,
+		DisableServiceFingerprint: true,
+		HostDiscovery:             controlledHostDiscovery(port),
+	})
+	if err != nil {
+		t.Fatalf("batch scan failed: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 batch results, got %d", len(result.Results))
+	}
+	for _, targetResult := range result.Results {
+		if targetResult.Error != "" {
+			t.Fatalf("target %s failed: %s", targetResult.Target, targetResult.Error)
+		}
+		assertPortOnlyResult(t, targetResult.Result, port)
+	}
+	waitForAcceptedConnections(t, accepted, 4)
+	if got := accepted.Load(); got != 4 {
+		t.Fatalf("expected host and port discovery connections for each target, got %d", got)
+	}
+}
+
+func TestScanTargetsDefaultToServiceFingerprint(t *testing.T) {
+	port, accepted := startControlledTCPListener(t)
+	scanner, err := NewScanner(Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1", "localhost"}, ScanCommonOptions{
+		Ports:           []int{port},
+		Protocol:        ProtocolTCP,
+		PortConcurrency: 2,
+		HostDiscovery:   controlledHostDiscovery(port),
+	})
+	if err != nil {
+		t.Fatalf("batch scan failed: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("expected 2 batch results, got %d", len(result.Results))
+	}
+	for _, targetResult := range result.Results {
+		if targetResult.Error != "" {
+			t.Fatalf("target %s failed: %s", targetResult.Target, targetResult.Error)
+		}
+		assertFingerprintResult(t, targetResult.Result, port)
+	}
+	waitForAcceptedConnections(t, accepted, 6)
+}
+
+func controlledHostDiscovery(port int) HostDiscoveryOptions {
+	return HostDiscoveryOptions{
+		Modes:   []HostDiscoveryMode{HostDiscoveryTCPConnect},
+		Timeout: time.Second,
+		Ports:   []int{port},
+	}
+}
+
+func startControlledTCPListener(t *testing.T) (int, *atomic.Int32) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := &atomic.Int32{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			_, _ = conn.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n"))
+			_ = conn.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-done
+	})
+
+	return ln.Addr().(*net.TCPAddr).Port, accepted
+}
+
+func waitForAcceptedConnections(t *testing.T, accepted *atomic.Int32, want int32) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for accepted.Load() < want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := accepted.Load(); got < want {
+		t.Fatalf("expected at least %d accepted connections, got %d", want, got)
+	}
+}
+
+func assertPortOnlyResult(t *testing.T, result *ScanResult, port int) {
+	t.Helper()
+
+	if result == nil {
+		t.Fatal("expected scan result")
+	}
+	if result.Meta.OpenPorts != 1 || result.Meta.FingerprintedOpenPorts != 0 || result.Meta.SkippedFingerprintPorts != 1 {
+		t.Fatalf("unexpected port-only statistics: %#v", result.Meta)
+	}
+	if len(result.Ports) != 1 || result.Ports[0].Port != port || !result.Ports[0].Open {
+		t.Fatalf("unexpected open port result: %#v", result.Ports)
+	}
+	got := result.Ports[0]
+	if got.Service != "" || got.Version != "" || got.Banner != "" || got.Subject != "" || len(got.DNSNames) != 0 {
+		t.Fatalf("expected no service fingerprint fields, got %#v", got)
+	}
+}
+
+func assertFingerprintResult(t *testing.T, result *ScanResult, port int) {
+	t.Helper()
+
+	if result == nil {
+		t.Fatal("expected scan result")
+	}
+	if result.Meta.OpenPorts != 1 || result.Meta.FingerprintedOpenPorts != 1 || result.Meta.SkippedFingerprintPorts != 0 {
+		t.Fatalf("unexpected fingerprint statistics: %#v", result.Meta)
+	}
+	if len(result.Ports) != 1 || result.Ports[0].Port != port || !result.Ports[0].Open {
+		t.Fatalf("unexpected open port result: %#v", result.Ports)
+	}
+	got := result.Ports[0]
+	if got.Service == "" || got.Service == "open" || got.Service == "unknown" || got.Banner == "" {
+		t.Fatalf("expected service fingerprint fields, got %#v", got)
 	}
 }
 
