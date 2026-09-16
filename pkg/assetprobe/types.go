@@ -112,6 +112,8 @@ type ScanRequest struct {
 	Timeout time.Duration
 	// MaxFingerprintPorts 用于覆盖最多参与服务识别的开放端口数量。
 	MaxFingerprintPorts int
+	// DisableServiceFingerprint 控制是否跳过 TCP 服务指纹阶段，仅返回端口发现结果。
+	DisableServiceFingerprint bool
 	// HoneypotOpenThreshold 用于覆盖疑似蜜罐判定的开放端口数量阈值。
 	HoneypotOpenThreshold int
 	// HoneypotOpenRatio 用于覆盖疑似蜜罐判定的开放占比阈值。
@@ -137,6 +139,8 @@ type ScanCommonOptions struct {
 	Timeout time.Duration
 	// MaxFingerprintPorts 用于覆盖最多参与服务识别的开放端口数量。
 	MaxFingerprintPorts int
+	// DisableServiceFingerprint 控制是否跳过 TCP 服务指纹阶段，仅返回端口发现结果。
+	DisableServiceFingerprint bool
 	// HoneypotOpenThreshold 用于覆盖疑似蜜罐判定的开放端口数量阈值。
 	HoneypotOpenThreshold int
 	// HoneypotOpenRatio 用于覆盖疑似蜜罐判定的开放占比阈值。

@@ -200,16 +200,19 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 
 	collected, discoveredOpen := s.scanTCPDiscoveryStage(ctx, targetHost, resolvedIP, ports, timeout, portConcurrency, portRateLimit)
-	fingerprintedCount := s.runTCPFingerprintStage(
-		ctx,
-		targetHost,
-		resolvedIP,
-		timeout,
-		portConcurrency,
-		maxFingerprintPorts,
-		discoveredOpen,
-		collected,
-	)
+	fingerprintedCount := 0
+	if !req.DisableServiceFingerprint {
+		fingerprintedCount = s.runTCPFingerprintStage(
+			ctx,
+			targetHost,
+			resolvedIP,
+			timeout,
+			portConcurrency,
+			maxFingerprintPorts,
+			discoveredOpen,
+			collected,
+		)
+	}
 
 	return buildScanResult(
 		targetHost,
@@ -322,7 +325,9 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 		runBatchUDPStage(ctx, s, contexts, jobCh, timeout, portConcurrency, portRateLimit)
 	} else {
 		runBatchTCPDiscoveryStage(ctx, s, contexts, jobCh, timeout, portConcurrency, portRateLimit)
-		runBatchTCPFingerprintStage(ctx, s, contexts, timeout, portConcurrency, maxFingerprintPorts)
+		if !opts.DisableServiceFingerprint {
+			runBatchTCPFingerprintStage(ctx, s, contexts, timeout, portConcurrency, maxFingerprintPorts)
+		}
 	}
 
 	for i, targetCtx := range contexts {
