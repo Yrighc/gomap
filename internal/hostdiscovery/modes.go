@@ -6,10 +6,15 @@ import (
 )
 
 type Options struct {
-	Modes   []string
+	// Modes is an explicit, ordered probe list. Empty selects the internal
+	// target-aware automatic policy.
+	Modes []string
+	// Timeout limits one ICMP/ARP round or one TCP port attempt.
 	Timeout time.Duration
+	// Retries is the maximum total number of normally completed no-signal rounds per explicit mode or automatic policy round.
 	Retries int
-	Ports   []int
+	// Ports contains the TCP-family ports attempted in each round.
+	Ports []int
 }
 
 type Result struct {

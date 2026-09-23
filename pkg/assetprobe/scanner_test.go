@@ -2,18 +2,21 @@ package assetprobe
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/yrighc/gomap/internal/hostdiscovery"
+	"github.com/yrighc/gomap/internal/updservices"
 )
 
 func TestApplyDefaults(t *testing.T) {
@@ -32,11 +35,45 @@ func TestApplyDefaults(t *testing.T) {
 	if opts.HostDiscovery.Disabled {
 		t.Fatal("expected host discovery enabled by default")
 	}
-	if len(opts.HostDiscovery.Modes) == 0 {
-		t.Fatal("expected default host discovery modes")
+	if opts.HostDiscovery.Modes != nil {
+		t.Fatalf("expected automatic host discovery defaults, got explicit modes: %#v", opts.HostDiscovery.Modes)
 	}
 	if len(opts.HostDiscovery.Ports) == 0 {
 		t.Fatal("expected default host discovery ports")
+	}
+}
+
+func TestMergeHostDiscoveryOptionsDistinguishesInheritedAndExplicitAutomaticModes(t *testing.T) {
+	base := HostDiscoveryOptions{
+		Modes: []HostDiscoveryMode{HostDiscoveryICMPEcho, HostDiscoveryTCPConnect},
+	}
+
+	inherited := mergeHostDiscoveryOptions(base, HostDiscoveryOptions{})
+	if !reflect.DeepEqual(inherited.Modes, base.Modes) {
+		t.Fatalf("nil Modes should inherit scanner configuration: %#v", inherited.Modes)
+	}
+
+	automatic := mergeHostDiscoveryOptions(base, HostDiscoveryOptions{Modes: []HostDiscoveryMode{}})
+	if automatic.Modes == nil || len(automatic.Modes) != 0 {
+		t.Fatalf("non-nil empty Modes should select automatic policy: %#v", automatic.Modes)
+	}
+}
+
+func TestMergeHostDiscoveryOptionsClonesInheritedEmptySlices(t *testing.T) {
+	baseModes := make([]HostDiscoveryMode, 0, 1)
+	basePorts := make([]int, 0, 1)
+	merged := mergeHostDiscoveryOptions(HostDiscoveryOptions{
+		Modes: baseModes,
+		Ports: basePorts,
+	}, HostDiscoveryOptions{})
+
+	merged.Modes = append(merged.Modes, HostDiscoveryICMPEcho)
+	merged.Ports = append(merged.Ports, 443)
+	if got := baseModes[:1][0]; got != "" {
+		t.Fatalf("merged empty Modes shares base backing array: %q", got)
+	}
+	if got := basePorts[:1][0]; got != 0 {
+		t.Fatalf("merged empty Ports shares base backing array: %d", got)
 	}
 }
 
@@ -470,26 +507,19 @@ func TestNormalizeTargetsExpandsCIDRAndDeduplicates(t *testing.T) {
 }
 
 func TestScanSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
+	original := runHostDiscovery
+	runHostDiscovery = func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		return hostdiscovery.Result{}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
 
-	go func() {
-		conn, err := ln.Accept()
-		if err == nil {
-			conn.Close()
-		}
-	}()
-
-	scanner, err := NewScanner(Options{
-		Timeout: 100 * time.Millisecond,
-		HostDiscovery: HostDiscoveryOptions{
-			Modes: []HostDiscoveryMode{HostDiscoveryTCPConnect},
-			Ports: []int{65001},
-		},
-	})
+	scanner, err := NewScanner(Options{Timeout: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,11 +528,6 @@ func TestScanSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
 		Target:   "127.0.0.1",
 		PortSpec: strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
 		Protocol: ProtocolTCP,
-		HostDiscovery: HostDiscoveryOptions{
-			Modes:   []HostDiscoveryMode{HostDiscoveryTCPConnect},
-			Timeout: 20 * time.Millisecond,
-			Ports:   []int{65001},
-		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -608,26 +633,19 @@ func TestScanTargetsExpandsCIDRTargets(t *testing.T) {
 }
 
 func TestScanTargetsSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) {
+	original := runHostDiscovery
+	runHostDiscovery = func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		return hostdiscovery.Result{}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
 
-	go func() {
-		conn, err := ln.Accept()
-		if err == nil {
-			conn.Close()
-		}
-	}()
-
-	scanner, err := NewScanner(Options{
-		Timeout: 100 * time.Millisecond,
-		HostDiscovery: HostDiscoveryOptions{
-			Modes: []HostDiscoveryMode{HostDiscoveryTCPConnect},
-			Ports: []int{65001},
-		},
-	})
+	scanner, err := NewScanner(Options{Timeout: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,11 +653,6 @@ func TestScanTargetsSkipsPortScanWhenHostDiscoveryReturnsNoSignal(t *testing.T) 
 	result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1"}, ScanCommonOptions{
 		PortSpec: strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
 		Protocol: ProtocolTCP,
-		HostDiscovery: HostDiscoveryOptions{
-			Modes:   []HostDiscoveryMode{HostDiscoveryTCPConnect},
-			Timeout: 20 * time.Millisecond,
-			Ports:   []int{65001},
-		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected batch error: %v", err)
@@ -773,5 +786,300 @@ func TestScanEmitsHostDiscoveryMatchedEvent(t *testing.T) {
 		default:
 			t.Fatal("expected host discovery matched event")
 		}
+	}
+}
+
+func TestScanEventCallbackCancellationStopsBeforePortScan(t *testing.T) {
+	original := runHostDiscovery
+	runHostDiscovery = func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		return hostdiscovery.Result{Matched: true, Method: "tcp-connect"}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-done
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	scanner, err := NewScanner(Options{
+		Timeout: time.Second,
+		OnEvent: func(evt ScanEvent) {
+			if evt.Kind == ScanEventHostDiscoveryMatched {
+				cancel()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = scanner.Scan(ctx, ScanRequest{
+		Target:                    "127.0.0.1",
+		Ports:                     []int{ln.Addr().(*net.TCPAddr).Port},
+		Protocol:                  ProtocolTCP,
+		DisableServiceFingerprint: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	select {
+	case <-accepted:
+		t.Fatal("port scan started after event callback canceled the context")
+	default:
+	}
+}
+
+func TestScanCancellationDuringPortStageReturnsContextError(t *testing.T) {
+	port, accepted := startControlledTCPListener(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	scanner, err := NewScanner(Options{
+		Timeout: time.Second,
+		OnEvent: func(evt ScanEvent) {
+			if evt.Kind == ScanEventOpenPort {
+				cancel()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = scanner.Scan(ctx, ScanRequest{
+		Target:                    "127.0.0.1",
+		Ports:                     []int{port},
+		Protocol:                  ProtocolTCP,
+		DisableServiceFingerprint: true,
+		HostDiscovery:             HostDiscoveryOptions{Disabled: true},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	waitForAcceptedConnections(t, accepted, 1)
+}
+
+func TestScanTargetsCancellationStopsBufferedPreparationJobs(t *testing.T) {
+	original := runHostDiscovery
+	var calls atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	runHostDiscovery = func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		calls.Add(1)
+		cancel()
+		return hostdiscovery.Result{}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
+	scanner, err := NewScanner(Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scanner.ScanTargets(ctx, []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}, ScanCommonOptions{
+		Ports:           []int{80},
+		Protocol:        ProtocolTCP,
+		PortConcurrency: 1,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected only the received preparation job to start discovery, got %d calls", calls.Load())
+	}
+	if result == nil || len(result.Results) != 3 {
+		t.Fatalf("unexpected partial result: %#v", result)
+	}
+	for i, targetResult := range result.Results {
+		if targetResult.Target == "" {
+			t.Fatalf("target %d was not prefilled: %#v", i, result.Results)
+		}
+		if targetResult.Error != context.Canceled.Error() {
+			t.Fatalf("target %d: expected cancellation error, got %q", i, targetResult.Error)
+		}
+		if targetResult.Result != nil {
+			t.Fatalf("target %d: expected no port result after preparation cancellation", i)
+		}
+	}
+}
+
+func TestScanTargetsDiscoveryFailureIsNotReportedAsSkipped(t *testing.T) {
+	original := runHostDiscovery
+	runHostDiscovery = func(_ context.Context, ip string, _ HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		if ip == "127.0.0.1" {
+			return hostdiscovery.Result{}, errors.Join(hostdiscovery.ErrProbeFailed, errors.New("probe broke"))
+		}
+		return hostdiscovery.Result{}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
+	var summary *HostDiscoverySummary
+	scanner, err := NewScanner(Options{
+		Timeout: time.Second,
+		OnEvent: func(evt ScanEvent) {
+			if evt.Kind == ScanEventHostDiscoverySummary {
+				summary = evt.Summary
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1", "127.0.0.2"}, ScanCommonOptions{
+		Ports:           []int{80},
+		Protocol:        ProtocolTCP,
+		PortConcurrency: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected batch error: %v", err)
+	}
+	if !strings.Contains(result.Results[0].Error, "probe broke") {
+		t.Fatalf("expected target-level discovery failure, got %#v", result.Results[0])
+	}
+	if result.Results[1].Result == nil || result.Results[1].Error != "" {
+		t.Fatalf("expected second target to retain normal no-signal result, got %#v", result.Results[1])
+	}
+	if summary == nil {
+		t.Fatal("expected host discovery summary")
+	}
+	if len(summary.Alive) != 0 || len(summary.Skipped) != 1 || summary.Skipped[0].Target != "127.0.0.2" {
+		t.Fatalf("failure must not be counted as skipped: %#v", summary)
+	}
+}
+
+func TestHostDiscoveryMatchDoesNotMarkRefusedScanPortOpen(t *testing.T) {
+	original := runHostDiscovery
+	runHostDiscovery = func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		return hostdiscovery.Result{Matched: true, Method: "tcp-connect"}, nil
+	}
+	t.Cleanup(func() { runHostDiscovery = original })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	scanner, err := NewScanner(Options{Timeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scanner.Scan(context.Background(), ScanRequest{
+		Target:                    "127.0.0.1",
+		Ports:                     []int{port},
+		Protocol:                  ProtocolTCP,
+		DisableServiceFingerprint: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected scan error: %v", err)
+	}
+	if len(result.Ports) != 0 || result.Meta.OpenPorts != 0 {
+		t.Fatalf("connection refusal must not become an open port: %#v", result)
+	}
+}
+
+func replaceUDPProbe(t *testing.T, fn func(context.Context, string, int, time.Duration) updservices.ProbeResult) {
+	t.Helper()
+	original := udpProbe
+	udpProbe = fn
+	t.Cleanup(func() { udpProbe = original })
+}
+
+func TestScanUDPRequiresResponseEvidence(t *testing.T) {
+	var events []ScanEvent
+	scanner := &Scanner{opts: Options{OnEvent: func(event ScanEvent) { events = append(events, event) }}}
+	replaceUDPProbe(t, func(context.Context, string, int, time.Duration) updservices.ProbeResult {
+		return updservices.ProbeResult{Service: "domain?"}
+	})
+
+	result := scanner.scanUDPPort(context.Background(), "target", "192.0.2.1", 53, time.Second)
+	if result.Open || result.Service != "" || len(events) != 0 {
+		t.Fatalf("service metadata without response emitted an open UDP result: result=%#v events=%#v", result, events)
+	}
+}
+
+func TestScanUDPResponseEvidenceProducesCompatibleResultAndEvents(t *testing.T) {
+	events := make([]ScanEvent, 0, 2)
+	scanner := &Scanner{opts: Options{OnEvent: func(event ScanEvent) { events = append(events, event) }}}
+	replaceUDPProbe(t, func(context.Context, string, int, time.Duration) updservices.ProbeResult {
+		return updservices.ProbeResult{Responded: true, Banner: "reply", Service: "domain?", Version: "1"}
+	})
+
+	result := scanner.scanUDPPort(context.Background(), "target", "192.0.2.1", 53, time.Second)
+	if !result.Open || result.Service != "domain" || result.Banner != "reply" || result.Version != "1" {
+		t.Fatalf("response evidence did not retain UDP metadata: %#v", result)
+	}
+	if len(events) != 2 || events[0].Kind != ScanEventOpenPort || events[1].Kind != ScanEventServiceMatch {
+		t.Fatalf("expected compatible UDP open and service events, got %#v", events)
+	}
+}
+
+func TestUDPScanAndBatchSkipHostDiscoveryAndShareResponseRule(t *testing.T) {
+	var discoveryCalls atomic.Int32
+	replaceRunHostDiscovery(t, func(context.Context, string, HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		discoveryCalls.Add(1)
+		return hostdiscovery.Result{}, nil
+	})
+	replaceUDPProbe(t, func(context.Context, string, int, time.Duration) updservices.ProbeResult {
+		return updservices.ProbeResult{Responded: true}
+	})
+	scanner := &Scanner{opts: Options{PortConcurrency: 1, Timeout: time.Second}}
+
+	single, err := scanner.Scan(context.Background(), ScanRequest{
+		Target: "127.0.0.1", Ports: []int{53006}, Protocol: ProtocolUDP,
+	})
+	if err != nil {
+		t.Fatalf("UDP Scan returned error: %v", err)
+	}
+	if len(single.Ports) != 1 || !single.Ports[0].Open || single.Ports[0].Service != "unknown" {
+		t.Fatalf("unexpected UDP Scan result: %#v", single)
+	}
+
+	batch, err := scanner.ScanTargets(context.Background(), []string{"127.0.0.1"}, ScanCommonOptions{
+		Ports: []int{53006}, Protocol: ProtocolUDP, PortConcurrency: 1,
+	})
+	if err != nil {
+		t.Fatalf("UDP ScanTargets returned error: %v", err)
+	}
+	if len(batch.Results) != 1 || batch.Results[0].Result == nil || len(batch.Results[0].Result.Ports) != 1 || !batch.Results[0].Result.Ports[0].Open {
+		t.Fatalf("unexpected UDP ScanTargets result: %#v", batch)
+	}
+	if got := discoveryCalls.Load(); got != 0 {
+		t.Fatalf("UDP paths called Host Discovery %d times", got)
+	}
+}
+
+func TestResolveTargetContextCancelsLookup(t *testing.T) {
+	original := lookupTargetIPs
+	started := make(chan struct{})
+	lookupTargetIPs = func(ctx context.Context, network, host string) ([]net.IP, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { lookupTargetIPs = original })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolveTargetContext(ctx, "context-test.invalid")
+		done <- err
+	}()
+	<-started
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }

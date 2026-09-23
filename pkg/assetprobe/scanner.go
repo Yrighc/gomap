@@ -34,6 +34,8 @@ var (
 	initErr           error
 	portLimiterMu     sync.Mutex
 	portLimiterByRate = make(map[int]*portRateLimiter)
+	lookupTargetIPs   = net.DefaultResolver.LookupIP
+	udpProbe          = updservices.UcpPortServer
 )
 
 type Scanner struct {
@@ -127,6 +129,9 @@ func shouldEmitServiceMatch(service string) bool {
 // 这里返回的 Ports 已经过滤，只包含 Open=true 的端口。
 // 关闭端口不会出现在结果中，但仍会参与总扫描量与蜜罐判定计算。
 func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(req.Target) == "" {
 		return nil, errors.New("target is required")
 	}
@@ -143,8 +148,11 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 
 	targetHost := strings.TrimSpace(req.Target)
-	resolvedIP, err := resolveTarget(targetHost)
+	resolvedIP, err := resolveTargetContext(ctx, targetHost)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -176,17 +184,32 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 	hostDiscovery := mergeHostDiscoveryOptions(s.opts.HostDiscovery, req.HostDiscovery)
 	if req.Protocol == ProtocolTCP && !hostDiscovery.Disabled {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if err != nil {
 			return nil, err
 		}
 		s.emitHostDiscoveryEvent(targetHost, resolvedIP, req.Protocol, discoveryResult)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !discoveryResult.Matched {
 			return emptyScanResult(targetHost, resolvedIP, req.Protocol), nil
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if req.Protocol == ProtocolUDP {
 		collected := s.scanAllUDPPorts(ctx, targetHost, resolvedIP, ports, timeout, portConcurrency, portRateLimit)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return buildScanResult(
 			targetHost,
 			resolvedIP,
@@ -200,6 +223,9 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	}
 
 	collected, discoveredOpen := s.scanTCPDiscoveryStage(ctx, targetHost, resolvedIP, ports, timeout, portConcurrency, portRateLimit)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fingerprintedCount := 0
 	if !req.DisableServiceFingerprint {
 		fingerprintedCount = s.runTCPFingerprintStage(
@@ -212,6 +238,9 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 			discoveredOpen,
 			collected,
 		)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 
 	return buildScanResult(
@@ -296,6 +325,10 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 			Summary: prepared.hostDiscoverySummary,
 		})
 	}
+	if err := ctx.Err(); err != nil {
+		markPendingBatchResults(results, err)
+		return &BatchScanResult{Results: results}, err
+	}
 
 	jobs := make([]batchJob, 0, len(normalized)*len(ports))
 	for idx, targetCtx := range contexts {
@@ -344,15 +377,19 @@ func (s *Scanner) ScanTargets(ctx context.Context, targets []string, opts ScanCo
 	}
 
 	if err := ctx.Err(); err != nil {
-		for i := range results {
-			if results[i].Result == nil && results[i].Error == "" {
-				results[i].Error = err.Error()
-			}
-		}
+		markPendingBatchResults(results, err)
 		return &BatchScanResult{Results: results}, err
 	}
 
 	return &BatchScanResult{Results: results}, nil
+}
+
+func markPendingBatchResults(results []TargetScanResult, err error) {
+	for i := range results {
+		if results[i].Result == nil && results[i].Error == "" {
+			results[i].Error = err.Error()
+		}
+	}
 }
 
 func prepareBatchTargetContexts(
@@ -368,6 +405,9 @@ func prepareBatchTargetContexts(
 ) batchPreparationResult {
 	contexts := make([]*batchTargetContext, len(targets))
 	summary := &HostDiscoverySummary{Total: len(targets)}
+	for i, target := range targets {
+		results[i].Target = target
+	}
 	if len(targets) == 0 {
 		return batchPreparationResult{contexts: contexts, hostDiscoverySummary: summary}
 	}
@@ -384,45 +424,90 @@ func prepareBatchTargetContexts(
 	}
 	close(jobs)
 
+	// Host discovery has its own target-level budget. PortConcurrency controls
+	// the later port task pool and must not turn the pre-discovery phase into a
+	// raw-probe burst.
+	discoverySlots := make(chan struct{}, defaultDiscoverHostsConcurrency)
 	var wg sync.WaitGroup
-	var resultsMu sync.Mutex
+	var summaryMu sync.Mutex
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for idx := range jobs {
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				var idx int
+				var ok bool
+				select {
+				case <-ctx.Done():
+					return
+				case idx, ok = <-jobs:
+					if !ok {
+						return
+					}
+				}
+				if ctx.Err() != nil {
+					return
+				}
+
 				target := targets[idx]
-				results[idx].Target = target
-				resolvedIP, resolveErr := resolveTarget(target)
+				resolvedIP, resolveErr := resolveTargetContext(ctx, target)
+				if ctx.Err() != nil {
+					return
+				}
 				if resolveErr != nil {
 					results[idx].Error = resolveErr.Error()
 					continue
 				}
 				if protocol == ProtocolTCP && !hostDiscovery.Disabled {
+					if ctx.Err() != nil {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case discoverySlots <- struct{}{}:
+					}
+					if ctx.Err() != nil {
+						<-discoverySlots
+						return
+					}
 					discoveryResult, err := runHostDiscovery(ctx, resolvedIP, hostDiscovery)
+					<-discoverySlots
+					if ctx.Err() != nil {
+						return
+					}
 					if err != nil {
 						results[idx].Error = err.Error()
 						continue
 					}
-					s.emitHostDiscoveryEvent(target, resolvedIP, protocol, discoveryResult)
+
 					targetSummary := HostDiscoveryTarget{
 						Target:     target,
 						ResolvedIP: resolvedIP,
 						Method:     discoveryResult.Method,
 					}
+					summaryMu.Lock()
 					if discoveryResult.Matched {
-						resultsMu.Lock()
 						summary.Alive = append(summary.Alive, targetSummary)
-						resultsMu.Unlock()
 					} else {
-						resultsMu.Lock()
 						summary.Skipped = append(summary.Skipped, targetSummary)
-						resultsMu.Unlock()
+					}
+					summaryMu.Unlock()
+
+					s.emitHostDiscoveryEvent(target, resolvedIP, protocol, discoveryResult)
+					if ctx.Err() != nil {
+						return
 					}
 					if !discoveryResult.Matched {
 						results[idx].Result = emptyScanResult(target, resolvedIP, protocol)
 						continue
 					}
+				}
+				if ctx.Err() != nil {
+					return
 				}
 				contexts[idx] = &batchTargetContext{
 					index:      idx,
@@ -622,7 +707,7 @@ func (s *Scanner) scanAllUDPPorts(
 				if err := waitPortRateLimit(ctx, portLimiter); err != nil {
 					return
 				}
-				results <- s.scanUDPPort(targetHost, resolvedIP, p, timeout)
+				results <- s.scanUDPPort(ctx, targetHost, resolvedIP, p, timeout)
 			}
 		}()
 	}
@@ -909,7 +994,7 @@ func runBatchUDPStage(
 				if targetCtx == nil {
 					continue
 				}
-				portResult := s.scanUDPPort(targetCtx.target, targetCtx.resolvedIP, job.port, timeout)
+				portResult := s.scanUDPPort(ctx, targetCtx.target, targetCtx.resolvedIP, job.port, timeout)
 				targetCtx.mu.Lock()
 				targetCtx.collected = append(targetCtx.collected, portResult)
 				targetCtx.mu.Unlock()
@@ -1041,31 +1126,27 @@ func runBatchTCPFingerprintStage(
 
 // scanUDPPort 基于 UDP 探针与匹配规则做服务识别。
 // UDP 不像 TCP 那样有稳定的建连语义，因此这里只要探针有有效响应，就视为开放并输出识别结果。
-func (s *Scanner) scanUDPPort(targetHost string, resolvedIP string, port int, timeout time.Duration) PortResult {
+func (s *Scanner) scanUDPPort(ctx context.Context, targetHost string, resolvedIP string, port int, timeout time.Duration) PortResult {
 	result := PortResult{Port: port}
-	address := net.JoinHostPort(resolvedIP, strconv.Itoa(port))
-	conn, err := net.DialTimeout("udp", address, timeout)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return result
 	}
-	defer conn.Close()
 
-	buf := make([]byte, 4096)
-	banner, subject, dns, serviceName, version := updservices.UcpPortServer(resolvedIP, port, buf, conn)
-	if banner == "" && serviceName == "" {
+	probeResult := udpProbe(ctx, resolvedIP, port, timeout)
+	if !probeResult.Responded {
 		return result
 	}
 
 	result.Open = true
-	result.Service = strings.TrimSuffix(serviceName, "?")
+	result.Service = strings.TrimSuffix(probeResult.Service, "?")
 	if result.Service == "" {
 		result.Service = "unknown"
 	}
-	result.Version = achieve.SanitizeUTF8(version)
-	result.Banner = achieve.SanitizeUTF8(banner)
-	result.Subject = achieve.SanitizeUTF8(subject)
-	if dns != "" {
-		result.DNSNames = splitAndCleanDNS(dns)
+	result.Version = achieve.SanitizeUTF8(probeResult.Version)
+	result.Banner = achieve.SanitizeUTF8(probeResult.Banner)
+	result.Subject = achieve.SanitizeUTF8(probeResult.Subject)
+	if probeResult.DNS != "" {
+		result.DNSNames = splitAndCleanDNS(probeResult.DNS)
 	}
 	s.emitEvent(ScanEvent{
 		Kind:       ScanEventOpenPort,
@@ -1142,9 +1223,6 @@ func applyDefaults(opts *Options) {
 	if opts.HoneypotOpenRatio <= 0 {
 		opts.HoneypotOpenRatio = 0.85
 	}
-	if len(opts.HostDiscovery.Modes) == 0 {
-		opts.HostDiscovery.Modes = []HostDiscoveryMode{HostDiscoveryICMPEcho, HostDiscoveryTCPConnect}
-	}
 	if opts.HostDiscovery.Timeout <= 0 {
 		opts.HostDiscovery.Timeout = time.Second
 	}
@@ -1193,8 +1271,8 @@ func mergeHostDiscoveryOptions(base, override HostDiscoveryOptions) HostDiscover
 	if override.Disabled {
 		merged.Disabled = true
 	}
-	if len(override.Modes) > 0 {
-		merged.Modes = append([]HostDiscoveryMode(nil), override.Modes...)
+	if override.Modes != nil {
+		merged.Modes = append([]HostDiscoveryMode{}, override.Modes...)
 	}
 	if override.Timeout > 0 {
 		merged.Timeout = override.Timeout
@@ -1205,11 +1283,15 @@ func mergeHostDiscoveryOptions(base, override HostDiscoveryOptions) HostDiscover
 	if len(override.Ports) > 0 {
 		merged.Ports = append([]int(nil), override.Ports...)
 	}
-	if len(merged.Modes) > 0 {
-		merged.Modes = append([]HostDiscoveryMode(nil), merged.Modes...)
+	if merged.Modes != nil {
+		modes := make([]HostDiscoveryMode, len(merged.Modes))
+		copy(modes, merged.Modes)
+		merged.Modes = modes
 	}
-	if len(merged.Ports) > 0 {
-		merged.Ports = append([]int(nil), merged.Ports...)
+	if merged.Ports != nil {
+		ports := make([]int, len(merged.Ports))
+		copy(ports, merged.Ports)
+		merged.Ports = ports
 	}
 	return merged
 }
@@ -1244,12 +1326,22 @@ func emptyScanResult(target, resolvedIP string, protocol Protocol) *ScanResult {
 
 // resolveTarget 将域名解析为 IP，优先返回 IPv4。
 func resolveTarget(target string) (string, error) {
+	return resolveTargetContext(context.Background(), target)
+}
+
+func resolveTargetContext(ctx context.Context, target string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if ip := net.ParseIP(target); ip != nil {
 		return target, nil
 	}
-	ips, err := net.LookupIP(target)
+	ips, err := lookupTargetIPs(ctx, "ip", target)
 	if err != nil {
 		return "", fmt.Errorf("resolve target failed: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if len(ips) == 0 {
 		return "", errors.New("no IP resolved")
@@ -1587,60 +1679,107 @@ func sanitizeStringSlice(items []string) []string {
 }
 
 func normalizeTargets(targets []string) []string {
-	if len(targets) == 0 {
+	normalized, err := normalizeDiscoveryTargets(context.Background(), targets, 0)
+	if err != nil {
 		return nil
+	}
+	return normalized
+}
+
+// normalizeDiscoveryTargets preserves ScanTargets' trimming, CIDR expansion,
+// and first-occurrence ordering while adding cancellation and a caller-owned
+// upper bound for standalone discovery. Invalid CIDRs remain single targets so
+// callers can report them as target-level errors.
+func normalizeDiscoveryTargets(ctx context.Context, targets []string, maxTargets int) ([]string, error) {
+	if len(targets) == 0 {
+		return nil, nil
 	}
 
 	out := make([]string, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
-	add := func(target string) {
+	add := func(target string) error {
 		if _, ok := seen[target]; ok {
-			return
+			return nil
+		}
+		if maxTargets > 0 && len(out) >= maxTargets {
+			return fmt.Errorf("target count exceeds limit %d", maxTargets)
 		}
 		seen[target] = struct{}{}
 		out = append(out, target)
+		return nil
 	}
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
 		}
-		expanded := expandCIDRTarget(target)
-		if len(expanded) == 0 {
-			add(target)
+		expanded, isCIDR, err := expandCIDRTargetWithLimit(ctx, target, maxTargets)
+		if err != nil {
+			return nil, err
+		}
+		if !isCIDR {
+			if err := add(target); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		for _, item := range expanded {
-			add(item)
+			if err := add(item); err != nil {
+				return nil, err
+			}
 		}
 	}
-	return out
+	return out, nil
 }
 
-func expandCIDRTarget(target string) []string {
+func expandCIDRTargetWithLimit(ctx context.Context, target string, maxTargets int) ([]string, bool, error) {
 	if !strings.Contains(target, "/") {
-		return nil
+		return nil, false, nil
 	}
 	ip, ipNet, err := net.ParseCIDR(target)
 	if err != nil {
-		return nil
+		return nil, false, nil
 	}
+	ones, bits := ipNet.Mask.Size()
+	hostBits := bits - ones
+	if maxTargets > 0 && cidrAddressCountExceeds(hostBits, maxTargets) {
+		return nil, true, fmt.Errorf("CIDR target %q exceeds limit %d", target, maxTargets)
+	}
+
 	current := append(net.IP(nil), ip.Mask(ipNet.Mask)...)
 	out := make([]string, 0, 8)
 	for ipNet.Contains(current) {
+		if err := ctx.Err(); err != nil {
+			return nil, true, err
+		}
 		out = append(out, current.String())
-		incrementIP(current)
+		if !incrementIP(current) {
+			break
+		}
 	}
-	return out
+	return out, true, nil
 }
 
-func incrementIP(ip net.IP) {
+func cidrAddressCountExceeds(hostBits, maxTargets int) bool {
+	// maxTargets is an int, so 2^(word size-1) already exceeds every valid
+	// positive limit. Keep the remaining shift in signed-int range.
+	if hostBits >= strconv.IntSize-1 {
+		return true
+	}
+	return 1<<uint(hostBits) > maxTargets
+}
+
+func incrementIP(ip net.IP) bool {
 	for i := len(ip) - 1; i >= 0; i-- {
 		ip[i]++
 		if ip[i] != 0 {
-			return
+			return true
 		}
 	}
+	return false
 }
 
 func shuffleBatchJobs(jobs []batchJob) {

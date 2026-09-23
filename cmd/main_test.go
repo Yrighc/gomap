@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +16,13 @@ import (
 )
 
 type stubPortScanner struct {
-	batch      *assetprobe.BatchScanResult
-	err        error
-	gotTargets []string
-	gotOpts    assetprobe.ScanCommonOptions
+	batch            *assetprobe.BatchScanResult
+	err              error
+	gotTargets       []string
+	gotOpts          assetprobe.ScanCommonOptions
+	events           []assetprobe.ScanEvent
+	onEvent          func(assetprobe.ScanEvent)
+	waitBeforeReturn <-chan struct{}
 }
 
 type portExitCode int
@@ -32,6 +33,14 @@ type dirExitCode int
 func (s *stubPortScanner) ScanTargets(_ context.Context, targets []string, opts assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error) {
 	s.gotTargets = append([]string(nil), targets...)
 	s.gotOpts = opts
+	for _, evt := range s.events {
+		if s.onEvent != nil {
+			s.onEvent(evt)
+		}
+	}
+	if s.waitBeforeReturn != nil {
+		<-s.waitBeforeReturn
+	}
 	return s.batch, s.err
 }
 
@@ -437,6 +446,11 @@ func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
 				},
 			}},
 		},
+		events: []assetprobe.ScanEvent{
+			{Kind: assetprobe.ScanEventOpenPort, Target: "demo", ResolvedIP: "127.0.0.1", Protocol: assetprobe.ProtocolTCP, Port: 80},
+			{Kind: assetprobe.ScanEventServiceMatch, Target: "demo", ResolvedIP: "127.0.0.1", Protocol: assetprobe.ProtocolTCP, Port: 80, Service: "http", Version: "nginx"},
+			{Kind: assetprobe.ScanEventOpenPort, Target: "demo", ResolvedIP: "127.0.0.1", Protocol: assetprobe.ProtocolTCP, Port: 443},
+		},
 	}
 	restoreScanner := stubPortScannerFactory(scanner)
 	defer restoreScanner()
@@ -450,7 +464,10 @@ func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
 	if !strings.Contains(stdout, `"Target": "demo"`) {
 		t.Fatalf("expected stdout to include json result, got %s", stdout)
 	}
-	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80 service=http version=nginx") {
+	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80") {
+		t.Fatalf("expected stderr to include localized open port hit log, got %s", stderr)
+	}
+	if !strings.Contains(stderr, "发现服务命中 target=demo resolved_ip=127.0.0.1 protocol=tcp port=80 service=http version=nginx") {
 		t.Fatalf("expected stderr to include localized service hit log, got %s", stderr)
 	}
 	if !strings.Contains(stderr, "发现开放端口 target=demo resolved_ip=127.0.0.1 protocol=tcp port=443") {
@@ -459,20 +476,30 @@ func TestRunPortVerboseLogsOpenPortsAndMatchedServicesToStderr(t *testing.T) {
 }
 
 func TestRunPortVerboseEmitsRealtimeOpenPortLog(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	release := make(chan struct{})
+	scanner := &stubPortScanner{
+		batch: &assetprobe.BatchScanResult{
+			Results: []assetprobe.TargetScanResult{{
+				Target: "127.0.0.1",
+				Result: &assetprobe.ScanResult{
+					Target:     "127.0.0.1",
+					ResolvedIP: "127.0.0.1",
+					Protocol:   assetprobe.ProtocolTCP,
+					Ports:      []assetprobe.PortResult{{Port: 80, Open: true}},
+				},
+			}},
+		},
+		events: []assetprobe.ScanEvent{{
+			Kind:       assetprobe.ScanEventOpenPort,
+			Target:     "127.0.0.1",
+			ResolvedIP: "127.0.0.1",
+			Protocol:   assetprobe.ProtocolTCP,
+			Port:       80,
+		}},
+		waitBeforeReturn: release,
 	}
-	defer ln.Close()
-
-	accepted := make(chan struct{})
-	go func() {
-		defer close(accepted)
-		conn, err := ln.Accept()
-		if err == nil {
-			_ = conn.Close()
-		}
-	}()
+	restoreScanner := stubPortScannerFactory(scanner)
+	defer restoreScanner()
 
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
@@ -510,13 +537,7 @@ func TestRunPortVerboseEmitsRealtimeOpenPortLog(t *testing.T) {
 		exitPort = func(code int) {
 			panic(portExitCode(code))
 		}
-		runPort([]string{
-			"-target", "127.0.0.1",
-			"-ports", strconv.Itoa(ln.Addr().(*net.TCPAddr).Port),
-			"-timeout", "1",
-			"-Pn",
-			"-v",
-		})
+		runPort([]string{"-target", "127.0.0.1", "-ports", "80", "-Pn", "-v"})
 	}()
 
 	stderrReady := make(chan string, 1)
@@ -529,12 +550,22 @@ func TestRunPortVerboseEmitsRealtimeOpenPortLog(t *testing.T) {
 	select {
 	case firstChunk := <-stderrReady:
 		if !strings.Contains(firstChunk, "发现开放端口 target=127.0.0.1") {
+			close(release)
+			<-done
 			t.Fatalf("expected realtime open port log, got %s", firstChunk)
 		}
 	case <-time.After(3 * time.Second):
+		close(release)
+		<-done
 		t.Fatal("expected realtime stderr log before command completion")
 	}
+	select {
+	case exitCode := <-done:
+		t.Fatalf("command completed before the scanner was released, exit code %d", exitCode)
+	default:
+	}
 
+	close(release)
 	exitCode := <-done
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
@@ -553,7 +584,6 @@ func TestRunPortVerboseEmitsRealtimeOpenPortLog(t *testing.T) {
 	if !strings.Contains(string(stdout), `"Target": "127.0.0.1"`) {
 		t.Fatalf("expected stdout json result, got %s", string(stdout))
 	}
-	<-accepted
 }
 
 func TestRunPortVerbosePrintsHostDiscoverySummaryForMultipleTargets(t *testing.T) {
@@ -626,7 +656,7 @@ func TestRunPortVerbosePrintsHostDiscoverySummaryForMultipleTargets(t *testing.T
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d with stderr %s", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "主机存活校验完成：总数=2，存活=1，未存活=1") {
+	if !strings.Contains(stderr, "主机存活校验完成：总数=2，已确认存活=1，未确认存活=1") {
 		t.Fatalf("expected host discovery summary, got %s", stderr)
 	}
 	if strings.Contains(stderr, "发现主机存活") || strings.Contains(stderr, "未发现主机存活信号") {
@@ -635,7 +665,7 @@ func TestRunPortVerbosePrintsHostDiscoverySummaryForMultipleTargets(t *testing.T
 	if !strings.Contains(stderr, "发现开放端口 target=127.0.0.1 resolved_ip=127.0.0.1 protocol=tcp port=80") {
 		t.Fatalf("expected open port logs to remain visible in multi-target mode, got %s", stderr)
 	}
-	if strings.Contains(stderr, "存活目标:") || strings.Contains(stderr, "未存活目标:") {
+	if strings.Contains(stderr, "已确认存活目标:") || strings.Contains(stderr, "未确认存活目标:") {
 		t.Fatalf("expected summary-only output without target detail lines, got %s", stderr)
 	}
 	if !strings.Contains(stdout, `"Target": "127.0.0.1"`) {
@@ -698,10 +728,10 @@ func TestRunPortVerboseTreatsCIDRInputAsSummaryOnlyMode(t *testing.T) {
 	if strings.Contains(stderr, "未发现主机存活信号 target=192.168.0.250") {
 		t.Fatalf("expected CIDR input to suppress per-target process logs, got %s", stderr)
 	}
-	if !strings.Contains(stderr, "主机存活校验完成：总数=256，存活=1，未存活=1") {
+	if !strings.Contains(stderr, "主机存活校验完成：总数=256，已确认存活=1，未确认存活=1") {
 		t.Fatalf("expected CIDR summary log, got %s", stderr)
 	}
-	if strings.Contains(stderr, "存活目标:") || strings.Contains(stderr, "未存活目标:") {
+	if strings.Contains(stderr, "已确认存活目标:") || strings.Contains(stderr, "未确认存活目标:") {
 		t.Fatalf("expected CIDR summary-only output without target detail lines, got %s", stderr)
 	}
 }
@@ -1328,7 +1358,10 @@ func capturePortRun(t *testing.T, fn func()) (string, string, int) {
 func stubPortScannerFactory(scanner portTargetScanner) func() {
 	oldScannerFactory := newPortTargetScanner
 
-	newPortTargetScanner = func(assetprobe.Options) (portTargetScanner, error) {
+	newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
+		if stub, ok := scanner.(*stubPortScanner); ok {
+			stub.onEvent = opts.OnEvent
+		}
 		return scanner, nil
 	}
 

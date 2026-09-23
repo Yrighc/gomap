@@ -36,8 +36,8 @@ type weakTargetScanner interface {
 }
 
 type verboseEventWriter struct {
-	mu                         sync.Mutex
-	w                          io.Writer
+	mu                        sync.Mutex
+	w                         io.Writer
 	suppressHostDiscoveryLogs bool
 }
 
@@ -110,7 +110,7 @@ func formatAssetEventLog(evt assetprobe.ScanEvent) string {
 			return ""
 		}
 		return fmt.Sprintf(
-			"主机存活校验完成：总数=%d，存活=%d，未存活=%d",
+			"主机存活校验完成：总数=%d，已确认存活=%d，未确认存活=%d",
 			evt.Summary.Total,
 			len(evt.Summary.Alive),
 			len(evt.Summary.Skipped),

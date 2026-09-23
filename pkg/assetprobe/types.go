@@ -56,13 +56,16 @@ const (
 type HostDiscoveryOptions struct {
 	// Disabled controls whether host discovery is skipped before TCP port scanning.
 	Disabled bool
-	// Modes defines the ordered host discovery probes to try.
+	// Modes defines ordered explicit probes. In effective configuration an empty
+	// slice selects GoMap's target-aware automatic policy. For request overrides,
+	// nil inherits the Scanner configuration while a non-nil empty slice selects automatic.
 	Modes []HostDiscoveryMode
-	// Timeout is the per-mode discovery timeout.
+	// Timeout limits one ICMP/ARP round or one TCP port attempt.
 	Timeout time.Duration
-	// Retries controls mode-specific retry attempts.
+	// Retries is the maximum total attempt rounds, not the number of additional retries.
+	// Explicit modes retry only their own normal no-signal rounds; automatic mode retries a normal policy round. Values <= 0 normalize to one round.
 	Retries int
-	// Ports defines TCP-family discovery ports.
+	// Ports defines TCP-family discovery ports. One TCP round attempts every valid configured port with at most eight concurrent connections.
 	Ports []int
 }
 
@@ -166,6 +169,40 @@ type ScanResult struct {
 type BatchScanResult struct {
 	// Results 按输入目标顺序返回每个目标的扫描结果或错误。
 	Results []TargetScanResult
+}
+
+// DiscoverHostsOptions controls one standalone host-discovery batch.
+type DiscoverHostsOptions struct {
+	// HostDiscovery overrides the Scanner host-discovery configuration. Disabled
+	// is ignored because calling DiscoverHosts explicitly requests discovery.
+	HostDiscovery HostDiscoveryOptions
+	// Concurrency limits concurrently discovered targets. Values <= 0 use 32.
+	Concurrency int
+	// MaxTargets limits normalized IP/CIDR and invalid input result entries.
+	// Values <= 0 use 65,536.
+	MaxTargets int
+}
+
+// BatchHostDiscoveryResult contains standalone host-discovery results in
+// normalized target order.
+type BatchHostDiscoveryResult struct {
+	Results []TargetHostDiscoveryResult
+}
+
+// TargetHostDiscoveryResult is the standalone discovery outcome for one IP.
+type TargetHostDiscoveryResult struct {
+	// Target is the trimmed, de-duplicated IP or CIDR-expanded IP processed.
+	Target string
+	// ResolvedIP is the IP address supplied to the discovery probes. It is empty
+	// for invalid input.
+	ResolvedIP string
+	// Matched reports whether a host liveness signal was confirmed.
+	Matched bool
+	// Method identifies the matching probe mode when Matched is true.
+	Method string
+	// Error contains an input, probe, or cancellation failure. A normal no-signal
+	// result leaves both Method and Error empty.
+	Error string
 }
 
 // TargetScanResult 表示单个目标在批量扫描中的结果。
