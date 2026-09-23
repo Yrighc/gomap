@@ -139,9 +139,14 @@ go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
 ```
 
 默认行为说明：
-- `port` 模式默认会先执行 HostDiscovery，再进入正式 TCP 端口扫描
+- 未显式配置 `HostDiscovery.Modes` 时，`port` 模式按目标级自动策略执行；TCP 发现端口仍为 `80,443,22,445,3389`
+- TCP Connect 建连成功或收到明确的连接拒绝都表示目标返回了存活信号；正式端口扫描仍只有建连成功才判定端口开放
 - `-Pn` 会跳过 HostDiscovery，直接扫描端口，语义与 Nmap `-Pn` 对齐
-- 如果 HostDiscovery 没有获取到任何存活信号，则该目标会被跳过，不会继续执行完整端口扫描
+- HostDiscovery 未获取存活信号时：至少一种探针有效执行并正常未命中则该目标未确认、跳过前置端口扫描；所有允许的探针都未能有效执行时经现有错误通道返回原因（如本机无路由），不新增结果字段
+- Host Discovery 不再启动 `ping/ping6/nping/arping`：Linux 原生支持 ICMPv4/v6、IPv4 SYN/ACK 和直连以太网 IPv4 ARP；macOS 原生支持 ICMPv4/v6；Windows 本阶段保留 TCP Connect
+- 自动策略在 Linux 直连以太网 IPv4 且 ARP 可用时只执行 ARP；其他目标并发执行 ICMP Echo 与 TCP SYN，SYN 不可用时同轮降级 TCP Connect。macOS 为 ICMP + Connect，Windows 为 Connect。ACK 只在调用方显式选择时执行
+- 这是默认行为的可观察升级；SDK 调用方如需旧顺序，可显式设置 `Modes: []HostDiscoveryMode{HostDiscoveryICMPEcho, HostDiscoveryTCPConnect}`。`nil` 覆盖继承 Scanner 配置，非 nil 空切片明确选择自动策略
+- 授权 Linux/PVE 与隔离网络的实测证据及尚未验证的平台边界见 [docs/host-discovery-network-acceptance-matrix.md](docs/host-discovery-network-acceptance-matrix.md)；编译不等于跨平台运行验证
 
 全端口直扫示例：
 
@@ -377,7 +382,71 @@ for _, item := range batch.Results {
 
 `ScanTargets` 会在批量入口展开 CIDR 目标，并保持去重后的输入顺序返回结果。
 
-### 6.3 首页识别调用
+HostDiscovery 配置语义：
+- 有效配置中的空 `Modes` 选择目标级自动策略；非空 `Modes` 严格按调用方给定顺序执行，不会自动增删探针。请求级覆盖中，`nil` 表示继承 Scanner 配置，非 nil 空切片表示显式选择自动策略；旧的 `icmp-echo → tcp-connect` 组合可继续显式配置
+- `Timeout` 是一次单目标探针的等待上限：ICMP/ARP 为本轮原生收发预算，TCP Connect/SYN/ACK 为一个端口的一次等待预算
+- `Retries` 表示显式模式或自动策略轮最多执行的总轮数，不是额外重试次数；默认 `1` 即只执行一轮
+- 自动策略中，直连 ARP 正常无信号只重试 ARP；其他目标每轮并发 ICMP 和 TCP。能力不可用在同轮降级，并在本次目标调用的后续轮次跳过；任一探针确认存活优先，至少一种探针有效执行并正常未命中时返回未确认，仅所有允许的探针都未能有效执行时返回错误
+- 一轮 TCP Connect、TCP SYN 或 TCP ACK 会尝试全部配置端口，最多保留 `8` 个在途端口；父 `context` 可以提前终止整个过程
+- 自动策略只使用已配置的有效 TCP 发现端口；一轮 IP 探测的 ICMP 与 TCP 预算重叠，不新增 80/443 或其他端口
+- Linux SYN/ACK 首版仅支持 IPv4；ARP 只接受内核确认的无网关直连以太网 IPv4 路由。IPv6 SYN/ACK、NDP、macOS/Windows 的 SYN/ACK/ARP 不在 R3 范围
+- ARP 没有事务 ID，代理 ARP 也可能代答；命中表示当前接口窗口内收到字段完整关联的回复，不证明目标对应某台唯一物理设备
+- 已完成受控单测、Linux 容器与授权 Debian/PVE 网络验收，以及 Linux/macOS/Windows 交叉编译；未实测的平台能力仍按平台矩阵标注，不以编译代替运行验证
+- 原生 ICMP/SYN/ACK 通常依赖系统允许 ping socket 或 `CAP_NET_RAW`/root；ARP 依赖 `CAP_NET_RAW`。GoMap 不修改权限、路由、防火墙或 sysctl
+- 真实协议集成测试默认关闭。仅在隔离网络中设置 `GOMAP_HOSTDISCOVERY_INTEGRATION=1`，并提供 `GOMAP_HOSTDISCOVERY_ICMP4_TARGET`、`GOMAP_HOSTDISCOVERY_ICMP6_TARGET`；Linux 还需 `GOMAP_HOSTDISCOVERY_TCP_TARGET`、`GOMAP_HOSTDISCOVERY_SYN_PORT`、`GOMAP_HOSTDISCOVERY_ACK_PORT`、`GOMAP_HOSTDISCOVERY_TCP_CLOSED_PORT`、`GOMAP_HOSTDISCOVERY_ARP_TARGET`、`GOMAP_HOSTDISCOVERY_NO_REPLY_TARGET`。无 raw 权限的 Connect 降级场景独立运行，还需 `GOMAP_HOSTDISCOVERY_CONNECT_FALLBACK_TARGET`、`GOMAP_HOSTDISCOVERY_CONNECT_FALLBACK_PORT`；不得与要求 raw 权限的场景混用。显式启用但缺少目标、权限或环境前提会直接失败
+
+Linux 显式 SYN 发现示例（不会自动追加 ICMP、Connect 或其他端口）：
+
+```go
+HostDiscovery: assetprobe.HostDiscoveryOptions{
+    Modes:   []assetprobe.HostDiscoveryMode{assetprobe.HostDiscoveryTCPSYN},
+    Ports:   []int{80, 443},
+    Timeout: time.Second,
+    Retries: 1,
+}
+```
+
+### 6.3 独立 Host Discovery 调用
+
+`DiscoverHosts` 仅执行主机发现，不初始化服务识别资产，也不会扫描端口、获取页面或触发 `OnEvent`。它只接受 IP/CIDR；CIDR 会按地址递增展开并按首次出现顺序去重。
+
+```go
+var scanner assetprobe.Scanner // 独立发现支持零值 Scanner
+batch, err := scanner.DiscoverHosts(context.Background(), []string{
+    "192.168.1.10",
+    "192.168.1.0/30",
+}, assetprobe.DiscoverHostsOptions{
+    Concurrency: 32,
+    HostDiscovery: assetprobe.HostDiscoveryOptions{
+        Modes:   []assetprobe.HostDiscoveryMode{assetprobe.HostDiscoveryICMPEcho, assetprobe.HostDiscoveryTCPConnect},
+        Timeout: time.Second,
+        Retries: 1,
+        Ports:   []int{80, 443, 22, 445, 3389},
+    },
+})
+if err != nil && !errors.Is(err, context.Canceled) {
+    panic(err) // 配置、空目标或 MaxTargets 超限会在发包前失败
+}
+if batch == nil { // 调用在目标展开完成前（包括展开期间）已被取消
+    return
+}
+for _, item := range batch.Results {
+    if item.Error != "" {
+        fmt.Println(item.Target, "discovery failed:", item.Error)
+        continue
+    }
+    if item.Matched {
+        fmt.Println(item.Target, "alive via", item.Method)
+    }
+}
+```
+
+- `Concurrency <= 0` 默认 `32`；`MaxTargets <= 0` 默认最多展开、去重后 `65,536` 个结果。超限会在探测前报错，绝不截断。
+- `HostDiscovery.Disabled` 只影响 `Scan`/`ScanTargets` 的扫描前置发现；显式调用 `DiscoverHosts` 时会忽略该字段并执行探测。
+- 无存活信号返回 `Matched=false` 且 `Method/Error` 为空，表示未确认而非确认离线。单项无效输入或探测失败写入该项 `Error`。
+- 目标展开完成前取消会返回 `nil` 批次和顶层 context 错误；进入探测阶段后取消会保留已完成结果，尚未完成项写入 context 错误，并返回完整结果列表和顶层 context 错误。
+
+### 6.4 首页识别调用
 
 ```go
 page, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
@@ -391,7 +460,7 @@ if err != nil {
 fmt.Println(page.Title, page.Response.Header.StatusCode, page.Response.Header.Server, len(page.Response.Body))
 ```
 
-### 6.4 目录爆破调用
+### 6.5 目录爆破调用
 
 ```go
 dirs, err := scanner.ScanDirectories(context.Background(), "https://example.com", assetprobe.DirBruteOptions{
@@ -406,7 +475,7 @@ if err != nil {
 fmt.Println(dirs.Target, dirs.Port, len(dirs.Paths))
 ```
 
-### 6.5 协议账号口令探测调用
+### 6.6 协议账号口令探测调用
 
 ```go
 scanResult, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
@@ -430,7 +499,7 @@ out, _ := security.ToJSON(true)
 fmt.Println(string(out))
 ```
 
-### 6.6 依赖注入（DI）集成示例
+### 6.7 依赖注入（DI）集成示例
 
 适合在你的业务服务中抽象接口，便于测试替换：
 

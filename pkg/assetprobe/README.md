@@ -30,11 +30,12 @@ res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
     Protocol:        assetprobe.ProtocolTCP,
     PortConcurrency: 100,
     PortRateLimit:   1000,
+    // Empty Modes selects target-aware automatic discovery. Set an explicit
+    // ordered Modes slice only when overriding that policy.
     HostDiscovery: assetprobe.HostDiscoveryOptions{
-        Modes:   []assetprobe.HostDiscoveryMode{"icmp-echo", "tcp-connect"},
         Timeout: 1 * time.Second,
         Retries: 1,
-        Ports:   "80,443,22,445,3389",
+        Ports:   []int{80, 443, 22, 445, 3389},
     },
 })
 if err != nil {
@@ -51,10 +52,9 @@ batch, err := scanner.ScanTargets(context.Background(), []string{
     Protocol:        assetprobe.ProtocolTCP,
     PortConcurrency: 300, // 多目标时表示全局总并发
     HostDiscovery: assetprobe.HostDiscoveryOptions{
-        Modes:   []assetprobe.HostDiscoveryMode{"icmp-echo", "tcp-connect"},
         Timeout: 1 * time.Second,
         Retries: 1,
-        Ports:   "80,443,22,445,3389",
+        Ports:   []int{80, 443, 22, 445, 3389},
     },
 })
 if err != nil {
@@ -63,6 +63,37 @@ if err != nil {
 
 // ScanTargets 支持在批量目标里混合传入 IP、域名和 CIDR，
 // CIDR 会在入口处展开为具体 IP 后再继续后续扫描流程。
+
+// 独立 Host Discovery：只接受 IP/CIDR，不触发端口扫描、服务识别或页面获取。
+// 零值 Scanner 同样可用；Disabled 不会跳过显式的 DiscoverHosts 调用。
+// 空 Modes 使用自动策略：Linux 直连以太网 IPv4 为 ARP-only；Linux 远端 IPv4
+// 使用 ICMP + SYN，SYN 不可用时降级 Connect；Linux IPv6 和 macOS 使用 ICMP + Connect，
+// Windows 使用 Connect。若需旧策略，显式传入
+// Modes: []assetprobe.HostDiscoveryMode{assetprobe.HostDiscoveryICMPEcho, assetprobe.HostDiscoveryTCPConnect}；
+// nil 覆盖继承 Scanner 配置，非 nil 空切片明确选择自动策略。
+// 原生模式不调用 ping/nping/arping，权限不足会在同轮降级或返回目标级能力错误。
+// 已通过受控测试、授权 Debian/PVE 网络验收与跨平台编译；其他平台限制见验收矩阵。
+var discoveryScanner assetprobe.Scanner
+discovery, err := discoveryScanner.DiscoverHosts(context.Background(), []string{
+    "192.168.1.10",
+    "192.168.1.0/30",
+}, assetprobe.DiscoverHostsOptions{
+    Concurrency: 32, // <= 0 默认 32
+    // MaxTargets <= 0 默认 65,536；超限在探测前报错且不截断。
+    HostDiscovery: assetprobe.HostDiscoveryOptions{
+        Ports: []int{80, 443, 22, 445, 3389},
+    },
+})
+if err != nil && !errors.Is(err, context.Canceled) {
+    panic(err)
+}
+// 展开完成前取消时 discovery 为 nil；探测阶段取消时保留完整结果列表和部分结果。
+if discovery != nil {
+    for _, item := range discovery.Results {
+        // Matched=false 且 Error="" 代表未确认，不代表目标离线。
+        fmt.Println(item.Target, item.ResolvedIP, item.Matched, item.Method, item.Error)
+    }
+}
 
 // 首页识别
 web, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
