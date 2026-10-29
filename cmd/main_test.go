@@ -354,6 +354,56 @@ func TestRunPortPnDisablesHostDiscovery(t *testing.T) {
 	}
 }
 
+func TestRunPortServiceFingerprintFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		args                 []string
+		disableFingerprint   bool
+		disableHostDiscovery bool
+	}{
+		{name: "default"},
+		{name: "Pn_only", args: []string{"-Pn"}, disableHostDiscovery: true},
+		{name: "nf", args: []string{"-nf"}, disableFingerprint: true},
+		{name: "nf_false", args: []string{"-nf=false"}},
+		{name: "nf_and_Pn", args: []string{"-nf", "-Pn"}, disableFingerprint: true, disableHostDiscovery: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scanner := &stubPortScanner{batch: &assetprobe.BatchScanResult{}}
+			restoreScanner := stubPortScannerFactory(scanner)
+			defer restoreScanner()
+
+			args := append([]string{"-target", "demo", "-ports", "80"}, tc.args...)
+			stdout, stderr, exitCode := capturePortRun(t, func() {
+				runPort(args)
+			})
+			if exitCode != 0 || stderr != "" {
+				t.Fatalf("expected success, got exit code %d with stderr %s and stdout %s", exitCode, stderr, stdout)
+			}
+			if len(scanner.gotTargets) != 1 || scanner.gotTargets[0] != "demo" {
+				t.Fatalf("expected scanner to receive demo, got %v", scanner.gotTargets)
+			}
+			if scanner.gotOpts.DisableServiceFingerprint != tc.disableFingerprint {
+				t.Fatalf("expected DisableServiceFingerprint=%v, got %v", tc.disableFingerprint, scanner.gotOpts.DisableServiceFingerprint)
+			}
+			if scanner.gotOpts.HostDiscovery.Disabled != tc.disableHostDiscovery {
+				t.Fatalf("expected HostDiscovery.Disabled=%v, got %v", tc.disableHostDiscovery, scanner.gotOpts.HostDiscovery.Disabled)
+			}
+		})
+	}
+}
+
+func TestRunPortHelpDocumentsNF(t *testing.T) {
+	stdout, stderr, exitCode := capturePortRun(t, func() {
+		runPort([]string{"-h"})
+	})
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("expected help success, got exit code %d with stderr %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "-nf") || !strings.Contains(stdout, "跳过 TCP 服务识别") {
+		t.Fatalf("expected help to document -nf, got %s", stdout)
+	}
+}
+
 func TestRunPortRejectsLegacyHostDiscoveryFlags(t *testing.T) {
 	_, stderr, exitCode := capturePortRun(t, func() {
 		runPort([]string{"-target", "demo", "-ports", "80", "-host-discovery-timeout", "2"})

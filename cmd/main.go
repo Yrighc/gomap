@@ -306,6 +306,7 @@ func runPort(args []string) {
 		fmt.Println("  默认先执行 HostDiscovery，确认目标存在存活信号后再进入正式 TCP 端口扫描")
 		fmt.Println("  使用 -Pn 可跳过 HostDiscovery，行为与 Nmap -Pn 一致，直接对目标执行端口扫描")
 		fmt.Println("  若 HostDiscovery 未获取到任何存活信号，则该目标会被跳过，不再执行完整端口扫描")
+		fmt.Println("  使用 -nf 跳过 TCP 服务识别，仅返回端口发现结果；可与 -Pn 组合")
 		fmt.Println()
 		fmt.Println("选项:")
 		fs.PrintDefaults()
@@ -314,6 +315,7 @@ func runPort(args []string) {
 		fmt.Println("  gomap port -target example.com -ports 1-1024")
 		fmt.Println("  gomap port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443")
 		fmt.Println("  gomap port -target example.com -ports 1-65535 -Pn")
+		fmt.Println("  gomap port -target example.com -ports 1-65535 -Pn -nf")
 		fmt.Println("  gomap port -target example.com -ports 80,443,1-1024 -c 200 -rate 3000")
 	}
 	target := fs.String("target", "", "[必选，和 -ips 二选一] 单个扫描目标 IP 或域名")
@@ -326,6 +328,7 @@ func runPort(args []string) {
 	portRateLimitShort := fs.Int("rate", 0, "[可选] 端口扫描全局速率限制（每秒）")
 	timeout := fs.Int("timeout", 2, "[可选] 超时秒数")
 	disableHostDiscovery := fs.Bool("Pn", false, "[可选] 跳过 HostDiscovery，直接扫描端口（兼容 Nmap -Pn 语义）")
+	disableServiceFingerprint := fs.Bool("nf", false, "[可选] 跳过 TCP 服务识别，仅扫描端口（no fingerprint）")
 	maxFingerprintPorts := fs.Int("max-fp", 50, "[可选] 最多做服务识别的开放端口数")
 	maxFingerprintPortsLong := fs.Int("max-fingerprint-ports", 50, "[可选] 最多做服务识别的开放端口数")
 	honeypotOpenThreshold := fs.Int("honeypot-open-threshold", 100, "[可选] 疑似蜜罐判定最小开放端口数阈值")
@@ -441,15 +444,16 @@ func runPort(args []string) {
 	}
 
 	batchRes, err := scanner.ScanTargets(context.Background(), targets, assetprobe.ScanCommonOptions{
-		PortSpec:              *ports,
-		Protocol:              protocol,
-		PortConcurrency:       finalPortConcurrency,
-		PortRateLimit:         finalPortRateLimit,
-		Timeout:               time.Duration(*timeout) * time.Second,
-		MaxFingerprintPorts:   finalMaxFingerprintPorts,
-		HoneypotOpenThreshold: *honeypotOpenThreshold,
-		HoneypotOpenRatio:     *honeypotOpenRatio,
-		HostDiscovery:         hostDiscovery,
+		PortSpec:                  *ports,
+		Protocol:                  protocol,
+		PortConcurrency:           finalPortConcurrency,
+		PortRateLimit:             finalPortRateLimit,
+		Timeout:                   time.Duration(*timeout) * time.Second,
+		MaxFingerprintPorts:       finalMaxFingerprintPorts,
+		DisableServiceFingerprint: *disableServiceFingerprint,
+		HoneypotOpenThreshold:     *honeypotOpenThreshold,
+		HoneypotOpenRatio:         *honeypotOpenRatio,
+		HostDiscovery:             hostDiscovery,
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "batch scan finished with error: %v\n", err)

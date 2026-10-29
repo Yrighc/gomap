@@ -142,6 +142,7 @@ go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
 - 未显式配置 `HostDiscovery.Modes` 时，`port` 模式按目标级自动策略执行；TCP 发现端口仍为 `80,443,22,445,3389`
 - TCP Connect 建连成功或收到明确的连接拒绝都表示目标返回了存活信号；正式端口扫描仍只有建连成功才判定端口开放
 - `-Pn` 会跳过 HostDiscovery，直接扫描端口，语义与 Nmap `-Pn` 对齐
+- `-nf`（no fingerprint）跳过 TCP 服务识别，仅返回端口发现结果；默认仍执行服务识别，不影响主机发现，可与 `-Pn` 组合
 - HostDiscovery 未获取存活信号时：至少一种探针有效执行并正常未命中则该目标未确认、跳过前置端口扫描；所有允许的探针都未能有效执行时经现有错误通道返回原因（如本机无路由），不新增结果字段
 - Host Discovery 不再启动 `ping/ping6/nping/arping`：Linux 原生支持 ICMPv4/v6、IPv4 SYN/ACK 和直连以太网 IPv4 ARP；macOS 原生支持 ICMPv4/v6；Windows 本阶段保留 TCP Connect
 - 自动策略在 Linux 直连以太网 IPv4 且 ARP 可用时只执行 ARP；其他目标并发执行 ICMP Echo 与 TCP SYN，SYN 不可用时同轮降级 TCP Connect。macOS 为 ICMP + Connect，Windows 为 Connect。ACK 只在调用方显式选择时执行
@@ -152,6 +153,12 @@ go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
 
 ```bash
 go run ./cmd port -target example.com -ports 1-65535 -Pn
+```
+
+仅扫描 TCP 端口，不执行主机发现和服务识别：
+
+```bash
+go run ./cmd port -target example.com -ports 1-65535 -Pn -nf
 ```
 
 ### 5.2 首页识别（web）
