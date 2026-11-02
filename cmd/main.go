@@ -476,6 +476,9 @@ func runPort(args []string) {
 			fmt.Fprintf(os.Stderr, "scan %s failed: empty result\n", item.Target)
 			continue
 		}
+		if len(res.Ports) == 0 {
+			continue
+		}
 		var security *secprobe.RunResult
 		if *enableWeak {
 			weakOpts := buildPortWeakProbeOptions(
@@ -493,29 +496,6 @@ func runPort(args []string) {
 
 		if csvWriter != nil {
 			now := time.Now().Format(csvTimeLayout)
-			if len(res.Ports) == 0 {
-				row := []string{
-					now,
-					res.Target,
-					res.ResolvedIP,
-					string(res.Protocol),
-					"",
-					"false",
-					"",
-					"",
-					"",
-					"",
-					"",
-					strconv.Itoa(res.Meta.OpenPorts),
-					strconv.Itoa(res.Meta.FingerprintedOpenPorts),
-					strconv.Itoa(res.Meta.SkippedFingerprintPorts),
-					strconv.FormatBool(res.Meta.SuspectedHoneypot),
-					res.Meta.HoneypotReason,
-				}
-				if err := csvWriter.Write(row); err != nil {
-					fmt.Fprintf(os.Stderr, "写入 port.csv 失败: %v\n", err)
-				}
-			}
 			for _, p := range res.Ports {
 				row := []string{
 					now,

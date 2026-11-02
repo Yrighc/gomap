@@ -419,7 +419,60 @@ func TestRunPortRejectsLegacyHostDiscoveryFlags(t *testing.T) {
 	}
 }
 
-func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
+func TestRunPortOmitsEmptyResults(t *testing.T) {
+	for _, jsonLines := range []bool{false, true} {
+		for _, withResult := range []bool{false, true} {
+			name := "pretty"
+			if jsonLines {
+				name = "jsonl"
+			}
+			if withResult {
+				name += "/mixed"
+			} else {
+				name += "/all_empty"
+			}
+			t.Run(name, func(t *testing.T) {
+				batch := &assetprobe.BatchScanResult{Results: []assetprobe.TargetScanResult{
+					{Target: "nil-ports", Result: &assetprobe.ScanResult{Target: "nil-ports"}},
+					{Target: "empty-ports", Result: &assetprobe.ScanResult{Target: "empty-ports", Ports: []assetprobe.PortResult{}}},
+				}}
+				if withResult {
+					batch.Results = append(batch.Results, assetprobe.TargetScanResult{
+						Target: "open", Result: &assetprobe.ScanResult{Target: "open", Ports: []assetprobe.PortResult{{Port: 22, Open: true}}},
+					})
+				}
+				restore := stubPortScannerFactory(&stubPortScanner{batch: batch})
+				defer restore()
+				args := []string{"-target", "demo", "-ports", "22"}
+				if jsonLines {
+					args = append(args, "-jl")
+				}
+				stdout, stderr, code := capturePortRun(t, func() { runPort(args) })
+				if code != 0 || stderr != "" {
+					t.Fatalf("unexpected failure: code=%d stderr=%s", code, stderr)
+				}
+				if !withResult {
+					if stdout != "" {
+						t.Fatalf("expected no output, got %s", stdout)
+					}
+					return
+				}
+				var result assetprobe.ScanResult
+				if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+					t.Fatalf("expected one JSON result: %v\n%s", err, stdout)
+				}
+				if result.Target != "open" || len(result.Ports) != 1 || result.Ports[0].Port != 22 {
+					t.Fatalf("unexpected result: %+v", result)
+				}
+				if jsonLines && strings.Count(stdout, "\n") != 1 {
+					t.Fatalf("expected one JSONL line, got %q", stdout)
+				}
+			})
+		}
+	}
+}
+
+func TestRunPortCSVOmitsRowWhenNoOpenPorts(t *testing.T) {
 	scanner := &stubPortScanner{
 		batch: &assetprobe.BatchScanResult{
 			Results: []assetprobe.TargetScanResult{{
@@ -460,8 +513,8 @@ func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %s", stderr)
 	}
-	if !strings.Contains(stdout, `"Target": "192.108.0.1"`) {
-		t.Fatalf("expected stdout to include target result, got %s", stdout)
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %s", stdout)
 	}
 
 	data, err := os.ReadFile(filepath.Join(tmp, "logs", "port.csv"))
@@ -469,14 +522,8 @@ func TestRunPortCSVWritesRowWhenNoOpenPorts(t *testing.T) {
 		t.Fatalf("read port.csv: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected header plus one data row, got %d lines:\n%s", len(lines), string(data))
-	}
-	if !strings.Contains(lines[1], "192.108.0.1") {
-		t.Fatalf("expected csv row to contain target, got %s", lines[1])
-	}
-	if !strings.Contains(lines[1], ",0,0,0,false,") {
-		t.Fatalf("expected csv row to record zero-open-port meta, got %s", lines[1])
+	if len(lines) != 1 {
+		t.Fatalf("expected header only, got %d lines:\n%s", len(lines), string(data))
 	}
 }
 
@@ -680,6 +727,7 @@ func TestRunPortVerbosePrintsHostDiscoverySummaryForMultipleTargets(t *testing.T
 							Target:     "127.0.0.1",
 							ResolvedIP: "127.0.0.1",
 							Protocol:   assetprobe.ProtocolTCP,
+							Ports:      []assetprobe.PortResult{{Port: 80, Open: true}},
 						},
 					},
 					{
