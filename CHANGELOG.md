@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.4.10](https://github.com/Yrighc/gomap/compare/v0.4.9...v0.4.10)
+
+- 新增独立 `Scanner.DiscoverHosts` / `gomap host`，保留原有扫描前置发现入口。
+- 主机发现默认按平台、路由和权限自动选择原生 ARP、ICMP、SYN 或 Connect；默认 TCP 判活端口扩为八个，区分无信号与无法执行。
+- 首页请求、跳转和 favicon 共用整体 deadline，支持实际取消并保留底层错误链。
+- UDP 仅在收到实际数据报时判定开放，单条 probe 遵守传入 timeout。
+- CLI 新增 `port -nf`，过滤零开放端口输出，保留单文件入口兼容；SDK 结果结构不变。
+- 默认行为及升级注意事项见 [v0.4.10 发布说明](docs/release-notes/v0.4.10-zh.md)。
+
 ## [0.4.0-alpha-1](https://github.com/Yrighc/gomap/compare/v0.3.1-alpha-1...v0.4.0-alpha-1) (2026-03-25)
 
 

@@ -1,6 +1,6 @@
 # GoMap Host Discovery / UDP 扫描变更说明（草案）
 
-> **未发布、未创建 tag。** 本说明仅记录待交付变更及其验证边界。
+> 本文保留主机发现与 UDP 的历史预发布说明。正式发布内容及升级边界以 [v0.4.10 发布说明](v0.4.10-zh.md) 为准。
 
 ## 概览
 
@@ -31,4 +31,4 @@ Host Discovery 的未显式指定 `Modes` 默认行为已从固定串行 `icmp-e
 
 ## 验证边界
 
-受控单测、race、vet、跨平台 `CGO_ENABLED=0` 编译及授权 Linux/PVE 实网验收见 [host-discovery-network-acceptance-matrix.md](../host-discovery-network-acceptance-matrix.md)。无路由修复已在本地 Docker Linux/arm64 及原 Debian 13/amd64 隔离 netns 同环境复验；相关 R4 实网门禁已关闭。尚未创建发布版本或 tag，未实测的平台能力不因交叉编译而宣称通过。
+受控单测、race、vet、跨平台 `CGO_ENABLED=0` 编译及授权 Linux/PVE 实网验收见 [host-discovery-network-acceptance-matrix.md](../host-discovery-network-acceptance-matrix.md)。无路由修复已在本地 Docker Linux/arm64 及原 Debian 13/amd64 隔离 netns 同环境复验；相关 R4 实网门禁已关闭。该记录不替代正式发布检查，未实测的平台能力不因交叉编译而宣称通过。
