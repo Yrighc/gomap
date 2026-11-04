@@ -543,20 +543,28 @@ func (s *Scanner) Probe(ctx context.Context, target string, port int, protocol P
 }
 
 // DetectHomepage 探测单个 URL，并返回标准化首页元信息。
-// 默认返回完整 body，不返回 headers。
+// 默认返回完整 body，不返回 headers；整体默认 10 秒，可通过 ctx deadline 覆盖。
 func (s *Scanner) DetectHomepage(ctx context.Context, rawURL string) (*HomepageResult, error) {
 	return s.DetectHomepageWithOptions(ctx, rawURL, HomepageOptions{})
 }
 
 // DetectHomepageWithOptions 探测单个 URL，并允许控制 headers/body 的返回粒度。
+// 首页时限由 ctx deadline 决定，缺省 10 秒，不使用端口探测的 Options.Timeout。
 func (s *Scanner) DetectHomepageWithOptions(ctx context.Context, rawURL string, opts HomepageOptions) (*HomepageResult, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-	page := crawlweb.AnalyzeWebsite(rawURL, strings.HasPrefix(strings.ToLower(rawURL), "https://"))
-	if page.Http.StatusCode == 0 || page.Http.Body == "" {
+	// SDK 保留底层错误链，调用方自行决定分类和展示文案；旧 AnalyzeWebsite 兼容入口不变。
+	page, err := crawlweb.FetchWebInfoWithContext(ctx, rawURL, strings.HasPrefix(strings.ToLower(rawURL), "https://"))
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("homepage not reachable: %w", err)
+	}
+	if page == nil || page.Http.StatusCode == 0 || page.Http.Body == "" {
 		return nil, errors.New("homepage not reachable")
 	}
 	body := achieve.SanitizeUTF8(page.Http.Body)

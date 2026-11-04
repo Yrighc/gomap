@@ -118,3 +118,11 @@ _, _, _, _ = res, batch, web, dirs
 ```
 
 示例代码见：`examples/library/main.go`
+
+## 首页探测超时与错误
+
+`DetectHomepage` / `DetectHomepageWithOptions` 保留底层错误链，可用 `errors.Is` / `errors.As` 识别 `context.Canceled`、`context.DeadlineExceeded`、`*net.DNSError`、`*net.OpError`、`*url.Error` 等；正文读取失败保留 `Op: "read"` 和原始读取错误。具体客户文案由调用方统一映射，不应直接展示错误字符串（可能包含请求 URL）。旧的无详细原因结果仍可能返回 `homepage not reachable`，调用方需提供未知原因兜底。
+
+首页默认使用 **10 秒整体时限**，覆盖 DNS、TCP、TLS、重定向、正文、兼容重试及 favicon。只需通过传入 context 的 deadline 覆盖整体时限（可短于或长于 10 秒）；未设置 deadline 时自动使用默认值。请求使用同一 context，中途取消会中断实际网络请求，不再分别写死连接 3 秒、单次请求 5 秒或正文 4 秒。
+
+favicon 作为附属信息仍最多使用 3 秒，且不能超过整体剩余时间；独立获取失败保留主页面，但调用方整体 deadline 到期或取消仍按调用失败处理。`Options.Timeout` 继续用于基础网络/端口探测，不控制首页；不增加各阶段超时配置，不改变兼容重试条件或空正文判定。

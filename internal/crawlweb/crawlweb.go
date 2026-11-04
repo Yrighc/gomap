@@ -23,27 +23,44 @@ import (
 	"github.com/corpix/uarand"
 )
 
+const defaultHomepageTimeout = 10 * time.Second
+
 func FetchWebInfo(fullURL string, useHTTPS bool) (*common.GlobalJson, error) {
+	return FetchWebInfoWithContext(context.Background(), fullURL, useHTTPS)
+}
+
+// FetchWebInfoWithContext 使用一个整体截止时间；调用方可用 context deadline 覆盖默认 10 秒。
+// 重定向、兼容重试和 favicon 继承同一截止时间，不重新获得完整预算。
+func FetchWebInfoWithContext(ctx context.Context, fullURL string, useHTTPS bool) (info *common.GlobalJson, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("FetchWebInfo panic: %v", r)
+			info = nil
+			err = fmt.Errorf("FetchWebInfo panic: %v", r)
 		}
 	}()
-
-	info, err := doFetch(fullURL, false)
-	if err != nil && strings.Contains(err.Error(), "tls: handshake failure") {
+	ctx, cancel := homepageContext(ctx)
+	defer cancel()
+	info, err = doFetch(ctx, fullURL, false)
+	if err != nil && ctx.Err() == nil && strings.Contains(err.Error(), "tls: handshake failure") {
 		logger.Warnf("TLS handshake failure: %s，尝试兼容模式重试", fullURL)
-		info, err = doFetch(fullURL, true)
+		info, err = doFetch(ctx, fullURL, true)
 	}
 	return info, err
 }
 
-func doFetch(fullURL string, compatibleTLS bool) (*common.GlobalJson, error) {
+func homepageContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, defaultHomepageTimeout)
+}
+
+func doFetch(ctx context.Context, fullURL string, compatibleTLS bool) (*common.GlobalJson, error) {
 	client := createHTTPClient(compatibleTLS)
 
-	req, err := http.NewRequest("GET", fullURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("构造请求失败: %v", err)
+		return nil, fmt.Errorf("构造请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", uarand.GetRandom())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -64,7 +81,7 @@ func doFetch(fullURL string, compatibleTLS bool) (*common.GlobalJson, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求失败: %v", err)
+		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -75,27 +92,10 @@ func doFetch(fullURL string, compatibleTLS bool) (*common.GlobalJson, error) {
 	// ✅ 设置最大读取大小
 	limitedBody := http.MaxBytesReader(nil, resp.Body, 2*1024*1024)
 
-	// ✅ 设置超时读取保护（防止 chunked 卡死）
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-
-	var bodyBytes []byte
-	var readErr error
-	done := make(chan error, 1) // 带缓冲，避免 goroutine 卡住
-
-	go func() {
-		bodyBytes, readErr = io.ReadAll(limitedBody)
-		done <- readErr
-	}()
-
-	select {
-	case <-ctx.Done():
-		limitedBody.Close()
-		return nil, fmt.Errorf("读取 body 超时: %s", fullURL)
-	case readErr := <-done:
-		if readErr != nil {
-			return nil, fmt.Errorf("读取 body 失败: %v", readErr)
-		}
+	// 请求 context 同时约束响应头与正文读取，无需另启 goroutine 或刷新超时。
+	bodyBytes, readErr := io.ReadAll(limitedBody)
+	if readErr != nil {
+		return nil, fmt.Errorf("读取 body 失败: %w", &net.OpError{Op: "read", Net: "http", Err: readErr})
 	}
 
 	hash := md5.Sum(bodyBytes)
@@ -112,9 +112,12 @@ func doFetch(fullURL string, compatibleTLS bool) (*common.GlobalJson, error) {
 	info.Http.Body = string(bodyBytes)
 	info.Http.RedirectChain = redirectChain
 
-	extractFavicon(info, bodyBytes, resp.Request.URL, client)
+	extractFavicon(ctx, info, bodyBytes, resp.Request.URL, client)
 	extractTitleAndICP(info, bodyBytes)
-
+	// 附属请求自己的超时可忽略，整个首页截止或取消不能伪装为成功。
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("首页探测未完成: %w", err)
+	}
 	return info, nil
 }
 
@@ -144,16 +147,14 @@ func createHTTPClient(compatibleTLS bool) *http.Client {
 
 	return &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig:       tlsConf,
-			DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
-			TLSHandshakeTimeout:   3 * time.Second,
-			ResponseHeaderTimeout: 3 * time.Second,
+			TLSClientConfig: tlsConf,
+			// DNS、TCP 和 TLS/响应读取统一受请求 context 约束，不设隐藏的更短时限。
+			DialContext: (&net.Dialer{}).DialContext,
 		},
-		Timeout: 5 * time.Second,
 	}
 }
 
-func extractFavicon(info *common.GlobalJson, html []byte, baseURL *url.URL, client *http.Client) {
+func extractFavicon(ctx context.Context, info *common.GlobalJson, html []byte, baseURL *url.URL, client *http.Client) {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(html))
 	if err != nil {
 		return
@@ -177,9 +178,13 @@ func extractFavicon(info *common.GlobalJson, html []byte, baseURL *url.URL, clie
 	})
 
 	if info.Http.Favicon.Location != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		// favicon 是附属信息，最多占用 3 秒且不能超过首页剩余时间；失败保留主页面。
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		req, _ := http.NewRequestWithContext(ctx, "GET", info.Http.Favicon.Location, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", info.Http.Favicon.Location, nil)
+		if err != nil {
+			return
+		}
 		resp, err := client.Do(req)
 		if err == nil {
 			defer resp.Body.Close()

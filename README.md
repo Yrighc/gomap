@@ -481,6 +481,8 @@ for _, item := range batch.Results {
 
 ### 6.4 首页识别调用
 
+首页默认整体超时 **10 秒**；可通过传入 context 的 deadline 覆盖，所有网络阶段、重定向、兼容重试及 favicon 共用该截止时间，取消会中断实际请求。无需分别配置 DNS、连接或 TLS 超时，端口探测的 `Options.Timeout` 不影响首页。favicon 自身最多 3 秒且受整体剩余时间限制，其独立失败不丢弃主页面；整体到期仍返回超时。错误链和详细约定见 [SDK 说明](pkg/assetprobe/README.md#首页探测超时与错误)。
+
 ```go
 page, err := scanner.DetectHomepageWithOptions(context.Background(), "https://example.com", assetprobe.HomepageOptions{
     IncludeHeaders: true,
