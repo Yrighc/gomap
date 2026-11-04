@@ -46,6 +46,10 @@ func TestDiscoverHostsZeroValueScannerAndDisabledStillRun(t *testing.T) {
 		if opts.Modes != nil {
 			t.Fatalf("expected automatic discovery defaults, got explicit modes: %#v", opts.Modes)
 		}
+		wantPorts := []int{80, 443, 22, 445, 3389, 8080, 3306, 6379}
+		if !reflect.DeepEqual(opts.Ports, wantPorts) {
+			t.Fatalf("expected default TCP discovery ports %v, got %v", wantPorts, opts.Ports)
+		}
 		return hostdiscovery.Result{Matched: true, Method: "tcp-connect"}, nil
 	})
 
@@ -124,6 +128,10 @@ func TestDiscoverHostsReturnsOrderedTargetOutcomes(t *testing.T) {
 func TestDiscoverHostsMatchesScanPreDiscoveryNoSignal(t *testing.T) {
 	var received []HostDiscoveryOptions
 	replaceRunHostDiscovery(t, func(_ context.Context, _ string, opts HostDiscoveryOptions) (hostdiscovery.Result, error) {
+		wantPorts := []int{80, 443, 22, 445, 3389, 8080, 3306, 6379}
+		if !reflect.DeepEqual(opts.Ports, wantPorts) {
+			t.Fatalf("expected shared default TCP discovery ports %v, got %v", wantPorts, opts.Ports)
+		}
 		received = append(received, opts)
 		return hostdiscovery.Result{}, nil
 	})

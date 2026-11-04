@@ -35,7 +35,7 @@ res, err := scanner.Scan(context.Background(), assetprobe.ScanRequest{
     HostDiscovery: assetprobe.HostDiscoveryOptions{
         Timeout: 1 * time.Second,
         Retries: 1,
-        Ports:   []int{80, 443, 22, 445, 3389},
+        Ports:   []int{80, 443, 22, 445, 3389, 8080, 3306, 6379},
     },
 })
 if err != nil {
@@ -54,7 +54,7 @@ batch, err := scanner.ScanTargets(context.Background(), []string{
     HostDiscovery: assetprobe.HostDiscoveryOptions{
         Timeout: 1 * time.Second,
         Retries: 1,
-        Ports:   []int{80, 443, 22, 445, 3389},
+        Ports:   []int{80, 443, 22, 445, 3389, 8080, 3306, 6379},
     },
 })
 if err != nil {
@@ -81,7 +81,7 @@ discovery, err := discoveryScanner.DiscoverHosts(context.Background(), []string{
     Concurrency: 32, // <= 0 默认 32
     // MaxTargets <= 0 默认 65,536；超限在探测前报错且不截断。
     HostDiscovery: assetprobe.HostDiscoveryOptions{
-        Ports: []int{80, 443, 22, 445, 3389},
+        Ports: []int{80, 443, 22, 445, 3389, 8080, 3306, 6379},
     },
 })
 if err != nil && !errors.Is(err, context.Canceled) {

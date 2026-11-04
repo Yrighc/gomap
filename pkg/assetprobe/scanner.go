@@ -1230,7 +1230,7 @@ func applyDefaults(opts *Options) {
 		opts.HostDiscovery.Retries = 1
 	}
 	if len(opts.HostDiscovery.Ports) == 0 {
-		opts.HostDiscovery.Ports = []int{80, 443, 22, 445, 3389}
+		opts.HostDiscovery.Ports = []int{80, 443, 22, 445, 3389, 8080, 3306, 6379}
 	}
 }
 

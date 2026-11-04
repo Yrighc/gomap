@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +29,10 @@ type portWithWeakOutput struct {
 	Security *secprobe.RunResult    `json:"security"`
 }
 
+type hostDiscoverer interface {
+	DiscoverHosts(context.Context, []string, assetprobe.DiscoverHostsOptions) (*assetprobe.BatchHostDiscoveryResult, error)
+}
+
 type portTargetScanner interface {
 	ScanTargets(context.Context, []string, assetprobe.ScanCommonOptions) (*assetprobe.BatchScanResult, error)
 }
@@ -39,6 +45,11 @@ type verboseEventWriter struct {
 	mu                        sync.Mutex
 	w                         io.Writer
 	suppressHostDiscoveryLogs bool
+}
+
+var newHostDiscoverer = func() hostDiscoverer {
+	// Standalone discovery supports a zero-value Scanner and needs no scan assets.
+	return &assetprobe.Scanner{}
 }
 
 var newPortTargetScanner = func(opts assetprobe.Options) (portTargetScanner, error) {
@@ -59,6 +70,7 @@ var runWeakProbe = func(ctx context.Context, candidates []secprobe.SecurityCandi
 	return secprobe.Run(ctx, candidates, opts)
 }
 
+var exitHost = os.Exit
 var exitPort = os.Exit
 var exitWeak = os.Exit
 var exitWeb = os.Exit
@@ -148,6 +160,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "host":
+		runHost(os.Args[2:])
 	case "port":
 		runPort(os.Args[2:])
 	case "web":
@@ -168,6 +182,136 @@ func main() {
 		printRootUsage()
 		os.Exit(1)
 	}
+}
+
+func runHost(args []string) {
+	if code := runHostCommand(args); code != 0 {
+		exitHost(code)
+	}
+}
+
+// runHostCommand only adapts CLI arguments and output; probe policy stays in DiscoverHosts.
+func runHostCommand(args []string) int {
+	fs := flag.NewFlagSet("host", flag.ContinueOnError)
+	// Route explicit help to stdout, but keep parse errors and usage off result output.
+	var flagOutput bytes.Buffer
+	fs.SetOutput(&flagOutput)
+	fs.Usage = func() {
+		w := fs.Output()
+		fmt.Fprintln(w, "用法: gomap host [options]")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "说明:")
+		fmt.Fprintln(w, "  仅执行主机存活探测，使用自动探测策略，不执行端口扫描或服务识别")
+		fmt.Fprintln(w, "  默认每行输出一个已确认存活的 IP；无信号表示未确认，不代表离线")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "选项:")
+		fs.PrintDefaults()
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "示例:")
+		fmt.Fprintln(w, "  gomap host -target 192.168.1.10")
+		fmt.Fprintln(w, "  gomap host -ips 192.168.1.0/24 -v")
+		fmt.Fprintln(w, "  gomap host -ips 192.168.1.10,192.168.2.0/24 -c 32 -timeout 1 -jl")
+	}
+
+	target := fs.String("target", "", "[必选，可用 -ips 代替] 单个 IP 或 CIDR，不支持域名")
+	ips := fs.String("ips", "", "[必选，可用 -target 代替] 多个 IP/CIDR，逗号分隔，不支持域名")
+	timeout := fs.Int("timeout", 1, "[可选] 单次探针超时秒数，不是整个批次的超时")
+	var concurrency int
+	fs.IntVar(&concurrency, "concurrency", 32, "[可选] 主机探测并发数")
+	fs.IntVar(&concurrency, "c", 32, "[可选] 主机探测并发数（-concurrency 简写）")
+	maxTargets := fs.Int("max-targets", 65536, "[可选] 展开、去重后最大目标数，超限报错，不截断")
+	verbose := fs.Bool("v", false, "[可选] 向 stderr 输出存活/未确认/失败数量汇总")
+	jsonLines := fs.Bool("jl", false, "[可选] 每个目标输出一行 JSON，包含未确认及失败结果")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(os.Stdout, flagOutput.String())
+			return 0
+		}
+		fmt.Fprint(os.Stderr, flagOutput.String())
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "host 不接受位置参数，请使用 -target 或 -ips 指定 IP/CIDR")
+		return 1
+	}
+	targets := collectTargets(*target, *ips)
+	if len(targets) == 0 {
+		fmt.Fprintln(os.Stderr, formatRequiredArgError("target", "gomap host -target 192.168.1.10 或 -ips 192.168.1.0/24"))
+		return 1
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("timeout", *timeout, "-timeout 1"))
+		return 1
+	}
+	if int64(*timeout) > (1<<63-1)/int64(time.Second) {
+		fmt.Fprintln(os.Stderr, "timeout 参数无效: 超出支持的秒数范围")
+		return 1
+	}
+	if concurrency <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("concurrency", concurrency, "-c 32"))
+		return 1
+	}
+	if *maxTargets <= 0 {
+		fmt.Fprintln(os.Stderr, formatPositiveArgError("max-targets", *maxTargets, "-max-targets 65536"))
+		return 1
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	batch, err := newHostDiscoverer().DiscoverHosts(ctx, targets, assetprobe.DiscoverHostsOptions{
+		Concurrency: concurrency,
+		MaxTargets:  *maxTargets,
+		HostDiscovery: assetprobe.HostDiscoveryOptions{
+			Timeout: time.Duration(*timeout) * time.Second,
+		},
+	})
+	code := 0
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "主机存活探测失败: %v\n", err)
+		code = 1
+	}
+	if batch == nil {
+		if err == nil {
+			fmt.Fprintln(os.Stderr, "主机存活探测未返回结果")
+		}
+		return 1
+	}
+
+	alive, unconfirmed, failed := 0, 0, 0
+	for _, item := range batch.Results {
+		switch {
+		case item.Error != "":
+			failed++
+			code = 1
+			fmt.Fprintf(os.Stderr, "主机存活探测失败 target=%s: %s\n", item.Target, item.Error)
+		case item.Matched:
+			alive++
+		default:
+			unconfirmed++
+		}
+
+		var line string
+		if *jsonLines {
+			raw, marshalErr := marshalCLIJSON(item, false)
+			if marshalErr != nil {
+				fmt.Fprintf(os.Stderr, "结果序列化失败: %v\n", marshalErr)
+				return 1
+			}
+			line = string(raw)
+		} else if item.Matched && item.Error == "" {
+			line = item.ResolvedIP
+		} else {
+			continue
+		}
+		if _, writeErr := fmt.Fprintln(os.Stdout, line); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "结果输出失败: %v\n", writeErr)
+			return 1
+		}
+	}
+	if *verbose {
+		fmt.Fprintf(os.Stderr, "主机存活探测完成：总数=%d，已确认存活=%d，未确认存活=%d，失败=%d\n", len(batch.Results), alive, unconfirmed, failed)
+	}
+	return code
 }
 
 func runWeak(args []string) {
@@ -971,12 +1115,14 @@ func printRootUsage() {
 	fmt.Println("  gomap <command> [options]")
 	fmt.Println()
 	fmt.Println("命令:")
+	fmt.Println("  host   主机存活探测（仅 IP/CIDR）")
 	fmt.Println("  port   端口扫描与服务识别")
 	fmt.Println("  web    首页识别")
 	fmt.Println("  dir    目录爆破")
 	fmt.Println("  weak   协议账号口令探测")
 	fmt.Println()
 	fmt.Println("示例:")
+	fmt.Println("  gomap host -ips 192.168.1.0/24")
 	fmt.Println("  gomap port -target example.com -ports 1-1024")
 	fmt.Println("  gomap port -target example.com -ports 1-65535 -Pn")
 	fmt.Println("  gomap web -url https://example.com")

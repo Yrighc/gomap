@@ -42,6 +42,9 @@ tmp/
 .cache/
 .worktrees/
 
+# Local research documents
+/docs/research/
+
 # Node / Husky
 node_modules/
 package-lock.json

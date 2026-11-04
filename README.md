@@ -6,6 +6,7 @@
 GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 当前仓库已聚焦在资产探测主链路，保留以下能力：
+- 独立主机存活探测（IP/CIDR）
 - TCP/UDP 端口扫描
 - 服务识别（基于 nmap probes 规则增强）
 - 首页识别（标题、状态码、响应特征、favicon hash）
@@ -37,7 +38,7 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 │       └── dicts/
 │           └── *.txt                 # 内置协议口令字典
 ├── cmd/
-│   └── main.go                   # 主 CLI（port/web/dir/weak 子命令）
+│   └── main.go                   # 主 CLI（host/port/web/dir/weak 子命令）
 ├── pkg/assetprobe/
 │   ├── types.go                  # 对外类型定义
 │   ├── scanner.go                # 主流程与核心算法
@@ -118,6 +119,31 @@ GoMap 是一个基于 Go 实现的资产探测工具库与 CLI。
 
 ## 5. CLI 使用
 
+### 5.0 主机存活探测（host）
+
+```bash
+# 快速查看已确认存活的主机，每行一个 IP
+go run ./cmd host -ips 192.168.1.0/24
+
+# 单个 IP，或逗号分隔的 IP/CIDR 列表
+go run ./cmd host -target 192.168.1.10
+go run ./cmd host -ips 192.168.1.10,192.168.2.0/24 -c 32 -timeout 1 -v
+
+# 所有目标的完整结果，每个目标一行 JSON
+go run ./cmd host -ips 192.168.1.0/24 -jl
+```
+
+- 仅调用 SDK `DiscoverHosts`，复用既有自动探测策略，不执行正式端口扫描、服务识别、首页识别或弱口令探测；自动策略可能使用 TCP 发现探针，这不等于正式端口扫描。
+- 仅接受 IPv4/IPv6 地址及 CIDR，不解析域名；目标展开和去重复用 SDK。
+- 同时支持包入口 `go run ./cmd ...` 与原单文件入口 `go run ./cmd/main.go ...`，例如 `go run ./cmd/main.go host -ips 192.168.1.0/24`。
+- `-target` 与 `-ips` 可合并使用；`-c`/`-concurrency` 默认 `32`，`-timeout` 默认 `1` 秒，表示单次探针上限，不是整个批次的总超时。
+- `-max-targets` 默认 `65536`，展开、去重后超限在探测前报错，不会截断目标。
+- TCP 判活默认端口组为 `80,443,22,445,3389,8080,3306,6379`；SDK 可通过 `HostDiscoveryOptions.Ports` 自定义，`host` CLI 暂未提供 `-ports`。
+- macOS 若仅发现自身，而系统工具可直连其他目标，需检查启动终端/IDE 的本地网络权限。
+- 默认 stdout 只输出已确认存活的 IP；`-jl` 改为输出每个目标的 SDK 结果，包括 `Matched`、`Method`、`Error`，保留未确认和失败结果。
+- `-v` 向 stderr 输出存活、未确认及失败数量汇总；错误也写入 stderr，不混入 IP/JSONL 输出。
+- 无存活信号仅表示未确认，不代表离线；正常未确认仍退出 `0`，参数/探测失败或取消退出非零，并保留已有存活结果。Ctrl+C 会取消正在执行的探测。
+
 ### 5.1 端口扫描（port）
 
 ```bash
@@ -139,7 +165,7 @@ go run ./cmd port -ips 192.168.1.10,192.168.1.0/30,example.com -ports 80,443
 ```
 
 默认行为说明：
-- 未显式配置 `HostDiscovery.Modes` 时，`port` 模式按目标级自动策略执行；TCP 发现端口仍为 `80,443,22,445,3389`
+- 未显式配置 `HostDiscovery.Modes` 时，`port` 模式按目标级自动策略执行；TCP 发现端口为 `80,443,22,445,3389,8080,3306,6379`
 - TCP Connect 建连成功或收到明确的连接拒绝都表示目标返回了存活信号；正式端口扫描仍只有建连成功才判定端口开放
 - `-Pn` 会跳过 HostDiscovery，直接扫描端口，语义与 Nmap `-Pn` 对齐
 - `-nf`（no fingerprint）跳过 TCP 服务识别，仅返回端口发现结果；默认仍执行服务识别，不影响主机发现，可与 `-Pn` 组合
@@ -318,7 +344,7 @@ gomap port -target example.com -ports 6379,27017,11211,2181 -weak -weak-enable-u
 
 兼容说明：
 - 旧用法 `go run ./cmd -target ...` 仍可用（自动按 `port` 模式执行）
-- 建议逐步迁移到子命令模式（`port/web/dir/weak`）
+- 建议逐步迁移到子命令模式（`host/port/web/dir/weak`）
 
 ## 6. 依赖形式调用（推荐）
 
