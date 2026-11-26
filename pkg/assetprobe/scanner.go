@@ -873,10 +873,17 @@ func detectTCPServiceWithBudget(
 		version     string
 	}
 
+	// Publish immutable transport evidence as soon as a handshake succeeds.
+	// Application reads may exceed the budget, but that must not turn confirmed
+	// TLS into an unqualified unknown (or a service-table application guess).
+	var confirmedTLS atomic.Pointer[detectResult]
+	onTLS := func(subject, dns string) {
+		confirmedTLS.Store(&detectResult{subject: subject, dns: dns, serviceName: "unknown/ssl"})
+	}
 	resultCh := make(chan detectResult, 1)
 	go func() {
 		buf := make([]byte, 4096)
-		b, s, d, svc, ver, _ := tcpservices.TcpPortServer(ip, targetHost, port, buf, conn, disableWeakPassword)
+		b, s, d, svc, ver, _ := tcpservices.TcpPortServerWithTLSObserver(ip, targetHost, port, buf, conn, disableWeakPassword, onTLS)
 		resultCh <- detectResult{
 			banner:      b,
 			subject:     s,
@@ -897,6 +904,9 @@ func detectTCPServiceWithBudget(
 	case r := <-resultCh:
 		return r.banner, r.subject, r.dns, r.serviceName, r.version, false
 	case <-time.After(budget):
+		if r := confirmedTLS.Load(); r != nil {
+			return "", r.subject, r.dns, r.serviceName, "", true
+		}
 		return "", "", "", "unknown", "", true
 	}
 }

@@ -23,6 +23,12 @@ import (
 // TLSReadWithProbe 封装 TLS 连接 + probeBytes 发送 + 读取 + 解码逻辑。
 // 当 targetHost 是域名时会自动携带 SNI，避免站点因为缺少 ServerName 而拒绝返回证书或 HTTP 响应。
 func TLSReadWithProbe(ip string, targetHost string, port int, buf []byte, timeout time.Duration, compatibleTLS bool, probe []byte) (string, error) {
+	return tlsReadWithProbe(ip, targetHost, port, buf, timeout, compatibleTLS, probe, nil)
+}
+
+// onTLS runs immediately after a successful handshake, before application I/O.
+// A subsequent read timeout must not erase the confirmed transport.
+func tlsReadWithProbe(ip string, targetHost string, port int, buf []byte, timeout time.Duration, compatibleTLS bool, probe []byte, onTLS func(string, string)) (string, error) {
 	var tlsConf *tls.Config
 	if !compatibleTLS {
 		tlsConf = &tls.Config{
@@ -54,6 +60,9 @@ func TLSReadWithProbe(ip string, targetHost string, port int, buf []byte, timeou
 		return "", err
 	}
 	defer tlsConn.Close()
+	if onTLS != nil {
+		onTLS(tlsCertificateInfo(tlsConn))
+	}
 
 	tlsConn.SetWriteDeadline(time.Now().Add(timeout))
 	if probe != nil {
@@ -64,23 +73,45 @@ func TLSReadWithProbe(ip string, targetHost string, port int, buf []byte, timeou
 	}
 	tlsConn.SetReadDeadline(time.Now().Add(timeout))
 	n, err := tlsConn.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", err
+	if err == io.EOF {
+		err = nil
 	}
 	if n == 0 {
-		return "", nil
+		return "", err
 	}
 
 	decoder := charmap.ISO8859_1.NewDecoder()
 	reader := transform.NewReader(bytes.NewReader(buf[:n]), decoder)
 	converted, _ := ioutil.ReadAll(reader)
-	return string(converted), nil
+	return string(converted), err
+}
+
+func tlsCertificateInfo(conn *tls.Conn) (string, string) {
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return "", ""
+	}
+	return fmt.Sprint(certs[0].Subject), strings.Join(certs[0].DNSNames, ", ")
 }
 
 // TcpPortServer 对指定 IP 与端口进行 TCP 探测，返回 banner、subject、dns、service、version 以及 weak（弱口令）信息。
 func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.Conn, unweak bool) (string, string, string, string, string, common.UsePwd) {
+	return TcpPortServerWithTLSObserver(ip, targetHost, port, buf, conn, unweak, nil)
+}
+
+// TcpPortServerWithTLSObserver lets budgeted callers retain confirmed TLS even
+// if application detection outlives their budget. The observer is synchronous
+// and must not block; it reports transport evidence, not an application match.
+func TcpPortServerWithTLSObserver(ip string, targetHost string, port int, buf []byte, conn net.Conn, unweak bool, onTLS func(string, string)) (string, string, string, string, string, common.UsePwd) {
 	var banner, subject, dns, service, version string
-	var count = 0
+	tlsConfirmed := false
+	recordTLS := func(certSubject, certDNS string) {
+		tlsConfirmed = true
+		subject, dns = certSubject, certDNS
+		if onTLS != nil {
+			onTLS(certSubject, certDNS)
+		}
+	}
 	var weak = common.UsePwd{
 		Username: "null",
 		Password: "null",
@@ -92,7 +123,7 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 	// 常见 Web 端口优先走一次快速协议确认。
 	// 这类端口往往不会主动回 banner，先等被动读取很容易白白消耗 2~3 秒，
 	// 直接发送原始 GET 请求更符合 Web 服务的真实交互方式，也能更稳定识别 80/443。
-	if banner, subject, dns, svc, ver, ok := detectPreferredWebServiceWithHost(ip, targetHost, port, timeout, buf); ok {
+	if banner, subject, dns, svc, ver, ok := detectPreferredWebServiceWithHost(ip, targetHost, port, timeout, buf, recordTLS); ok {
 		return banner, subject, dns, svc, ver, weak
 	}
 
@@ -127,82 +158,54 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 		return banner, subject, dns, svc, ver, weak
 	}
 
-	// 判断是否是 SSL 端口
-	// fmt.Println("SSL length", len(common.SslPortsMap))
-
-	if shouldTreatAsSSLPort(port) {
+	// Probe TLS on any port, rather than treating sslports as proof of TLS or
+	// using a port whitelist as an admission gate. A failed handshake falls
+	// through to the plaintext probes below, including GetRequest.
+	readTLS := func(probe []byte, wait time.Duration) string {
+		response, err := tlsReadWithProbe(ip, targetHost, port, buf, wait, false, probe, recordTLS)
+		if err != nil && (strings.Contains(err.Error(), "handshake failure") || strings.Contains(err.Error(), "protocol version")) {
+			response, _ = tlsReadWithProbe(ip, targetHost, port, buf, wait, true, probe, recordTLS)
+		}
+		return response
+	}
+	initialResponse := readTLS(nil, timeout)
+	if tlsConfirmed {
+		matchTLS := func(response string, rules []common.MatchRule) (string, string, common.UsePwd, bool) {
+			if response == "" {
+				return "", "", weak, false
+			}
+			if svc, ver, w, ok := connect.MatchRules(response, rules, true, unweak, ip, port); ok {
+				return svc, ver, w, true
+			}
+			if svc, ver, w, ok := connect.MatchRules(response, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
+				return svc, ver, w, true
+			}
+			svc, ok := detectHTTPServiceByPrefix(response, true)
+			return svc, "", weak, ok
+		}
+		// Keep decrypted evidence separate from any earlier plaintext banner.
+		banner = initialResponse
 		for _, probeRule := range result {
 			if probeRule.Protocol != "TCP" {
 				continue
 			}
-
-			if count == 0 {
-				// 第一次尝试直接读取 TLS 初始响应（普通 TLS）
-				count++
-				initialResponse, err := TLSReadWithProbe(ip, targetHost, port, buf, timeout, false, nil)
-				if err != nil {
-					// 如果 TLS 握手失败，切换兼容套件重试
-					if strings.Contains(err.Error(), "handshake failure") || strings.Contains(err.Error(), "protocol version") {
-						initialResponse, err = TLSReadWithProbe(ip, targetHost, port, buf, timeout, true, nil)
-					}
-				}
-				if err == nil && initialResponse != "" {
-					httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(initialResponse, true)
-					if svc, ver, w, ok := connect.MatchRules(initialResponse, probeRule.Msg, true, unweak, ip, port); ok {
-						service, version, weak = svc, ver, w
-						subject, dns = parseTLSCertificate(ip, targetHost, port)
-						return SanitizeBanner(initialResponse), subject, dns, service, version, weak
-					}
-					if svc, ver, w, ok := connect.MatchRules(initialResponse, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
-						service, version, weak = svc, ver, w
-						subject, dns = parseTLSCertificate(ip, targetHost, port)
-						return SanitizeBanner(initialResponse), subject, dns, service, version, weak
-					}
-					if hasHTTPFallback {
-						subject, dns = parseTLSCertificate(ip, targetHost, port)
-						return SanitizeBanner(initialResponse), subject, dns, httpFallback, "", weak
-					}
-				}
+			if svc, ver, w, ok := matchTLS(initialResponse, probeRule.Msg); ok {
+				return SanitizeBanner(initialResponse), subject, dns, svc, ver, w
 			}
-
-			// TLS 探测：发送 probeBytes
-			probeBytes := connect.GetProbeBytes(probeRule.ProbeBytes)
-			response, err := TLSReadWithProbe(ip, targetHost, port, buf, tlstimeout, false, probeBytes)
-			if err != nil {
-				// 遇到 handshake failure 切换兼容套件
-				if strings.Contains(err.Error(), "handshake failure") || strings.Contains(err.Error(), "protocol version") {
-					response, _ = TLSReadWithProbe(ip, targetHost, port, buf, tlstimeout, true, probeBytes)
-				} else {
-					continue
-				}
-			}
+			response := readTLS(connect.GetProbeBytes(probeRule.ProbeBytes), tlstimeout)
 			if response != "" {
-				httpFallback, hasHTTPFallback := detectHTTPServiceByPrefix(response, true)
-				if svc, ver, w, ok := connect.MatchRules(response, probeRule.Msg, true, unweak, ip, port); ok {
-					subject, dns = parseTLSCertificate(ip, targetHost, port)
-					return SanitizeBanner(response), subject, dns, svc, ver, w
-				}
-				if svc, ver, w, ok := connect.MatchRules(response, common.NmapData.NullProbeMatchRules, true, unweak, ip, port); ok {
-					subject, dns = parseTLSCertificate(ip, targetHost, port)
-					return SanitizeBanner(response), subject, dns, svc, ver, w
-				}
-				if hasHTTPFallback {
-					subject, dns = parseTLSCertificate(ip, targetHost, port)
-					return SanitizeBanner(response), subject, dns, httpFallback, "", weak
-				}
-				if service == "" && common.ServiceMap[port]["tcp"] != "" {
-					service = common.ServiceMap[port]["tcp"] + "/ssl?"
-					if service == "" {
-						service = "unknown/ssl"
-					}
-				}
+				banner = response
+			}
+			if svc, ver, w, ok := matchTLS(response, probeRule.Msg); ok {
+				return SanitizeBanner(response), subject, dns, svc, ver, w
 			}
 		}
-		if service == "" && common.ServiceMap[port]["tcp"] != "" {
-			subject, dns = parseTLSCertificate(ip, targetHost, port)
-			service = common.ServiceMap[port]["tcp"] + "/ssl?"
-			return banner, subject, dns, service, version, weak
+		if svc, ver, w, ok := matchTLS(initialResponse, nil); ok {
+			return SanitizeBanner(initialResponse), subject, dns, svc, ver, w
 		}
+		// TLS is confirmed, but no application is. Do not turn a service-table
+		// guess into an apparently verified product name such as ultraseek-http.
+		return SanitizeBanner(banner), subject, dns, "unknown/ssl", "", weak
 	}
 
 	// 非 SSL 处理
@@ -245,9 +248,14 @@ func TcpPortServer(ip string, targetHost string, port int, buf []byte, conn net.
 		}
 	}
 	if isUnknownService(service) {
-		if banner, subject, dns, svc, ver, ok := detectWebServiceWithHost(ip, targetHost, port, timeout, buf); ok {
+		if banner, subject, dns, svc, ver, ok := detectWebServiceWithHost(ip, targetHost, port, timeout, buf, recordTLS); ok {
 			return banner, subject, dns, svc, ver, weak
 		}
+	}
+	if tlsConfirmed {
+		// The final Web fallback may have completed a handshake without an
+		// application response, even if the earlier handshake attempt failed.
+		return "", subject, dns, "unknown/ssl", "", weak
 	}
 	return banner, subject, dns, service, version, weak
 }
@@ -266,10 +274,9 @@ func detectHTTPServiceByPrefix(response string, isTLS bool) (string, bool) {
 	return "http", true
 }
 
-func shouldTreatAsSSLPort(port int) bool {
-	// nmap 的 GetRequest probe 带有非常宽泛的 sslports 80-65535。
-	// 这些配置的含义是“该 probe 可用于 TLS 端口”，不是“这些端口默认就是 TLS 端口”。
-	// 如果这里直接照单全收，会把 80/8080 这类明文 HTTP 端口误导到 SSL 识别分支。
+func isLikelyTLSPort(port int) bool {
+	// Port hints only select the preferred Web probe order. They never prove
+	// TLS and never exclude other ports from handshake-based detection.
 	switch port {
 	case 80, 81, 591, 593, 8000, 8008, 8080, 8081, 8088, 8888:
 		return false
@@ -286,8 +293,7 @@ func shouldTreatAsSSLPort(port int) bool {
 
 	switch port {
 	case 9093:
-		// Kafka 常见的 TLS 端口；很多场景不会主动返回可匹配 banner，
-		// 但 TLS 握手本身是可成立的，因此这里强制走 TLS 识别分支。
+		// Kafka 常见 TLS 端口，仅作顺序提示，仍需实际握手确认。
 		return true
 	default:
 		return false
@@ -308,32 +314,25 @@ func shouldTryWebFallback(port int) bool {
 	}
 }
 
-func parseTLSCertificate(ip, targetHost string, port int) (string, string) {
-	if targetHost != "" && net.ParseIP(targetHost) == nil {
-		return separate.ParseHTTPSWithServerName(ip, port, targetHost)
-	}
-	return separate.ParseHTTPS(ip, port)
-}
-
-func detectWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte) (string, string, string, string, string, bool) {
+func detectWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte, onTLS func(string, string)) (string, string, string, string, string, bool) {
 	if !shouldTryWebFallback(port) {
 		return "", "", "", "", "", false
 	}
 
 	if preferTLSFirst(port) {
-		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
+		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true, onTLS); service != "" {
 			return banner, subject, dns, service, version, true
 		}
-		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false); service != "" {
+		if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false, onTLS); service != "" {
 			return banner, subject, dns, service, version, true
 		}
 		return "", "", "", "", "", false
 	}
 
-	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false); service != "" {
+	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, false, onTLS); service != "" {
 		return banner, subject, dns, service, version, true
 	}
-	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true); service != "" {
+	if banner, subject, dns, service, version := httpRequestFallback(ip, targetHost, port, timeout, buf, true, onTLS); service != "" {
 		return banner, subject, dns, service, version, true
 	}
 	return "", "", "", "", "", false
@@ -341,8 +340,8 @@ func detectWebServiceWithHost(ip, targetHost string, port int, timeout time.Dura
 
 // detectPreferredWebServiceWithHost 是常见 Web 端口的快速识别入口。
 // 与底部的未知服务回退不同，这里会在通用探针前优先执行，从而减少 443 等端口因为等待 banner 或遍历大量探针导致的超时。
-func detectPreferredWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte) (string, string, string, string, string, bool) {
-	return detectWebServiceWithHost(ip, targetHost, port, timeout, buf)
+func detectPreferredWebServiceWithHost(ip, targetHost string, port int, timeout time.Duration, buf []byte, onTLS func(string, string)) (string, string, string, string, string, bool) {
+	return detectWebServiceWithHost(ip, targetHost, port, timeout, buf, onTLS)
 }
 
 func preferTLSFirst(port int) bool {
@@ -350,11 +349,11 @@ func preferTLSFirst(port int) bool {
 	case 443, 444, 465, 563, 585, 636, 853, 989, 990, 992, 993, 994, 995, 8443, 8843, 9443, 10443, 14443:
 		return true
 	default:
-		return shouldTreatAsSSLPort(port)
+		return isLikelyTLSPort(port)
 	}
 }
 
-func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration, buf []byte, isTLS bool) (string, string, string, string, string) {
+func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration, buf []byte, isTLS bool, onTLS func(string, string)) (string, string, string, string, string) {
 	addr := net.JoinHostPort(ip, strconv.Itoa(port))
 	hostHeader := targetHost
 	if hostHeader == "" {
@@ -383,6 +382,13 @@ func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration,
 		return "", "", "", "", ""
 	}
 	defer conn.Close()
+	subject, dns := "", ""
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		subject, dns = tlsCertificateInfo(tlsConn)
+		if onTLS != nil {
+			onTLS(subject, dns)
+		}
+	}
 
 	conn.SetWriteDeadline(time.Now().Add(timeout))
 	if _, err := conn.Write([]byte(request)); err != nil {
@@ -395,11 +401,9 @@ func httpRequestFallback(ip, targetHost string, port int, timeout time.Duration,
 		return "", "", "", "", ""
 	}
 
-	subject, dns := "", ""
 	service := "http"
 	if isTLS {
 		service = "https"
-		subject, dns = parseTLSCertificate(ip, targetHost, port)
 	}
 
 	for _, rule := range common.AllHTTPRules {

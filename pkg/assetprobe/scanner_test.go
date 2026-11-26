@@ -443,8 +443,8 @@ func TestScanEmitsServiceMatchEventForHTTPServer(t *testing.T) {
 		case evt := <-events:
 			if evt.Kind == ScanEventServiceMatch && evt.Port == port {
 				found = true
-				if evt.Service == "" || evt.Service == "unknown" || evt.Service == "open" {
-					t.Fatalf("expected concrete service match, got %#v", evt)
+				if evt.Service != "http" {
+					t.Fatalf("expected confirmed plaintext HTTP, got %#v", evt)
 				}
 				return
 			}
