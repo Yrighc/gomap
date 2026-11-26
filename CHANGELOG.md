@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.4.11](https://github.com/Yrighc/gomap/compare/v0.4.10...v0.4.11)
+
+- 修复 8765 等端口上的明文 HTTP 被端口表误标为 TLS：握手未确认时继续明文探测，不再兜底生成 `/ssl`。
+- 保留非标准端口 HTTPS 识别；TLS 已确认但应用未知时返回 `unknown/ssl`，SDK 超时仍保留已确认的 TLS 和证书信息。
+- 公开 SDK 结构和方法签名不变；`unknown/ssl` 不表示已确认 HTTP，调用方不能仅凭后缀构造 HTTPS 网站地址。
+- 新增 HTTP/TLS 传输层回归测试，收紧 HTTP 服务事件断言。
+- 详细行为及升级说明见 [v0.4.11 发布说明](docs/release-notes/v0.4.11-zh.md)。
+
 ## [v0.4.10](https://github.com/Yrighc/gomap/compare/v0.4.9...v0.4.10)
 
 - 新增独立 `Scanner.DiscoverHosts` / `gomap host`，保留原有扫描前置发现入口。
