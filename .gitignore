@@ -52,3 +52,4 @@ npm-shrinkwrap.json
 pnpm-lock.yaml
 yarn.lock
 .husky/_/
+/.openidea/
